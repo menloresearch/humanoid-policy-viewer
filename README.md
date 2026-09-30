@@ -68,3 +68,21 @@ npm run dev
 If you want to keep multiple robots around, you can expose a selector in
 `src/views/Demo.vue` and call `demo.reloadScene(...)` and `demo.reloadPolicy(...)`
 from there.
+
+## License
+
+This repository is a fork of `humanoid-policy-viewer` by
+[Axellwppr](https://github.com/Axellwppr). The upstream project was published
+without a license.
+
+- **Menlo Research modifications** — changes made after upstream commit
+  `0490320` are licensed under the [BSD 3-Clause License](LICENSE),
+  Copyright (c) 2026, Menlo Research Pte. Ltd.
+- **Upstream code** — code and assets present as of commit `0490320`, and any
+  unmodified portions of it in later revisions, remain the work of the original
+  author(s). Menlo Research claims no copyright in it and grants no rights to it.
+- **Third-party components** — npm dependencies, robot models/meshes, and
+  motion data remain under their respective licenses.
+
+Use `git log` / `git blame` to see the origin of any line. See [LICENSE](LICENSE)
+for full terms.
