@@ -1,0 +1,10 @@
+{
+  "name": "forward_walk",
+  "duration": 12,
+  "gaitSymmetry": true,
+  "commands": [
+    { "t": 0, "vx": 0, "vy": 0, "wz": 0 },
+    { "t": 0.3, "vx": 0.6, "vy": 0, "wz": 0 },
+    { "t": 11.5, "vx": 0, "vy": 0, "wz": 0 }
+  ]
+}

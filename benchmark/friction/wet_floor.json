@@ -1,0 +1,14 @@
+{
+  "name": "friction stress (low, wet-floor-like)",
+  "duration": 26,
+  "footFriction": 0.3,
+  "commands": [
+    { "t": 0, "vx": 0, "vy": 0, "wz": 0 },
+    { "t": 0.5, "vx": 0.5, "vy": 0, "wz": 0.5 },
+    { "t": 13, "vx": 0.5, "vy": 0, "wz": -0.5 },
+    { "t": 25.5, "vx": 0, "vy": 0, "wz": 0 }
+  ],
+  "events": [
+    { "t": 6.5, "type": "push", "dir": [0, 1], "force": 150, "duration": 0.15, "label": "moderate push on top of reduced grip" }
+  ]
+}

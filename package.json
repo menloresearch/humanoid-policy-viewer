@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite --host",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "benchmark": "node scripts/run-benchmark.mjs",
+    "test": "node --test src/simulation/"
   },
   "dependencies": {
     "@fontsource/roboto": "5.2.5",
@@ -25,6 +27,7 @@
     "vuetify": "^3.8.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.48.0",
     "@vitejs/plugin-vue": "^5.2.3",
     "globals": "^16.0.0",
     "sass-embedded": "^1.86.3",
