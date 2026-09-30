@@ -42,7 +42,7 @@ function fakeHub(state) {
     if (url.includes('/api/models/')) {
       if (state.offline) throw new TypeError('fetch failed');
       if (state.missing) return new Response('', { status: 401 });
-      return Response.json({ sha: state.sha, siblings: state.files.map((rfilename) => ({ rfilename })) });
+      return Response.json({ id: state.id, sha: state.sha, siblings: state.files.map((rfilename) => ({ rfilename })) });
     }
     return new Response(`${state.sha}:${new URL(url).pathname.split('/').pop()}`);
   };
@@ -78,6 +78,19 @@ test('ensureModel downloads into a model library layout, then reuses and refresh
     assert.equal(updated.cached, false);
     assert.equal(updated.hasEnvYaml, false);
     assert.equal(existsSync(join(cacheDir, 'hf/Menlo__demo/env.yaml')), false);
+  } finally {
+    rmSync(cacheDir, { recursive: true, force: true });
+  }
+});
+
+test('ensureModel keys the cache on the Hub\'s spelling of the repo id, whatever case was typed', async () => {
+  const cacheDir = mkdtempSync(join(tmpdir(), 'hpv-hf-'));
+  try {
+    const hub = fakeHub({ id: 'Menlo/demo', sha: 'c'.repeat(40), files: ['policy.onnx'] });
+    const opts = { cacheDir, env: {}, fetchImpl: hub.fetchImpl };
+    const typed = await ensureModel('menlo/DEMO', opts);
+    assert.equal(typed.policyValue, 'ckpt:hf/Menlo__demo/policy.onnx');
+    assert.equal((await ensureModel('Menlo/demo', opts)).cached, true);
   } finally {
     rmSync(cacheDir, { recursive: true, force: true });
   }

@@ -26,14 +26,15 @@ serve a repo's checkpoint folders, see [Model library](#model-library).
 
 ```bash
 npm install
-npm run hf -- --model Menlo/asimov1-locomotion-0818
+npm run hf Menlo/asimov1-locomotion-0818
 ```
 
 This downloads the repo's `.onnx` and `env.yaml`, starts the dev server and
-opens the viewer with that policy selected. The `--` is required: without it
-npm keeps `--model` for itself and the script never sees it. The repo id can
-also be given bare (`npm run hf -- Menlo/asimov1-locomotion-0818`). The first
-run also fetches the Asimov robot model if it is missing.
+opens the viewer with that policy selected. The first run also fetches the
+Asimov robot model if it is missing. A Hub URL works in place of the id.
+
+Options go after a `--`, because npm keeps any flag written before it for
+itself: `npm run hf Menlo/asimov1-locomotion-0818 -- --no-open`.
 
 | Option / variable | Meaning |
 |---|---|

@@ -14,13 +14,12 @@ export const HF_MODEL_ROOT = 'hf';
 const META_FILE = '.hf-meta.json';
 const REPO_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
-export const USAGE = `Usage: npm run hf -- --model <org/name> [options]
+export const USAGE = `Usage: npm run hf <org/name> [-- options]
 
 Downloads a policy from Hugging Face (policy .onnx + env.yaml) and opens the
-viewer with it selected.
+viewer with it selected. Example: npm run hf Menlo/asimov1-locomotion-0818
 
-Options:
-  --model <org/name>   Hugging Face repo id or URL (a bare positional works too)
+Options (npm needs the "--" before these):
   --revision <ref>     branch, tag or commit (default: main)
   --port <n>           dev server port (default: 3000, or the next free one)
   --no-open            do not open a browser window
@@ -95,7 +94,7 @@ async function fetchRepoInfo(repo, revision, { endpoint, token, fetchImpl }) {
   }
   if (!response.ok) throw new Error(`Hugging Face API returned ${response.status} for ${repo}@${revision}`);
   const info = await response.json();
-  return { sha: info.sha, files: info.siblings.map((s) => s.rfilename) };
+  return { id: info.id ?? repo, sha: info.sha, files: info.siblings.map((s) => s.rfilename) };
 }
 
 async function downloadFile(url, destination, { token, fetchImpl }) {
@@ -119,30 +118,35 @@ export async function ensureModel(repo, {
 } = {}) {
   const endpoint = (env.HF_ENDPOINT || 'https://huggingface.co').replace(/\/+$/, '');
   const token = env.HF_TOKEN || env.HUGGING_FACE_HUB_TOKEN || null;
-  const dirName = repo.replace('/', '__');
-  const modelDir = join(cacheDir, HF_MODEL_ROOT, dirName);
-  const result = (meta, cached) => ({
-    cacheDir, modelDir, ...meta, cached,
-    policyValue: `ckpt:${HF_MODEL_ROOT}/${dirName}/${meta.primary}`,
-  });
+  const layout = (id) => {
+    const dirName = id.replace('/', '__');
+    return { dirName, modelDir: join(cacheDir, HF_MODEL_ROOT, dirName) };
+  };
+  const result = (id, meta, cached) => {
+    const { dirName, modelDir } = layout(id);
+    return { cacheDir, modelDir, ...meta, cached, policyValue: `ckpt:${HF_MODEL_ROOT}/${dirName}/${meta.primary}` };
+  };
 
   let info;
   try {
     info = await fetchRepoInfo(repo, revision, { endpoint, token, fetchImpl });
   } catch (error) {
-    const previous = readMeta(modelDir);
+    const previous = readMeta(layout(repo).modelDir);
     // A TypeError is fetch's "could not reach the server"; HTTP errors are not retried from cache.
     if (error instanceof TypeError && previous) {
       log(`Hugging Face is unreachable; using the cached copy of ${repo} (${previous.sha.slice(0, 7)})`);
-      return result(previous, true);
+      return result(repo, previous, true);
     }
     throw error;
   }
 
+  // The Hub matches repo ids case-insensitively; key the cache on its spelling.
+  const id = info.id;
+  const { modelDir } = layout(id);
   const previous = readMeta(modelDir);
   if (previous?.sha === info.sha) {
-    log(`Using cached ${repo} (${info.sha.slice(0, 7)})`);
-    return result(previous, true);
+    log(`Using cached ${id} (${info.sha.slice(0, 7)})`);
+    return result(id, previous, true);
   }
 
   const { onnx, env: envFiles, primary } = selectFiles(info.files);
@@ -153,15 +157,15 @@ export async function ensureModel(repo, {
     for (const file of wanted) {
       const destination = resolve(staging, file);
       if (!destination.startsWith(resolve(staging) + sep)) throw new Error(`Refusing unsafe path from the Hub: ${file}`);
-      log(`Downloading ${repo}/${file}`);
+      log(`Downloading ${id}/${file}`);
       const path = file.split('/').map(encodeURIComponent).join('/');
-      await downloadFile(`${endpoint}/${repo}/resolve/${info.sha}/${path}`, destination, { token, fetchImpl });
+      await downloadFile(`${endpoint}/${id}/resolve/${info.sha}/${path}`, destination, { token, fetchImpl });
     }
-    const meta = { repo, revision, sha: info.sha, primary, onnx, hasEnvYaml: envFiles.length > 0 };
+    const meta = { repo: id, revision, sha: info.sha, primary, onnx, hasEnvYaml: envFiles.length > 0 };
     writeFileSync(join(staging, META_FILE), JSON.stringify(meta, null, 2) + '\n');
     rmSync(modelDir, { recursive: true, force: true });
     renameSync(staging, modelDir);
-    return result(meta, false);
+    return result(id, meta, false);
   } catch (error) {
     rmSync(staging, { recursive: true, force: true });
     throw error;

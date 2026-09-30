@@ -40,7 +40,7 @@ async function main() {
     },
   });
   await server.listen();
-  console.log(`\nRunning ${repo}${model.primary === 'policy.onnx' ? '' : ` (${model.primary})`}`);
+  console.log(`\nRunning ${model.repo}${model.primary === 'policy.onnx' ? '' : ` (${model.primary})`}`);
   server.printUrls();
 }
 
