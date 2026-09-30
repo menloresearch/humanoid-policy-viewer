@@ -43,7 +43,7 @@
       <v-card-title>Humanoid Policy Viewer</v-card-title>
       <v-card-text class="py-0 controls-body">
           <v-btn
-            href="https://github.com/Axellwppr/humanoid-policy-viewer"
+            href="https://github.com/menloresearch/humanoid-policy-viewer"
             target="_blank"
             variant="text"
             size="small"
@@ -54,7 +54,7 @@
             Demo Code
           </v-btn>
           <v-btn
-            href="https://github.com/Axellwppr/motion_tracking"
+            href="https://github.com/menloresearch/isaac_asimov"
             target="_blank"
             variant="text"
             size="small"
@@ -808,7 +808,7 @@
               @update:modelValue="onMotionUpload"
             ></v-file-input>
             <div class="text-caption">
-              Read <a target="_blank" href="https://github.com/Axellwppr/humanoid-policy-viewer?tab=readme-ov-file#add-your-own-robot-policy-and-motions">readme</a> to learn how to create motion JSON files from GMR.<br/>
+              See the <a target="_blank" href="https://github.com/menloresearch/humanoid-policy-viewer/blob/main/docs/adding-a-robot.md#3-optional-add-tracking-motions">motion format</a> for how to write motion JSON files.<br/>
               Each file should be a single clip (same schema as motions/default.json). File name becomes the motion name (prefixed with [new]). Duplicate names are ignored.
             </div>
             <v-alert
