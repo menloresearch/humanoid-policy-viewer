@@ -1329,11 +1329,24 @@ export default {
         }
         this.policyLabel = this.demo.currentPolicyPath?.split('/').pop() ?? this.policyLabel;
         this.state = 1;
+        await this.selectPolicyFromUrl();
       } catch (error) {
         this.state = -1;
         this.extra_error_message = error.toString();
         console.error(error);
       }
+    },
+    // `?policy=ckpt:<model path>` (set by `npm run hf`) starts on that catalog checkpoint.
+    async selectPolicyFromUrl() {
+      const requested = new URLSearchParams(window.location.search).get('policy');
+      if (!requested) return;
+      await this.fetchModelCatalog();
+      if (!this.policies.some((policy) => policy.value === requested)) {
+        this.policyLoadError = `Policy "${requested}" is not in the model library`;
+        return;
+      }
+      this.currentPolicy = requested;
+      await this.onPolicyChange(requested);
     },
     /** Slider bounds for the currently loaded checkpoint, falling back to this file's original hand-tuned defaults. */
     syncCommandLimits() {

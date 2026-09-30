@@ -6,10 +6,11 @@
   "license": "BSD-3-Clause",
   "scripts": {
     "dev": "vite --host",
+    "hf": "node scripts/run-hf-model.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "benchmark": "node scripts/run-benchmark.mjs",
-    "test": "node --test src/simulation/"
+    "test": "node --test src/simulation/ scripts/"
   },
   "dependencies": {
     "@fontsource/roboto": "5.2.5",

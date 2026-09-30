@@ -22,6 +22,35 @@ The Vite dev server is configured for localhost only. Open the printed local
 URL, usually `http://127.0.0.1:3000/` or the next available port. To also
 serve a repo's checkpoint folders, see [Model library](#model-library).
 
+### Run a policy from Hugging Face
+
+```bash
+npm install
+npm run hf -- --model Menlo/asimov1-locomotion-0818
+```
+
+This downloads the repo's `.onnx` and `env.yaml`, starts the dev server and
+opens the viewer with that policy selected. The `--` is required: without it
+npm keeps `--model` for itself and the script never sees it. The repo id can
+also be given bare (`npm run hf -- Menlo/asimov1-locomotion-0818`). The first
+run also fetches the Asimov robot model if it is missing.
+
+| Option / variable | Meaning |
+|---|---|
+| `--revision <ref>` | Branch, tag or commit (default `main`) |
+| `--port <n>` | Dev server port (default 3000, or the next free one) |
+| `--no-open` | Do not open a browser window |
+| `HF_TOKEN` | Access token, for private repos |
+| `HF_ENDPOINT` | Alternative Hub endpoint (default `https://huggingface.co`) |
+| `HPV_CACHE_DIR` | Download cache (default `~/.cache/humanoid-policy-viewer`) |
+
+Downloads are cached per repo and refreshed when the revision's commit changes;
+offline, the cached copy is used. The repo should follow the layout of the
+policies in [Policy config vs training artifacts](#policy-config-vs-training-artifacts):
+an ONNX policy with the training run's `env.yaml` next to it, which supplies the
+gains, action scale and torque limits. The page selects the policy through its
+`?policy=` query parameter, which the script fills in when it opens the browser.
+
 ## Project structure
 
 - `src/views/Demo.vue` - UI controls for the live demo
