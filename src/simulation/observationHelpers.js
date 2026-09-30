@@ -290,6 +290,204 @@ class PrevActions {
 }
 
 
+// ==================== Asimov Observation Helpers ====================
+
+/**
+ * Global velocity command state for Asimov.
+ * Updated by the UI sliders.
+ */
+export const asimovCommandState = {
+  vx: 0.0,
+  vy: 0.0,
+  wz: 0.0
+};
+
+/**
+ * Global interrupt-mask state. 0 = policy controls upper body (arm outputs
+ * used). 1 = arms driven externally (teleop / CAN-garbage fallback); arm
+ * outputs from the policy should be ignored by firmware.
+ */
+export const asimovInterruptState = {
+  active: 0
+};
+
+/**
+ * Global IMU bias state for simulating miscalibrated IMU.
+ * Adds constant offset to projected gravity observation ONLY (not physics).
+ */
+export const imuBiasState = {
+  x: 0.0,
+  y: 0.0
+};
+
+class AsimovAngVel {
+  get size() {
+    return 3;
+  }
+
+  compute(state) {
+    const v = state.rootAngVel;
+    const s = 0.25; // match training obs scale
+    return new Float32Array([v[0] * s, v[1] * s, v[2] * s]);
+  }
+}
+
+class AsimovProjectedGravity {
+  constructor() {
+    this.gravity = new THREE.Vector3(0, 0, -1);
+  }
+
+  get size() {
+    return 3;
+  }
+
+  compute(state) {
+    const quat = state.rootQuat;
+    const quatObj = new THREE.Quaternion(quat[1], quat[2], quat[3], quat[0]);
+    const gravityLocal = this.gravity.clone().applyQuaternion(quatObj.clone().invert());
+    return new Float32Array([
+      gravityLocal.x + imuBiasState.x,
+      gravityLocal.y + imuBiasState.y,
+      gravityLocal.z
+    ]);
+  }
+}
+
+class AsimovCommand {
+  get size() {
+    return 3;
+  }
+
+  compute() {
+    return new Float32Array([
+      asimovCommandState.vx,
+      asimovCommandState.vy,
+      asimovCommandState.wz
+    ]);
+  }
+}
+
+class AsimovGaitClock {
+  constructor(_policy, kwargs = {}) {
+    this.phase = 0.0;
+    // Cadence scales with commanded planar speed (matches training
+    // velocity_command.py: eff_freq = gait_freq_base + gait_freq_speed_scale * |v_xy|).
+    this.gaitFreqBase = 0.5;
+    this.gaitFreqSpeedScale = 1.5;
+    this.threshold = 0.1;
+    // zero_at_rest: if true, the clock is DISABLED at v≈0 (returns [0,0] and
+    // resets phase) — matches policies trained with the v=0 gait-clock disable.
+    // Default false = legacy frozen-phase behavior (e.g. model_4100/sphere).
+    this.zeroAtRest = kwargs.zero_at_rest ?? false;
+  }
+
+  get size() {
+    return 2;
+  }
+
+  compute() {
+    // Match training velocity_command.py UniformVelocityCommand:
+    // - cmd_magnitude = norm(vx, vy) + |wz|  (L2 of xy + L1 of z)
+    // - phase advances by step_dt * eff_freq when above threshold
+    // - eff_freq = base + speed_scale * norm(vx, vy)
+    const planar = Math.sqrt(
+      asimovCommandState.vx ** 2 + asimovCommandState.vy ** 2
+    );
+    const cmdMag = planar + Math.abs(asimovCommandState.wz);
+    if (cmdMag > this.threshold) {
+      const effFreq = this.gaitFreqBase + this.gaitFreqSpeedScale * planar;
+      this.phase = (this.phase + (1.0 / 50.0) * effFreq) % 1.0;
+    } else if (this.zeroAtRest) {
+      // v=0 disable: reset phase and emit [0,0] (clean "no gait → stand").
+      this.phase = 0.0;
+      return new Float32Array([0.0, 0.0]);
+    }
+    // else (legacy): phase frozen at current value.
+    const p = 2.0 * Math.PI * this.phase;
+    return new Float32Array([Math.cos(p), Math.sin(p)]);
+  }
+}
+
+class AsimovJointPosSlot {
+  constructor(policy, kwargs = {}) {
+    this.indices = kwargs.indices ?? [];
+    this.policy = policy;
+  }
+
+  get size() {
+    return this.indices.length;
+  }
+
+  compute(state) {
+    const defaultPos = this.policy.defaultJointPos;
+    const out = new Float32Array(this.indices.length);
+    for (let i = 0; i < this.indices.length; i++) {
+      const idx = this.indices[i];
+      out[i] = (state.jointPos[idx] ?? 0) - (defaultPos[idx] ?? 0);
+    }
+    return out;
+  }
+}
+
+class AsimovJointVelSlot {
+  constructor(policy, kwargs = {}) {
+    this.indices = kwargs.indices ?? [];
+    this.scale = kwargs.scale ?? 0.1; // default 0.1 (legs-only); v147+ uses 1.0
+  }
+
+  get size() {
+    return this.indices.length;
+  }
+
+  compute(state) {
+    const out = new Float32Array(this.indices.length);
+    for (let i = 0; i < this.indices.length; i++) {
+      const idx = this.indices[i];
+      out[i] = (state.jointVel[idx] ?? 0) * this.scale;
+    }
+    return out;
+  }
+}
+
+class AsimovPrevActions {
+  constructor(policy) {
+    this.policy = policy;
+    this.numActions = policy.numActions;
+  }
+
+  get size() {
+    return this.numActions;
+  }
+
+  reset() {}
+
+  compute() {
+    const src = this.policy.lastActions ?? new Float32Array(this.numActions);
+    return new Float32Array(src);
+  }
+}
+
+/**
+ * Interrupt mask flag. Reads from `policy.interruptMask` (0 or 1).
+ * 0 = policy controls upper body (arm outputs used).
+ * 1 = upper body externally driven (teleop/held at default); policy outputs
+ *     for arms are ignored by downstream firmware.
+ * UI provides a toggle that writes policy.interruptMask.
+ */
+class AsimovInterruptMask {
+  get size() {
+    return 1;
+  }
+
+  reset() {}
+
+  compute() {
+    const out = new Float32Array(1);
+    out[0] = asimovInterruptState.active ? 1.0 : 0.0;
+    return out;
+  }
+}
+
 // Export a dictionary of all observation classes
 export const Observations = {
   PrevActions,
@@ -301,5 +499,13 @@ export const Observations = {
   TrackingCommandObsRaw,
   TargetRootZObs,
   TargetJointPosObs,
-  TargetProjectedGravityBObs
+  TargetProjectedGravityBObs,
+  AsimovAngVel,
+  AsimovProjectedGravity,
+  AsimovGaitClock,
+  AsimovCommand,
+  AsimovJointPosSlot,
+  AsimovJointVelSlot,
+  AsimovPrevActions,
+  AsimovInterruptMask
 };

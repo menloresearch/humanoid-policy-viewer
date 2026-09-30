@@ -1,4 +1,6 @@
-import * as ort from 'onnxruntime-web';
+// CPU-only build: its runtime .wasm is 14 MB, while the default (WebGPU/JSEP)
+// build's is 27.8 MB, over Cloudflare Pages' 25 MiB per-file limit.
+import * as ort from 'onnxruntime-web/wasm';
 
 export class ONNXModule {
   constructor(config) {

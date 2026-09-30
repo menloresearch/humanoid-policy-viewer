@@ -1,0 +1,25 @@
+{
+  "name": "backward_walk",
+  "duration": 7.8,
+  "gaitSymmetry": true,
+  "commands": [
+    {
+      "t": 0,
+      "vx": 0,
+      "vy": 0,
+      "wz": 0
+    },
+    {
+      "t": 0.3,
+      "vx": -0.5,
+      "vy": 0,
+      "wz": 0
+    },
+    {
+      "t": 7.3,
+      "vx": 0,
+      "vy": 0,
+      "wz": 0
+    }
+  ]
+}
