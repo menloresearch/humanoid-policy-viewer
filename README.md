@@ -1,56 +1,91 @@
 # Humanoid Policy Viewer
 
-Single-page Vue 3 + Vuetify app that runs a MuJoCo WebAssembly scene in the
-browser and drives it with an ONNX policy. This checkout defaults to a bundled
-Asimov policy (`public/examples/checkpoints/asimov/`, configured by
-`reference_policy_config.json`), running on the canonical Asimov model from the
-`asimov-1` git submodule (see `public/examples/scenes/README.md`).
+![The Asimov humanoid standing in the policy viewer, with velocity command sliders and the benchmark panel](docs/images/viewer.png)
 
-Demos: [Humanoid Policy Viewer](https://motion-tracking.axell.top/), [GentleHumanoid Web Demo](https://gentle-humanoid.axell.top/)
+A browser-based viewer and test bench for humanoid locomotion policies. It runs
+a MuJoCo WebAssembly simulation of the [Asimov](https://github.com/menloresearch/asimov-1)
+robot and drives it with an ONNX policy through onnxruntime-web, so a trained
+policy can be tried without a GPU or a training stack.
+
+- **Try a policy:** load one from Hugging Face with a single command, from a
+  local model library, or use the bundled example.
+- **Drive and stress it:** set velocity commands, push the robot, and change
+  friction, armature, gains, gravity and other physical parameters live.
+- **Score it:** run the `benchmark/` suite (locomotion, pushes, friction, long
+  walks) in the app or headless, and compare saved runs.
+- **Faithful setup:** the robot is the canonical `asimov-1` model, and each
+  policy's gains, action scale and torque limits are read from its training
+  `env.yaml`, so what you see matches how it was trained.
 
 ## Quick start
 
-```bash
-# fetch the Asimov robot model (git submodule, sim-model/ only)
-./scripts/init-asimov-1.sh
-
-npm install
-npm run dev
-```
-
-The Vite dev server is configured for localhost only. Open the printed local
-URL, usually `http://127.0.0.1:3000/` or the next available port. To also
-serve a repo's checkpoint folders, see [Model library](#model-library).
-
-### Run a policy from Hugging Face
+Run a policy from Hugging Face:
 
 ```bash
-npm install
+npm run hf <model>
+
+# example
 npm run hf Menlo/asimov1-locomotion-0818
 ```
 
-This downloads the repo's `.onnx` and `env.yaml`, starts the dev server and
-opens the viewer with that policy selected. The first run also fetches the
-Asimov robot model if it is missing. A Hub URL works in place of the id.
+`<model>` is the Hugging Face repo id (`org/name`) or its URL. This works straight
+from a fresh clone: it installs dependencies, fetches the Asimov robot model,
+downloads the policy and opens the viewer with it selected. It needs Node, `git`
+and `bash`. See [Run a policy from Hugging Face](docs/huggingface.md).
 
-Options go after a `--`, because npm keeps any flag written before it for
-itself: `npm run hf Menlo/asimov1-locomotion-0818 -- --no-open`.
+## Run local policies
 
-| Option / variable | Meaning |
+To run policies you have on disk, or to work on the viewer itself, set up once:
+
+```bash
+./scripts/init-asimov-1.sh   # fetch the Asimov robot model (sim-model/ only)
+npm ci                       # install dependencies exactly as locked
+npm run dev                  # start the viewer on the bundled example policy
+```
+
+Then open the printed URL. To add your own policy, put it in a folder under
+`models/` (git-ignored, and not built into `dist/`):
+
+```
+models/my-policy/
+├── policy.onnx
+├── env.yaml       the training run's gains, action scale and torque limits
+└── agent.yaml
+```
+
+It appears in the policy dropdown the next time the page loads. To serve
+checkpoints from somewhere else, see [Model library](docs/model-library.md).
+
+`npm run dev` listens on all network interfaces (it runs `vite --host`), so other
+machines on your network can reach it. Run `npx vite` instead to keep it on
+localhost, which is how `npm run hf` starts.
+
+## Where policies come from
+
+Every policy the viewer can run appears in its policy dropdown. There are three
+sources:
+
+| Source | Where the files are | How you get it |
+|---|---|---|
+| Bundled example | `public/examples/checkpoints/asimov/model_aug_18_1/`, in this repo | The default with `npm run dev` |
+| Hugging Face | `~/.cache/humanoid-policy-viewer/hf/<org>__<name>/`, outside the repo | `npm run hf <model>` |
+| Local folder | `models/<name>/` in this repo (git-ignored), or wherever `HPV_MODEL_LIBRARY_DIR` and `HPV_MODEL_ROOTS` point | Put the files there, then `npm run dev` |
+
+In every case the gains, action scale and torque limits come from the `env.yaml`
+next to the `.onnx`; see [Policy config](docs/policy-config.md). The robot is the
+same everywhere: the `asimov-1` submodule.
+
+## Docs
+
+| Topic | |
 |---|---|
-| `--revision <ref>` | Branch, tag or commit (default `main`) |
-| `--port <n>` | Dev server port (default 3000, or the next free one) |
-| `--no-open` | Do not open a browser window |
-| `HF_TOKEN` | Access token, for private repos |
-| `HF_ENDPOINT` | Alternative Hub endpoint (default `https://huggingface.co`) |
-| `HPV_CACHE_DIR` | Download cache (default `~/.cache/humanoid-policy-viewer`) |
-
-Downloads are cached per repo and refreshed when the revision's commit changes;
-offline, the cached copy is used. The repo should follow the layout of the
-policies in [Policy config vs training artifacts](#policy-config-vs-training-artifacts):
-an ONNX policy with the training run's `env.yaml` next to it, which supplies the
-gains, action scale and torque limits. The page selects the policy through its
-`?policy=` query parameter, which the script fills in when it opens the browser.
+| [Run a policy from Hugging Face](docs/huggingface.md) | `npm run hf`: options, private repos, where downloads are cached |
+| [Policy config](docs/policy-config.md) | What `reference_policy_config.json` and a checkpoint's `env.yaml` each control, and which wins |
+| [Model library](docs/model-library.md) | Serving checkpoints from outside `public/` (`HPV_MODEL_*` variables) |
+| [Benchmarking](docs/benchmarking.md) | Running the `benchmark/` suite in the app or headless |
+| [Adding a robot](docs/adding-a-robot.md) | Bringing your own MJCF, policy and motion clips |
+| [Benchmark methodology](benchmark/METHODOLOGY.md) | How the test suite and its thresholds were chosen |
+| [Scenes](public/examples/scenes/README.md) | The `asimov-1` submodule and how actuators are added at load |
 
 ## Project structure
 
@@ -58,219 +93,11 @@ gains, action scale and torque limits. The page selects the policy through its
 - `src/simulation/main.js` - bootstraps MuJoCo, Three.js renderer, policy loop, and metric sampling hook
 - `src/simulation/mujocoUtils.js` - scene/policy loading utilities and filesystem preloading
 - `src/simulation/policyRunner.js` - ONNX inference wrapper and observation pipeline
-- `public/sim-metrics.*` - metric recorder UI and browser-side metric calculations
-- `public/examples/scenes/` - MJCF files + meshes staged into MuJoCo's MEMFS; the Asimov robot is the `asimov-1/` git submodule (see its `README.md`)
+- `public/examples/scenes/` - MJCF files + meshes staged into MuJoCo's MEMFS; the Asimov robot is the `asimov-1/` git submodule
 - `public/examples/checkpoints/` - policy config JSON, bundled ONNX files, and motion clips
-- an optional model library (see [Model library](#model-library)) served by local Vite middleware under `/model-library/`
-
-## Policy config vs training artifacts
-
-The viewer runs out of the box on a bundled Asimov policy
-(`public/examples/checkpoints/asimov/model_aug_18_1/`), no model library needed.
-Three kinds of file describe a policy, and they have different owners:
-
-| File | What it is | Who owns it | Read by the viewer? |
-|---|---|---|---|
-| `reference_policy_config.json` (in `public/examples/checkpoints/asimov/`) | How to run an Asimov velocity policy **in simulation**: observation recipe, joint order, control rate, ONNX input shape, plus fallback values | the viewer | yes, always |
-| `env.yaml` (next to the `.onnx`, in `params/` or at its root) | **Training artifact**: snapshot of the Isaac Lab / mjlab environment the policy was trained in | the training run | yes, for the settings below |
-| `agent.yaml` (same place) | **Training artifact**: agent / PPO hyperparameters | the training run | no |
-
-### What is recorded where
-
-| Setting | `reference_policy_config.json` | `env.yaml` | What the viewer uses |
-|---|---|---|---|
-| ONNX path and input shape | yes | - | the JSON (catalog checkpoints swap in their own `.onnx`) |
-| Joint order (`policy_joint_names`) | yes | `actions.joint_pos.joint_names` | the JSON (not read from `env.yaml` yet) |
-| Observation recipe (`obs_config`) | yes | `observations.policy` | the JSON (not read from `env.yaml` yet) |
-| `policy_hz`, `action_lpf_hz`, `kd_ff`, `control_type` | yes | `policy_hz` = 1 / (`dt` x `decimation`) | the JSON |
-| `stiffness`, `damping` | fallback only | yes | **`env.yaml`** |
-| `action_scale`, `default_joint_pos` | fallback only | yes | **`env.yaml`** |
-| Action delay range | fallback only | if declared | `env.yaml` if declared, else the JSON |
-| Command limits (`vx`, `vy`, `wz`) | - | if declared | `env.yaml` if declared, else a global default |
-| Torque limits | - | `effort_limit` | **`env.yaml`**; without it torque is unclamped and the console warns |
-
-### Precedence rule
-
-**For every setting `env.yaml` records, `env.yaml` wins over the JSON.** It is
-never the other way round. The JSON's values for those settings are only a
-fallback, used when no `env.yaml` is found beside the `.onnx` (the console warns
-for model-library checkpoints). Settings `env.yaml` does not feed the viewer, such as
-the observation recipe, joint order and rates, always come from the JSON, so
-keep it consistent with the training run (the tests check that the joint order
-matches the bundled `env.yaml`).
-
-The robot model itself is not in either file. It comes from the `asimov-1`
-submodule, and the viewer adds actuators at load (`src/simulation/sceneOverlay.js`).
-Torque limits deliberately follow training, not the robot model, whose limits are
-hardware maxima that usually differ.
-
-
-## Simulation metrics
-
-The viewer includes a **Record Simulation Metrics** button under **Velocity Command**.
-The logic is adapted from `asimov-viewer/public/sim-metrics.*` and
-`asimov-viewer/README.md`.
-
-When clicked, the recorder runs a fixed scripted evaluation, captures one sample
-per policy step, computes summary metrics in the browser, and posts the HTML and JSON report files
-to the local Vite endpoint at `/simulation-metrics/report`.
-
-Reports are saved beside the checkpoint's model in the model library (see
-[Model library](#model-library)). For a checkpoint in `<root>/<checkpoint>/`,
-output is written to:
-
-```
-<root>/<checkpoint>/sim_metric.html
-<root>/<checkpoint>/sim_metric.json
-```
-
-Policy configs that point to bundled files under `public/examples/checkpoints`
-can still run in the viewer, but metric report saving is only supported for
-models whose `onnx.path` resolves under `/model-library/`.
-
-### Scripted evaluation
-
-The command-tracking portion runs these velocity segments:
-
-| Segment | Command | Duration |
-|---|---:|---:|
-| Forward slow | `vx = 0.3 m/s` | 5 s |
-| Forward fast | `vx = 0.8 m/s` | 8 s |
-| Lateral negative | `vy = -0.5 m/s` | 8 s |
-| Lateral positive | `vy = 0.5 m/s` | 8 s |
-| Turn negative | `wz = -0.6 rad/s` | 8 s |
-| Turn positive | `wz = 0.6 rad/s` | 8 s |
-
-After command tracking, it runs push tests from front, back, left, and right
-using increasing base-velocity impulses.
-
-### Recorded trace
-
-The JSON report stores the full trace under `trace.samples`. Each sample can
-include:
-
-- Time, phase, segment, and push-trial metadata.
-- Command velocity and measured root/base linear and angular velocity.
-- Root position and orientation.
-- Joint positions, joint velocities, policy actions, and action deltas.
-- Foot contact/support estimates when available.
-- Expected trajectory, actual trajectory, drift, and fallen/tumbling state.
-
-### Metrics summary
-
-- Command tracking RMSE: root-mean-square velocity error for `vx`, `vy`, and `wz`; lower is better.
-- Recoverable push: largest injected base velocity impulse survived per direction; higher is better.
-- Balance/support margin: approximate root support margin from contacted foot positions when available.
-- Gait symmetry: browser-side left/right mirror RMSE plus foot-contact duty asymmetry over the first 13 seconds of x-only walking.
-- Action smoothness: policy action delta and jerk-like third-difference estimates; lower is usually smoother.
-- Drift: expected X/Y path from command integration versus actual root X/Y path; lower is better.
-- Top-down trajectory: HTML plot comparing actual and expected floor-plane paths.
-
-## Headless benchmarking
-
-The in-app **Tests & Benchmark** panel (`src/views/Demo.vue`) runs the
-`benchmark/*.json` velocity-command tests against one or more policies and
-reports metrics via `src/simulation/benchmarkRunner.js`. To run the same
-sweep outside a browser tab:
-
-```bash
-# Every discovered checkpoint x every committed benchmark/*.json test
-npm run benchmark -- --out benchmark_runs/run.json
-
-# One policy, one test (fast smoke check)
-npm run benchmark -- \
-  --policies "ckpt:<root>/<model>/policy.onnx" \
-  --tests backward_walk.json \
-  --out benchmark_runs/run.json
-```
-
-"Discovered" means the checkpoints under the model library (see
-[Model library](#model-library)); `--policies` skips discovery.
-
-This boots a Vite dev server (the `/api/models`, `/api/sequences`, and
-`/api/benchmarks` endpoints only exist under `vite dev`, not `vite build` +
-`preview`), drives it with headless Chromium via Playwright, and calls the
-same `window.__runHeadlessBenchmark(...)` hook the confirm-dialog-driven UI
-flow uses (`Demo.vue`'s `runHeadlessBenchmark()` method). See
-`scripts/run-benchmark.mjs`.
-
-A single page can only host one live `MuJoCoDemo` (one canvas, one MuJoCo
-WASM instance, one ONNX Runtime session), so policies are benchmarked
-sequentially within a run. Parallelism comes from running multiple shards,
-each its own OS process with its own dev server + browser; `--policies` and
-`--tests` make it straightforward to partition a sweep across shards.
-
-Sharding, merging shard outputs into one report, PR comments and deployment
-belong to whatever repo embeds the viewer.
-
-## Model library
-
-Checkpoints that live outside `public/` are served by the dev server under
-`/model-library/<root>/...` and listed at `/api/models`. The viewer assumes
-nothing about the repo around it; the embedding repo opts in with environment
-variables (use absolute paths):
-
-| Variable | Meaning |
-|---|---|
-| `HPV_MODEL_LIBRARY_DIR` | Directory that contains the model root folders |
-| `HPV_MODEL_ROOTS` | Comma-separated folder names under that directory |
-| `HPV_BENCHMARK_RUNS_DIR` | Where saved benchmark runs are listed/read/written (default `benchmark_runs/` in this directory) |
-
-With none of them set, there is no model library. For example:
-
-```bash
-HPV_MODEL_LIBRARY_DIR=/abs/path/to/repo HPV_MODEL_ROOTS=models npm run dev
-```
-
-serves every `.onnx` under `/abs/path/to/repo/models/` at `/model-library/models/...`.
-
-## Add your own robot, policy and motions
-
-1. Add your MJCF + assets.
-   - Create `public/examples/scenes/<robot>/`.
-   - Put your MJCF as `public/examples/scenes/<robot>/<robot>.xml`.
-   - Add all meshes/textures used by the MJCF into the same folder.
-   - Append every file path to `public/examples/scenes/files.json` so the
-     loader can preload them into `/working/` in the wasm filesystem.
-
-2. Add your policy config and ONNX.
-   - Create `public/examples/checkpoints/<robot>/tracking_policy.json`.
-   - Place the ONNX model at `public/examples/checkpoints/<robot>/tracking_policy.onnx`, or put it in a model library root (see [Model library](#model-library)) when you want its training artifacts (`env.yaml`) and metric reports beside the model.
-   - In the JSON, make sure these fields are correct:
-     - `onnx.path` points to your ONNX file, for example `./examples/checkpoints/<robot>/tracking_policy.onnx` or `/model-library/<root>/<checkpoint>/policy.onnx`
-     - `policy_joint_names` matches the joint names in your MJCF actuators
-     - `obs_config` uses observation names that exist in `src/simulation/observationHelpers.js`
-     - `action_scale`, `stiffness`, `damping`, and `default_joint_pos` lengths match `policy_joint_names`
-   - For an ONNX file, the viewer reads `params/env.yaml` (or `env.yaml`) from the folder it sits in when loading the policy (for a model-library checkpoint, its `<root>/<model>/` folder). It maps the YAML's joint action scale, actuator stiffness/damping, and initial joint pose to `policy_joint_names`. These values override the matching arrays in `reference_policy_config.json` for that checkpoint (see [Policy config vs training artifacts](#policy-config-vs-training-artifacts)). If there is no `env.yaml`, the JSON arrays are used. The YAML's actuator `effort_limit` is also applied as each joint's torque cap (training's limit, not the robot model's hardware maximum); without it joint torque is unclamped and the console warns.
-   - **Recommended for benchmarking**: ship `env.yaml` (and `agent.yaml` as a record of the training run) with every checkpoint you benchmark, and make sure `env.yaml` explicitly declares stiffness, damping and `effort_limit` for every joint in `policy_joint_names`. Otherwise the viewer silently falls back to the JSON's gains and unclamped torque, the shared-gains mistake `benchmark/METHODOLOGY.md` warns about. A CI job can enforce this before running the suite.
-   - You need to adapt the observation helper functions in
-     `src/simulation/observationHelpers.js` if your policy uses
-     different observations than the built-in ones, and modify `src/simulation/policyRunner.js` to control the robot.
-
-3. (Optional) Add tracking motions.
-   - Add an index at `public/examples/checkpoints/<robot>/motions.json`.
-   - Put per-motion clips in `public/examples/checkpoints/<robot>/motions/`.
-   - In `tracking_policy.json`, set `tracking.motions_path` to the index file.
-   - The app downloads all motion clips listed in the index when the policy loads.
-   - The index uses this shape:
-     - `format`: `tracking-motion-index-v1`
-     - `base_path`: relative path to the motions folder, for example `./motions`
-     - `motions`: list of `{ name, file }` entries
-   - Each motion clip file must include a `default` clip overall and each clip contains:
-     - `joint_pos` or `jointPos`: per-frame joint arrays
-     - `root_pos` or `rootPos`: per-frame root positions
-     - `root_quat` or `rootQuat`: per-frame root quaternions `[w, x, y, z]`
-
-4. Point the app to your robot and policy.
-   - Update `src/simulation/main.js`:
-     - `defaultPolicy = './examples/checkpoints/<robot>/tracking_policy.json'`
-     - `await this.reloadScene('<robot>/<robot>.xml')`
-     - `await this.reloadPolicy(defaultPolicy)`
-   - Update `src/views/Demo.vue` policy entries if the UI selector should expose it.
-
-If you keep multiple robots around, expose them through the selector in
-`src/views/Demo.vue` and call `demo.reloadScene(...)` and
-`demo.reloadPolicy(...)` from there.
+- `scripts/` - `npm run hf`, the headless benchmark runner, and dev-server helpers
+- `benchmark/` - velocity-command and push test definitions
+- an optional [model library](docs/model-library.md) served by local Vite middleware under `/model-library/`
 
 ## License and acknowledgements
 

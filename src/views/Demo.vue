@@ -898,8 +898,7 @@ import loadMujoco from 'mujoco-js';
 // Reference policy config, reused as the template by every catalog checkpoint:
 // observation recipe, joint order, policy_hz. Wherever a checkpoint's training
 // env.yaml records a setting (gains, action scale, default pose, delay, command
-// and torque limits) it overrides this file. See the "Policy config vs training
-// artifacts" section of the README.
+// and torque limits) it overrides this file. See docs/policy-config.md.
 const REFERENCE_POLICY_CONFIG = './examples/checkpoints/asimov/reference_policy_config.json';
 
 // Control-panel width: dragged by the user, remembered per browser.

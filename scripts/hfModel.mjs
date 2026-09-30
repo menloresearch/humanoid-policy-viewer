@@ -68,14 +68,16 @@ export function defaultCacheDir(env = process.env) {
   return join(env.XDG_CACHE_HOME || join(homedir(), '.cache'), 'humanoid-policy-viewer');
 }
 
-// Every ONNX in the repo, plus the training config the viewer reads gains from.
+// Every ONNX in the repo, plus the training config (env.yaml supplies the gains,
+// agent.yaml is only checked for presence).
 export function selectFiles(files) {
   const onnx = files.filter((f) => f.toLowerCase().endsWith('.onnx')).sort();
   if (onnx.length === 0) throw new Error('The repo contains no .onnx file');
-  const env = checkpointFileCandidates('env.yaml').filter((f) => files.includes(f));
+  const present = (name) => checkpointFileCandidates(name).filter((f) => files.includes(f));
   return {
     onnx,
-    env,
+    env: present('env.yaml'),
+    agent: present('agent.yaml'),
     primary: onnx.includes('policy.onnx') ? 'policy.onnx' : onnx[0],
   };
 }
@@ -94,7 +96,12 @@ async function fetchRepoInfo(repo, revision, { endpoint, token, fetchImpl }) {
   }
   if (!response.ok) throw new Error(`Hugging Face API returned ${response.status} for ${repo}@${revision}`);
   const info = await response.json();
-  return { id: info.id ?? repo, sha: info.sha, files: info.siblings.map((s) => s.rfilename) };
+  return {
+    id: info.id ?? repo,
+    sha: info.sha,
+    libraryName: info.library_name ?? info.cardData?.library_name ?? null,
+    files: info.siblings.map((s) => s.rfilename),
+  };
 }
 
 async function downloadFile(url, destination, { token, fetchImpl }) {
@@ -144,13 +151,14 @@ export async function ensureModel(repo, {
   const id = info.id;
   const { modelDir } = layout(id);
   const previous = readMeta(modelDir);
-  if (previous?.sha === info.sha) {
+  const { onnx, env: envFiles, agent: agentFiles, primary } = selectFiles(info.files);
+  const wanted = [...onnx, ...envFiles, ...agentFiles];
+  // A copy cached by an older version may lack files that are wanted now.
+  if (previous?.sha === info.sha && wanted.every((file) => previous.files?.includes(file))) {
     log(`Using cached ${id} (${info.sha.slice(0, 7)})`);
-    return result(id, previous, true);
+    return result(id, { ...previous, libraryName: info.libraryName }, true);
   }
 
-  const { onnx, env: envFiles, primary } = selectFiles(info.files);
-  const wanted = [...onnx, ...envFiles];
   const staging = `${modelDir}.tmp-${process.pid}`;
   rmSync(staging, { recursive: true, force: true });
   try {
@@ -161,7 +169,7 @@ export async function ensureModel(repo, {
       const path = file.split('/').map(encodeURIComponent).join('/');
       await downloadFile(`${endpoint}/${id}/resolve/${info.sha}/${path}`, destination, { token, fetchImpl });
     }
-    const meta = { repo: id, revision, sha: info.sha, primary, onnx, hasEnvYaml: envFiles.length > 0 };
+    const meta = { repo: id, revision, sha: info.sha, libraryName: info.libraryName, primary, onnx, files: wanted };
     writeFileSync(join(staging, META_FILE), JSON.stringify(meta, null, 2) + '\n');
     rmSync(modelDir, { recursive: true, force: true });
     renameSync(staging, modelDir);

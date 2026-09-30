@@ -1,7 +1,7 @@
 // Clients for the two benchmark-side dev endpoints (served by
 // humanoidDevPlugin in vite.config.mjs):
 //   /api/models     — ONNX checkpoints discovered in the model library
-//                     (see the README), used to build the policy catalog.
+//                     (see docs/model-library.md), used to build the policy catalog.
 //   /api/benchmarks — completed benchmark runs, stored as JSON under
 //                     ./benchmarks so results survive a reload.
 //

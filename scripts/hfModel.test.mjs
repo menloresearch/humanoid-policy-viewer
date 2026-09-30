@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -26,9 +26,9 @@ test('normalizeRepoId accepts ids and Hub URLs, rejects anything else', () => {
   for (const bad of ['', 'Menlo', '../x/y', 'a/b/c', 'a/b c']) assert.throws(() => normalizeRepoId(bad), /not a Hugging Face repo id/);
 });
 
-test('selectFiles picks every onnx, the env.yaml, and prefers policy.onnx', () => {
+test('selectFiles picks every onnx, the env.yaml and agent.yaml, and prefers policy.onnx', () => {
   const picked = selectFiles(['README.md', 'agent.yaml', 'env.yaml', 'exported/a.onnx', 'policy.onnx']);
-  assert.deepEqual(picked, { onnx: ['exported/a.onnx', 'policy.onnx'], env: ['env.yaml'], primary: 'policy.onnx' });
+  assert.deepEqual(picked, { onnx: ['exported/a.onnx', 'policy.onnx'], env: ['env.yaml'], agent: ['agent.yaml'], primary: 'policy.onnx' });
   assert.equal(selectFiles(['params/env.yaml', 'm.onnx']).env[0], 'params/env.yaml');
   assert.equal(selectFiles(['b.onnx', 'a.onnx']).primary, 'a.onnx');
   assert.throws(() => selectFiles(['env.yaml']), /no .onnx/);
@@ -42,7 +42,7 @@ function fakeHub(state) {
     if (url.includes('/api/models/')) {
       if (state.offline) throw new TypeError('fetch failed');
       if (state.missing) return new Response('', { status: 401 });
-      return Response.json({ id: state.id, sha: state.sha, siblings: state.files.map((rfilename) => ({ rfilename })) });
+      return Response.json({ id: state.id, sha: state.sha, library_name: state.libraryName, siblings: state.files.map((rfilename) => ({ rfilename })) });
     }
     return new Response(`${state.sha}:${new URL(url).pathname.split('/').pop()}`);
   };
@@ -52,31 +52,46 @@ function fakeHub(state) {
 test('ensureModel downloads into a model library layout, then reuses and refreshes the cache', async () => {
   const cacheDir = mkdtempSync(join(tmpdir(), 'hpv-hf-'));
   try {
-    const state = { sha: 'a'.repeat(40), files: ['README.md', 'env.yaml', 'policy.onnx'] };
+    const state = { sha: 'a'.repeat(40), libraryName: 'asimov', files: ['README.md', 'env.yaml', 'agent.yaml', 'policy.onnx'] };
     const hub = fakeHub(state);
     const opts = { cacheDir, env: {}, fetchImpl: hub.fetchImpl };
 
     const first = await ensureModel('Menlo/demo', opts);
     assert.equal(first.cached, false);
     assert.equal(first.policyValue, 'ckpt:hf/Menlo__demo/policy.onnx');
-    assert.equal(first.hasEnvYaml, true);
+    assert.equal(first.libraryName, 'asimov');
+    assert.deepEqual(first.files, ['policy.onnx', 'env.yaml', 'agent.yaml']);
     assert.equal(readFileSync(join(cacheDir, 'hf/Menlo__demo/policy.onnx'), 'utf8'), `${state.sha}:policy.onnx`);
+    assert.equal(existsSync(join(cacheDir, 'hf/Menlo__demo/agent.yaml')), true);
     assert.equal(existsSync(join(cacheDir, 'hf/Menlo__demo/README.md')), false);
 
     const downloads = () => hub.calls.filter((u) => u.includes('/resolve/')).length;
-    assert.equal(downloads(), 2);
+    assert.equal(downloads(), 3);
     assert.equal((await ensureModel('Menlo/demo', opts)).cached, true);
-    assert.equal(downloads(), 2);
+    assert.equal(downloads(), 3);
+
+    state.libraryName = 'other';
+    assert.equal((await ensureModel('Menlo/demo', opts)).libraryName, 'other');
+    state.libraryName = 'asimov';
 
     state.offline = true;
-    assert.equal((await ensureModel('Menlo/demo', opts)).cached, true);
+    const offline = await ensureModel('Menlo/demo', opts);
+    assert.equal(offline.cached, true);
+    assert.equal(offline.libraryName, 'asimov');
     state.offline = false;
+
+    // A copy cached without the file list (an older version) is fetched again.
+    const metaPath = join(cacheDir, 'hf/Menlo__demo/.hf-meta.json');
+    const { files: _dropped, ...oldMeta } = JSON.parse(readFileSync(metaPath, 'utf8'));
+    writeFileSync(metaPath, JSON.stringify(oldMeta));
+    assert.equal((await ensureModel('Menlo/demo', opts)).cached, false);
+    assert.equal(downloads(), 6);
 
     state.sha = 'b'.repeat(40);
     state.files = ['policy.onnx'];
     const updated = await ensureModel('Menlo/demo', opts);
     assert.equal(updated.cached, false);
-    assert.equal(updated.hasEnvYaml, false);
+    assert.deepEqual(updated.files, ['policy.onnx']);
     assert.equal(existsSync(join(cacheDir, 'hf/Menlo__demo/env.yaml')), false);
   } finally {
     rmSync(cacheDir, { recursive: true, force: true });
