@@ -1,3 +1,5 @@
+// Based on Three.js Reflector, with project-specific rendering modifications.
+// Copyright © 2010-2023 three.js authors. MIT license; see LICENSES/Three.js-MIT.txt.
 import {
 	Color,
 	Matrix4,

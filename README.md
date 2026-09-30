@@ -68,3 +68,19 @@ npm run dev
 If you want to keep multiple robots around, you can expose a selector in
 `src/views/Demo.vue` and call `demo.reloadScene(...)` and `demo.reloadPolicy(...)`
 from there.
+
+## License and acknowledgements
+
+Original code and author-created motions in this project, together with the
+author-trained policy weights at
+`public/examples/checkpoints/g1/policy_latest.onnx` are licensed under the
+[BSD 3-Clause License](LICENSE), copyright © 2026 Qingzhou Lu.
+
+Third-party code, libraries, robot descriptions, meshes, and third-party motion data are
+not relicensed by this grant. They remain subject to their respective terms;
+see [Third-party notices](THIRD_PARTY_NOTICES.md) for sources and scope.
+
+This viewer builds on MuJoCo, the MuJoCo WASM community, Three.js, ONNX Runtime,
+Vue, and Vuetify. We also thank Unitree Robotics and the creators of the motion
+datasets used in the examples. If you build on this viewer, a link back to this
+repository is appreciated.
