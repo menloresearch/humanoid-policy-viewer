@@ -71,14 +71,27 @@ from there.
 
 ## License and acknowledgements
 
-Original code and author-created motions in this project, together with the
-author-trained policy weights at
-`public/examples/checkpoints/g1/policy_latest.onnx` are licensed under the
-[BSD 3-Clause License](LICENSE), copyright © 2026 Qingzhou Lu.
+This repository is a fork of `humanoid-policy-viewer` by
+[Qingzhou Lu (Axellwppr)](https://github.com/Axellwppr), a motion-tracking viewer for the Unitree G1, and still carries that viewer's G1
+scene and motion-tracking code. The upstream project's demos:
+[Humanoid Policy Viewer](https://motion-tracking.axell.top/),
+[GentleHumanoid Web Demo](https://gentle-humanoid.axell.top/).
 
-Third-party code, libraries, robot descriptions, meshes, and third-party motion data are
-not relicensed by this grant. They remain subject to their respective terms;
-see [Third-party notices](THIRD_PARTY_NOTICES.md) for sources and scope.
+Both the original project and Menlo Research's additions are licensed under the
+[BSD 3-Clause License](LICENSE):
+
+- **Original code**, author-created motions, and the author-trained policy
+  weights at `public/examples/checkpoints/g1/policy_latest.onnx` — copyright
+  © 2026 Qingzhou Lu.
+- **Menlo Research modifications** — changes made after upstream commit
+  `0490320`, including Asimov support, the benchmark suite, and Hugging Face
+  model loading — copyright © 2026 Menlo Research Pte. Ltd.
+
+Third-party code, libraries, robot descriptions, meshes, and third-party motion
+data are not relicensed by this grant. They remain subject to their respective
+terms; see [Third-party notices](THIRD_PARTY_NOTICES.md) for sources and scope.
+This includes the Asimov robot description in the `asimov-1` submodule, which is
+licensed under CERN-OHL-S-2.0.
 
 This viewer builds on MuJoCo, the MuJoCo WASM community, Three.js, ONNX Runtime,
 Vue, and Vuetify. We also thank Unitree Robotics and the creators of the motion
