@@ -6,8 +6,18 @@
 // embedding repo's tooling, so they never drift on what counts as a
 // discoverable model.
 
-import { existsSync, readdirSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { HF_META_FILE } from './hfModel.mjs';
+
+// A model downloaded by `npm run hf` is labelled by its Hugging Face repo id,
+// with the file name added when it is not the repo's primary policy.
+function hfLabel(dir, fileName) {
+  let meta;
+  try { meta = JSON.parse(readFileSync(resolve(dir, HF_META_FILE), 'utf8')); } catch { return null; }
+  if (typeof meta?.repo !== 'string') return null;
+  return fileName === meta.primary ? meta.repo : `${meta.repo} (${fileName})`;
+}
 
 export function listModelRoots(baseDir, roots) {
   if (!baseDir) return [];
@@ -33,7 +43,7 @@ export function listModels(baseDir, roots) {
             root: mr.root,
             path: `${mr.root}/${rel}`,
             url: `/model-library/${mr.root}/${rel}`,
-            label: `${mr.root}/${rel}`,
+            label: hfLabel(dir, entry.name) ?? `${mr.root}/${rel}`,
             name: entry.name,
           });
         }

@@ -11,7 +11,7 @@ import { pipeline } from 'node:stream/promises';
 import { checkpointFileCandidates } from '../src/simulation/envPolicyConfig.js';
 
 export const HF_MODEL_ROOT = 'hf';
-const META_FILE = '.hf-meta.json';
+export const HF_META_FILE = '.hf-meta.json';
 const REPO_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 export const USAGE = `Usage: npm run hf <org/name> [-- options]
@@ -83,7 +83,7 @@ export function selectFiles(files) {
 }
 
 function readMeta(modelDir) {
-  try { return JSON.parse(readFileSync(join(modelDir, META_FILE), 'utf8')); } catch { return null; }
+  try { return JSON.parse(readFileSync(join(modelDir, HF_META_FILE), 'utf8')); } catch { return null; }
 }
 
 async function fetchRepoInfo(repo, revision, { endpoint, token, fetchImpl }) {
@@ -170,7 +170,7 @@ export async function ensureModel(repo, {
       await downloadFile(`${endpoint}/${id}/resolve/${info.sha}/${path}`, destination, { token, fetchImpl });
     }
     const meta = { repo: id, revision, sha: info.sha, libraryName: info.libraryName, primary, onnx, files: wanted };
-    writeFileSync(join(staging, META_FILE), JSON.stringify(meta, null, 2) + '\n');
+    writeFileSync(join(staging, HF_META_FILE), JSON.stringify(meta, null, 2) + '\n');
     rmSync(modelDir, { recursive: true, force: true });
     renameSync(staging, modelDir);
     return result(id, meta, false);
