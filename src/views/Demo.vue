@@ -54,7 +54,7 @@
             Demo Code
           </v-btn>
           <v-btn
-            href="https://github.com/menloresearch/isaac_asimov"
+            href="https://github.com/menloresearch/cyclotron"
             target="_blank"
             variant="text"
             size="small"

@@ -44,7 +44,7 @@ itself: `npm run hf Menlo/asimov1-locomotion-0818 -- --no-open`.
 ## Supported policies
 
 The viewer runs Asimov velocity-tracking policies with one fixed interface,
-the one `isaac_asimov` trains. A policy whose ONNX input or output size does
+the one `cyclotron` trains. A policy whose ONNX input or output size does
 not match is refused when it loads, with a message saying which size differs.
 
 **Output:** 23 joint position actions, in this order. The target for each
