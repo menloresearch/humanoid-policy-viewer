@@ -10,7 +10,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "benchmark": "node scripts/run-benchmark.mjs",
-    "test": "node --test src/simulation/ scripts/"
+    "test": "node --test \"src/simulation/**/*.test.js\" \"scripts/**/*.test.mjs\""
   },
   "dependencies": {
     "@fontsource/roboto": "5.2.5",
