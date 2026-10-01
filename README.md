@@ -19,12 +19,10 @@ policy can be tried without a GPU or a training stack.
 
 ## Quick start
 
-Run a policy from Hugging Face:
+Run a policy from Hugging Face use the format `npm run hf <model>`
 
+For Example:
 ```bash
-npm run hf <model>
-
-# example
 npm run hf Menlo/asimov1-locomotion-0818
 ```
 
