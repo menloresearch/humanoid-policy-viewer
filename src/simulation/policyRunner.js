@@ -1,6 +1,7 @@
 import * as ort from 'onnxruntime-web/wasm';
 import { ONNXModule } from './onnxHelper.js';
 import { Observations } from './observationHelpers.js';
+import { policyIOErrorMessage, policyIOErrors } from './policyIO.js';
 import { TrackingHelper } from './trackingHelper.js';
 import { toFloatArray } from './utils/math.js';
 
@@ -89,6 +90,18 @@ export class PolicyRunner {
 
   async init() {
     await this.module.init();
+    const { session, inKeys, outKeys } = this.module;
+    const ioErrors = policyIOErrors({
+      inputMetadata: session.inputMetadata,
+      outputMetadata: session.outputMetadata,
+      inputName: session.inputNames[inKeys.indexOf(this.inputKey)],
+      outputName: session.outputNames[outKeys.indexOf(this.outputKey)],
+      numObs: this.numObs,
+      numActions: this.numActions,
+    });
+    if (ioErrors.length) {
+      throw new Error(policyIOErrorMessage(ioErrors));
+    }
     this.reset();
   }
 
