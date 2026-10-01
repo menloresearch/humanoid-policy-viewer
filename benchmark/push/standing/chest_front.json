@@ -1,0 +1,40 @@
+{
+  "name": "push: chest front (standing)",
+  "duration": 12,
+  "commands": [
+    {
+      "t": 0,
+      "vx": 0,
+      "vy": 0,
+      "wz": 0
+    }
+  ],
+  "events": [
+    {
+      "t": 2,
+      "type": "push",
+      "dir": [
+        1,
+        0,
+        0
+      ],
+      "force": 250,
+      "duration": 0.15,
+      "targetBody": "waist_yaw_link",
+      "label": "chest front — reasonable (250N)"
+    },
+    {
+      "t": 8,
+      "type": "push",
+      "dir": [
+        1,
+        0,
+        0
+      ],
+      "force": 350,
+      "duration": 0.15,
+      "targetBody": "waist_yaw_link",
+      "label": "chest front — beyond (350N)"
+    }
+  ]
+}

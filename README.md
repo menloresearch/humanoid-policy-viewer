@@ -1,84 +1,125 @@
 # Humanoid Policy Viewer
 
-Single-page Vue 3 + Vuetify app that runs a MuJoCo WebAssembly scene in the
-browser and drives it with an ONNX policy. The default setup loads the G1
-scene, policy, and motion clips from `public/examples`.
+![The Asimov humanoid standing in the policy viewer, with velocity command sliders and the benchmark panel](docs/images/viewer.png)
 
-Demos: [Humanoid Policy Viewer](https://motion-tracking.axell.top/), [GentleHumanoid Web Demo](https://gentle-humanoid.axell.top/)
+A browser-based viewer and test bench for humanoid locomotion policies. It runs
+a MuJoCo WebAssembly simulation of the [Asimov](https://github.com/menloresearch/asimov-1)
+robot and drives it with an ONNX policy through onnxruntime-web, so a trained
+policy can be tried without a GPU or a training stack.
+
+- **Try a policy:** load one from Hugging Face with a single command, from a
+  local model library, or use the bundled example.
+- **Drive and stress it:** set velocity commands, push the robot, and change
+  friction, armature, gains, gravity and other physical parameters live.
+- **Score it:** run the `benchmark/` suite (locomotion, pushes, friction, long
+  walks) in the app or headless, and compare saved runs.
+- **Faithful setup:** the robot is the canonical `asimov-1` model, and each
+  policy's gains, action scale and torque limits are read from its training
+  `env.yaml`, so what you see matches how it was trained.
 
 ## Quick start
 
+Run a policy from Hugging Face use the format `npm run hf <model>`
+
+For Example:
 ```bash
-npm install
-npm run dev
+npm run hf Menlo/asimov1-locomotion-0818
 ```
+
+`<model>` is the Hugging Face repo id (`org/name`) or its URL. This works straight
+from a fresh clone: it installs dependencies, fetches the Asimov robot model,
+downloads the policy and opens the viewer with it selected. It needs Node, `git`
+and `bash`. See [Run a policy from Hugging Face](docs/huggingface.md).
+
+## Run local policies
+
+To run policies you have on disk, or to work on the viewer itself, set up once:
+
+```bash
+./scripts/init-asimov-1.sh   # fetch the Asimov robot model (sim-model/ only)
+npm ci                       # install dependencies exactly as locked
+npm run dev                  # start the viewer on the bundled example policy
+```
+
+Then open the printed URL. To add your own policy, put it in a folder under
+`models/` (git-ignored, and not built into `dist/`):
+
+```
+models/my-policy/
+├── policy.onnx
+├── env.yaml       the training run's gains, action scale and torque limits
+└── agent.yaml
+```
+
+It appears in the policy dropdown the next time the page loads. To serve
+checkpoints from somewhere else, see [Model library](docs/model-library.md).
+
+`npm run dev` listens on all network interfaces (it runs `vite --host`), so other
+machines on your network can reach it. Run `npx vite` instead to keep it on
+localhost, which is how `npm run hf` starts.
+
+## Where policies come from
+
+Every policy the viewer can run appears in its policy dropdown. There are three
+sources:
+
+| Source | Where the files are | How you get it |
+|---|---|---|
+| Bundled example | `public/examples/checkpoints/asimov/model_aug_18_1/`, in this repo | The default with `npm run dev` |
+| Hugging Face | `~/.cache/humanoid-policy-viewer/hf/<org>__<name>/`, outside the repo | `npm run hf <model>` |
+| Local folder | `models/<name>/` in this repo (git-ignored), or wherever `HPV_MODEL_LIBRARY_DIR` and `HPV_MODEL_ROOTS` point | Put the files there, then `npm run dev` |
+
+In every case the gains, action scale and torque limits come from the `env.yaml`
+next to the `.onnx`; see [Policy config](docs/policy-config.md). The robot is the
+same everywhere: the `asimov-1` submodule.
+
+## Docs
+
+| Topic | |
+|---|---|
+| [Run a policy from Hugging Face](docs/huggingface.md) | `npm run hf`: options, private repos, where downloads are cached |
+| [Policy config](docs/policy-config.md) | What `reference_policy_config.json` and a checkpoint's `env.yaml` each control, and which wins |
+| [Model library](docs/model-library.md) | Serving checkpoints from outside `public/` (`HPV_MODEL_*` variables) |
+| [Benchmarking](docs/benchmarking.md) | Running the `benchmark/` suite in the app or headless |
+| [Adding a robot](docs/adding-a-robot.md) | Bringing your own MJCF, policy and motion clips |
+| [Benchmark methodology](benchmark/METHODOLOGY.md) | How the test suite and its thresholds were chosen |
+| [Scenes](public/examples/scenes/README.md) | The `asimov-1` submodule and how actuators are added at load |
 
 ## Project structure
 
 - `src/views/Demo.vue` - UI controls for the live demo
-- `src/simulation/main.js` - bootstraps MuJoCo, Three.js renderer, and policy loop
+- `src/simulation/main.js` - bootstraps MuJoCo, Three.js renderer, policy loop, and metric sampling hook
 - `src/simulation/mujocoUtils.js` - scene/policy loading utilities and filesystem preloading
 - `src/simulation/policyRunner.js` - ONNX inference wrapper and observation pipeline
-- `node_modules/mujoco-js/` - MuJoCo wasm runtime (npm package)
-- `public/examples/scenes/` - MJCF files + meshes staged into MuJoCo's MEMFS
-- `public/examples/checkpoints/` - policy config JSON, ONNX file, and motion clips
-
-## Add your own robot, policy and motions
-
-1. Add your MJCF + assets.
-   - Create `public/examples/scenes/<robot>/`.
-   - Put your MJCF as `public/examples/scenes/<robot>/<robot>.xml`.
-   - Add all meshes/textures used by the MJCF into the same folder.
-   - Append every file path to `public/examples/scenes/files.json` so the
-     loader can preload them into `/working/` in the wasm filesystem.
-
-2. Add your policy config and ONNX.
-   - Create `public/examples/checkpoints/<robot>/tracking_policy.json`.
-   - Place the ONNX model at `public/examples/checkpoints/<robot>/tracking_policy.onnx`.
-   - In the JSON, make sure these fields are correct:
-     - `onnx.path` points to your ONNX file (example: `./examples/checkpoints/<robot>/tracking_policy.onnx`)
-     - `policy_joint_names` matches the joint names in your MJCF actuators
-     - `obs_config` uses observation names that exist in `src/simulation/observationHelpers.js`
-     - `action_scale`, `stiffness`, `damping`, and `default_joint_pos` lengths
-       match `policy_joint_names`
-   - You need to adapt the observation helper functions in
-     `src/simulation/observationHelpers.js` if your policy uses
-     different observations than the built-in ones, and modify `src/simulation/policyRunner.js` to control the robot.
-
-3. (Optional) Add tracking motions.
-   - Add an index at `public/examples/checkpoints/<robot>/motions.json`.
-   - Put per-motion clips in `public/examples/checkpoints/<robot>/motions/`.
-   - In `tracking_policy.json`, set `tracking.motions_path` to the index file.
-   - The app downloads all motion clips listed in the index when the policy loads.
-   - The index uses this shape:
-     - `format`: `tracking-motion-index-v1`
-     - `base_path`: relative path to the motions folder (example: `./motions`)
-     - `motions`: list of `{ name, file }` entries
-   - Each motion clip file must include a `default` clip overall and each clip contains:
-     - `joint_pos` (or `jointPos`): per-frame joint arrays
-     - `root_pos` (or `rootPos`): per-frame root positions
-     - `root_quat` (or `rootQuat`): per-frame root quaternions (w, x, y, z)
-
-4. Point the app to your robot and policy.
-   - Update `src/simulation/main.js`:
-     - `this.currentPolicyPath = './examples/checkpoints/<robot>/tracking_policy.json'`
-     - `await this.reloadScene('<robot>/<robot>.xml')`
-     - `await this.reloadPolicy('./examples/checkpoints/<robot>/tracking_policy.json')`
-
-If you want to keep multiple robots around, you can expose a selector in
-`src/views/Demo.vue` and call `demo.reloadScene(...)` and `demo.reloadPolicy(...)`
-from there.
+- `public/examples/scenes/` - MJCF files + meshes staged into MuJoCo's MEMFS; the Asimov robot is the `asimov-1/` git submodule
+- `public/examples/checkpoints/` - policy config JSON, bundled ONNX files, and motion clips
+- `scripts/` - `npm run hf`, the headless benchmark runner, and dev-server helpers
+- `benchmark/` - velocity-command and push test definitions
+- an optional [model library](docs/model-library.md) served by local Vite middleware under `/model-library/`
 
 ## License and acknowledgements
 
-Original code and author-created motions in this project, together with the
-author-trained policy weights at
-`public/examples/checkpoints/g1/policy_latest.onnx` are licensed under the
-[BSD 3-Clause License](LICENSE), copyright © 2026 Qingzhou Lu.
+This repository is a fork of `humanoid-policy-viewer` by
+[Qingzhou Lu (Axellwppr)](https://github.com/Axellwppr), a motion-tracking viewer for the Unitree G1, and still carries that viewer's G1
+scene and motion-tracking code. The upstream project's demos:
+[Humanoid Policy Viewer](https://motion-tracking.axell.top/),
+[GentleHumanoid Web Demo](https://gentle-humanoid.axell.top/).
 
-Third-party code, libraries, robot descriptions, meshes, and third-party motion data are
-not relicensed by this grant. They remain subject to their respective terms;
-see [Third-party notices](THIRD_PARTY_NOTICES.md) for sources and scope.
+Both the original project and Menlo Research's additions are licensed under the
+[BSD 3-Clause License](LICENSE):
+
+- **Original code**, author-created motions, and the author-trained policy
+  weights at `public/examples/checkpoints/g1/policy_latest.onnx` — copyright
+  © 2026 Qingzhou Lu.
+- **Menlo Research modifications** — changes made after upstream commit
+  `0490320`, including Asimov support, the benchmark suite, and Hugging Face
+  model loading — copyright © 2026 Menlo Research Pte. Ltd.
+
+Third-party code, libraries, robot descriptions, meshes, and third-party motion
+data are not relicensed by this grant. They remain subject to their respective
+terms; see [Third-party notices](THIRD_PARTY_NOTICES.md) for sources and scope.
+This includes the Asimov robot description in the `asimov-1` submodule, which is
+licensed under CERN-OHL-S-2.0.
 
 This viewer builds on MuJoCo, the MuJoCo WASM community, Three.js, ONNX Runtime,
 Vue, and Vuetify. We also thank Unitree Robotics and the creators of the motion

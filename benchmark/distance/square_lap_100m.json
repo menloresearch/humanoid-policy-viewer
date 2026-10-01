@@ -1,0 +1,16 @@
+{
+  "name": "long distance walking (100m square lap, 1/4-scale proxy for the physical 400m SOP)",
+  "duration": 180,
+  "commands": [
+    { "t": 0, "vx": 0, "vy": 0, "wz": 0 },
+    { "t": 0.3, "vx": 0.6, "vy": 0, "wz": 0 },
+    { "t": 41.967, "vx": 0, "vy": 0, "wz": 0.6 },
+    { "t": 44.585, "vx": 0.6, "vy": 0, "wz": 0 },
+    { "t": 86.252, "vx": 0, "vy": 0, "wz": 0.6 },
+    { "t": 88.87, "vx": 0.6, "vy": 0, "wz": 0 },
+    { "t": 130.537, "vx": 0, "vy": 0, "wz": 0.6 },
+    { "t": 133.155, "vx": 0.6, "vy": 0, "wz": 0 },
+    { "t": 174.822, "vx": 0, "vy": 0, "wz": 0.6 },
+    { "t": 177.44, "vx": 0, "vy": 0, "wz": 0 }
+  ]
+}

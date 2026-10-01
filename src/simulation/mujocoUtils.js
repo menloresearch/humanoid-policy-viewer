@@ -2,6 +2,9 @@ import * as THREE from 'three';
 import { Reflector } from './utils/Reflector.js';
 import { PolicyRunner } from './policyRunner.js';
 import { toFloatArray } from './utils/math.js';
+import { loadEnvPolicySettings } from './envPolicyConfig.js';
+import { setActiveCommandLimits } from './commandSequencer.js';
+import { applyTorqueLimits, withActuatorOverlay } from './sceneOverlay.js';
 
 const MOTION_INDEX_FORMAT = 'tracking-motion-index-v1';
 
@@ -111,8 +114,24 @@ export async function reloadScene(mjcf_path) {
   this.decimation = Math.max(1, Math.round(0.02 / this.timestep));
 }
 
+/**
+ * Swap in a new policy. The sim loop is held paused for the whole swap: joint
+ * mappings, gains and the action-delay buffers below are mutated in place, so a
+ * loop iteration landing mid-swap would step the old runner against the new
+ * mappings (or the new runner before its ONNX session exists). Callers that
+ * already pause are unaffected — the previous pause state is restored.
+ */
 export async function reloadPolicy(policy_path, options = {}) {
-  this.currentPolicyPath = policy_path;
+  const wasPaused = this.params?.paused ?? false;
+  if (this.params) this.params.paused = true;
+  try {
+    return await reloadPolicyUnguarded.call(this, policy_path, options);
+  } finally {
+    if (this.params) this.params.paused = wasPaused;
+  }
+}
+
+async function reloadPolicyUnguarded(policy_path, options = {}) {
   console.log('Reloading policy:', policy_path);
 
   while (this.policyRunner?.isInferencing) {
@@ -155,6 +174,17 @@ export async function reloadPolicy(policy_path, options = {}) {
     throw new Error('Policy configuration must include a non-empty policy_joint_names list');
   }
 
+  const envSettings = await loadEnvPolicySettings(config.onnx?.path, policyJointNames);
+  if (envSettings) Object.assign(config, envSettings);
+  setActiveCommandLimits(config.command_limits ?? null);
+  // Only commit to the new path once loading has gotten past every point
+  // that can throw above (bad URL, malformed config, missing joint names) —
+  // otherwise a failed reload would leave currentPolicyPath pointing at a
+  // policy that was never actually loaded, breaking a retry that trusts it.
+  this.currentPolicyPath = policy_path;
+  this.currentPolicyConfig = config;
+  this.currentOnnxPath = options?.onnxPath ?? null;
+
   configureJointMappings(this, policyJointNames);
   const configDefaultJointPos = Array.isArray(config.default_joint_pos)
     ? config.default_joint_pos
@@ -169,7 +199,29 @@ export async function reloadPolicy(policy_path, options = {}) {
   }
   this.kpPolicy = toFloatArray(config.stiffness, this.numActions, 0.0);
   this.kdPolicy = toFloatArray(config.damping, this.numActions, 0.0);
+  this.kdFfPolicy = Array.isArray(config.kd_ff) ? toFloatArray(config.kd_ff, this.numActions, 0.0) : null;
   this.control_type = config.control_type ?? 'joint_position';
+
+  if (!Array.isArray(config.torque_limit)) {
+    console.warn(`[torque] no effort_limit from env.yaml for ${config.onnx?.path ?? policy_path} — joint torque is unclamped`);
+  }
+  applyTorqueLimits(this.model, this.ctrl_adr_policy, Array.isArray(config.torque_limit) ? config.torque_limit : null);
+
+  const delayMinLag = typeof config.delay_min_lag === 'number' ? config.delay_min_lag : 0;
+  const delayMaxLag = typeof config.delay_max_lag === 'number' ? config.delay_max_lag : delayMinLag;
+  this.configureActionDelay(delayMinLag, delayMaxLag);
+
+  // Action LPF: one-pole filter at action_lpf_hz applied at policy_hz
+  this.filteredActionTarget = null;
+  const lpfHz = typeof config.action_lpf_hz === 'number' ? config.action_lpf_hz : 0;
+  const policyHz = typeof config.policy_hz === 'number' ? config.policy_hz : 50;
+  if (lpfHz > 0 && policyHz > 0) {
+    const dt = 1.0 / policyHz;
+    const rc = 1.0 / (2 * Math.PI * lpfHz);
+    this.actionLpfAlpha = dt / (rc + dt);
+  } else {
+    this.actionLpfAlpha = 1.0;
+  }
 
   if (trackingConfig) {
     trackingConfig.policy_joint_names = policyJointNames.slice();
@@ -177,7 +229,9 @@ export async function reloadPolicy(policy_path, options = {}) {
 
   this.simulation.resetData();
   this.simulation.forward();
-  this.policyRunner = new PolicyRunner(
+  // Build and initialize first, publish second: `main_loop` only ever sees a
+  // runner whose ONNX session is ready.
+  const policyRunner = new PolicyRunner(
     {
       ...config,
       tracking: trackingConfig,
@@ -191,7 +245,8 @@ export async function reloadPolicy(policy_path, options = {}) {
       defaultJointPos: this.defaultJposPolicy
     }
   );
-  await this.policyRunner.init();
+  await policyRunner.init();
+  this.policyRunner = policyRunner;
 
   const state = this.readPolicyState?.();
   if (state) {
@@ -211,7 +266,7 @@ export async function loadSceneFromURL(mujoco, filename, parent) {
     parent.data = null;
   }
 
-  const model = mujoco.MjModel.loadFromXML('/working/' + filename);
+  const model = mujoco.MjModel.loadFromXML('/working/' + withActuatorOverlay(mujoco, filename));
   const data = new mujoco.MjData(model);
   const simulation = createSimulationWrapper(mujoco, model, data);
 
@@ -256,7 +311,7 @@ export async function loadSceneFromURL(mujoco, filename, parent) {
       bodies[b].bodyID = b;
       bodies[b].has_custom_mesh = false;
 
-      if (bodies[b].name === 'base') {
+      if (bodies[b].name === 'base' || bodies[b].name === 'pelvis_link') {
         parent.pelvis_body_id = b;
       }
     }
@@ -618,6 +673,12 @@ function createSimulationWrapper(mujoco, model, data) {
     get qfrc_applied() { return data.qfrc_applied; },
     get xpos() { return data.xpos; },
     get xquat() { return data.xquat; },
+    // Per-body inertial-frame (true center of mass) position in world coords —
+    // unlike xpos (joint/frame origin), this accounts for each body's real
+    // <inertial pos=...> offset. Used to anchor scripted pushes at a point
+    // that's a genuine CoM but fixed relative to its body (not the
+    // pose-dependent whole-robot subtree_com).
+    get xipos() { return data.xipos; },
     get light_xpos() { return data.light_xpos; },
     get light_xdir() { return data.light_xdir; },
     get ten_wrapadr() { return model.ten_wrapadr; },

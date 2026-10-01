@@ -1,0 +1,279 @@
+{
+  "description": "Reference policy config for Asimov velocity policies: how the viewer wires an ONNX policy to the simulation (observation recipe, joint order, control rate, ONNX input shape) plus fallback values. Training artifacts next to a checkpoint (env.yaml) override the settings they record: stiffness, damping, action_scale, default_joint_pos, delay range, command limits and torque limits. stiffness, damping, action_scale, default_joint_pos and kd_ff here are leftovers from an older run and only used when no env.yaml is found. See docs/policy-config.md. onnx.path is the bundled example; catalog checkpoints replace it with their own .onnx.",
+  "onnx": {
+    "meta": {
+      "in_keys": [
+        "policy"
+      ],
+      "out_keys": [
+        "action"
+      ],
+      "in_shapes": [
+        [
+          [
+            1,
+            78
+          ]
+        ]
+      ]
+    },
+    "path": "./examples/checkpoints/asimov/model_aug_18_1/policy_isaaclab_new.onnx"
+  },
+  "obs_config": {
+    "policy": [
+      {
+        "name": "AsimovAngVel"
+      },
+      {
+        "name": "AsimovProjectedGravity"
+      },
+      {
+        "name": "AsimovCommand"
+      },
+      {
+        "name": "AsimovJointPosSlot",
+        "slot_name": "slot01",
+        "indices": [
+          0,
+          1,
+          6,
+          7,
+          12,
+          13,
+          14,
+          18,
+          19
+        ]
+      },
+      {
+        "name": "AsimovJointPosSlot",
+        "slot_name": "slot23",
+        "indices": [
+          2,
+          3,
+          8,
+          9,
+          15,
+          16,
+          20,
+          21
+        ]
+      },
+      {
+        "name": "AsimovJointPosSlot",
+        "slot_name": "slot45",
+        "indices": [
+          4,
+          5,
+          10,
+          11,
+          17,
+          22
+        ]
+      },
+      {
+        "name": "AsimovJointVelSlot",
+        "slot_name": "slot01",
+        "scale": 0.1,
+        "indices": [
+          0,
+          1,
+          6,
+          7,
+          12,
+          13,
+          14,
+          18,
+          19
+        ]
+      },
+      {
+        "name": "AsimovJointVelSlot",
+        "slot_name": "slot23",
+        "scale": 0.1,
+        "indices": [
+          2,
+          3,
+          8,
+          9,
+          15,
+          16,
+          20,
+          21
+        ]
+      },
+      {
+        "name": "AsimovJointVelSlot",
+        "slot_name": "slot45",
+        "scale": 0.1,
+        "indices": [
+          4,
+          5,
+          10,
+          11,
+          17,
+          22
+        ]
+      },
+      {
+        "name": "AsimovPrevActions"
+      }
+    ]
+  },
+  "policy_joint_names": [
+    "left_hip_pitch_joint",
+    "left_hip_roll_joint",
+    "left_hip_yaw_joint",
+    "left_knee_joint",
+    "left_ankle_pitch_joint",
+    "left_ankle_roll_joint",
+    "right_hip_pitch_joint",
+    "right_hip_roll_joint",
+    "right_hip_yaw_joint",
+    "right_knee_joint",
+    "right_ankle_pitch_joint",
+    "right_ankle_roll_joint",
+    "waist_yaw_joint",
+    "right_shoulder_pitch_joint",
+    "right_shoulder_roll_joint",
+    "right_shoulder_yaw_joint",
+    "right_elbow_joint",
+    "right_wrist_yaw_joint",
+    "left_shoulder_pitch_joint",
+    "left_shoulder_roll_joint",
+    "left_shoulder_yaw_joint",
+    "left_elbow_joint",
+    "left_wrist_yaw_joint"
+  ],
+  
+  "action_scale": [
+    0.18,
+    0.14,
+    0.14,
+    0.2,
+    0.16,
+    0.06,
+    0.18,
+    0.14,
+    0.14,
+    0.2,
+    0.16,
+    0.06,
+    0.12,
+    0.25,
+    0.18,
+    0.15,
+    0.1,
+    0.06,
+    0.25,
+    0.18,
+    0.15,
+    0.1,
+    0.06
+  ],
+  "stiffness": [
+    200,
+    200,
+    204.69,
+    250,
+    191.08,
+    191.08,
+    200,
+    200,
+    204.69,
+    250,
+    191.08,
+    191.08,
+    201.47,
+    100.45,
+    100,
+    100,
+    95.54,
+    95.54,
+    100.45,
+    100,
+    100,
+    95.54,
+    95.54
+  ],
+  "damping": [
+    15.0,
+    15.0,
+    15.0,
+    15.0,
+    12.16,
+    12.16,
+    15.0,
+    15.0,
+    15.0,
+    15.0,
+    12.16,
+    12.16,
+    15.0,
+    15.0,
+    5,
+    5.0,
+    6.08,
+    6.08,
+    15.0,
+    5,
+    5.0,
+    6.08,
+    6.08
+  ],
+  "kd_ff": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "default_joint_pos": [
+    -0.25,
+    0.0,
+    0.0,
+    0.5,
+    -0.25,
+    0.0,
+    0.25,
+    0.0,
+    0.0,
+    -0.5,
+    0.25,
+    0.0,
+    0.0,
+    0.25,
+    0.05,
+    0.0,
+    -0.4,
+    0.0,
+    -0.25,
+    -0.05,
+    0.0,
+    0.4,
+    0.0
+  ],
+  "control_type": "joint_position",
+  "delay_min_lag": 0,
+  "delay_max_lag": 5,
+  "action_lpf_hz": 1000,
+  "policy_hz": 50
+}

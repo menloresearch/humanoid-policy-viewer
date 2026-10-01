@@ -1,0 +1,66 @@
+{
+  "name": "push: left shoulder lateral sustained ramp (standing)",
+  "duration": 36,
+  "commands": [
+    {
+      "t": 0,
+      "vx": 0,
+      "vy": 0,
+      "wz": 0
+    }
+  ],
+  "events": [
+    {
+      "t": 2,
+      "type": "push",
+      "dir": [
+        0,
+        1,
+        0
+      ],
+      "force": 55,
+      "duration": 0.6,
+      "targetBody": "left_shoulder_pitch_link",
+      "label": "left shoulder lateral — sustained step 1 (55N, 0.6s)"
+    },
+    {
+      "t": 10,
+      "type": "push",
+      "dir": [
+        0,
+        1,
+        0
+      ],
+      "force": 95,
+      "duration": 0.6,
+      "targetBody": "left_shoulder_pitch_link",
+      "label": "left shoulder lateral — sustained step 2 (95N, 0.6s)"
+    },
+    {
+      "t": 18,
+      "type": "push",
+      "dir": [
+        0,
+        1,
+        0
+      ],
+      "force": 130,
+      "duration": 0.6,
+      "targetBody": "left_shoulder_pitch_link",
+      "label": "left shoulder lateral — sustained step 3 (130N, 0.6s)"
+    },
+    {
+      "t": 26,
+      "type": "push",
+      "dir": [
+        0,
+        1,
+        0
+      ],
+      "force": 170,
+      "duration": 0.6,
+      "targetBody": "left_shoulder_pitch_link",
+      "label": "left shoulder lateral — sustained step 4 (170N, 0.6s)"
+    }
+  ]
+}
