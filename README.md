@@ -17,7 +17,7 @@ policy can be tried without a GPU or a training stack.
   policy's gains, action scale and torque limits are read from its training
   `env.yaml`, so what you see matches how it was trained.
 
-To train your own policy, use [isaac_asimov](https://github.com/menloresearch/isaac_asimov).
+To train your own policy, use [cyclotron](https://github.com/menloresearch/cyclotron).
 See [Supported policies](docs/huggingface.md#supported-policies) for the
 inputs and outputs the viewer expects.
 
