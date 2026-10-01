@@ -41,6 +41,50 @@ itself: `npm run hf Menlo/asimov1-locomotion-0818 -- --no-open`.
   read it, but it records the training run.
 - `library_name: asimov` in the model card metadata.
 
+## Supported policies
+
+The viewer runs Asimov velocity-tracking policies with one fixed interface,
+the one `isaac_asimov` trains. A policy whose ONNX input or output size does
+not match is refused when it loads, with a message saying which size differs.
+
+**Output:** 23 joint position actions, in this order. The target for each
+joint is `default_joint_pos + action_scale * action`, with both read from
+`env.yaml`.
+
+```
+left_hip_pitch   left_hip_roll   left_hip_yaw   left_knee   left_ankle_pitch   left_ankle_roll
+right_hip_pitch  right_hip_roll  right_hip_yaw  right_knee  right_ankle_pitch  right_ankle_roll
+waist_yaw
+right_shoulder_pitch  right_shoulder_roll  right_shoulder_yaw  right_elbow  right_wrist_yaw
+left_shoulder_pitch   left_shoulder_roll   left_shoulder_yaw   left_elbow   left_wrist_yaw
+```
+
+**Input:** 78 values per step at 50 Hz, in this order:
+
+| Values | Observation | Scale |
+|---|---|---|
+| 3 | Base angular velocity (IMU gyro, body frame) | 0.25 |
+| 3 | Projected gravity (body frame) | 1 |
+| 3 | Velocity command `vx, vy, wz` | 1 |
+| 23 | Joint positions relative to `default_joint_pos`, in motor-slot order (below) | 1 |
+| 23 | Joint velocities, in motor-slot order | 0.1 |
+| 23 | Previous action, in the output order above | 1 |
+
+Joint positions and velocities are grouped by motor slot rather than in the
+output order. Each group lists output indices from the order above:
+
+| Slot | Output indices |
+|---|---|
+| 0-1 | 0, 1, 6, 7, 12, 13, 14, 18, 19 |
+| 2-3 | 2, 3, 8, 9, 15, 16, 20, 21 |
+| 4-5 | 4, 5, 10, 11, 17, 22 |
+
+The recipe lives in `public/examples/checkpoints/asimov/reference_policy_config.json`
+and is not read from `env.yaml` yet, so a policy trained on a different
+recipe of the same size would load but behave wrongly. Base linear velocity,
+foot contacts and other quantities the real robot cannot measure are not
+inputs; a policy that needs them has to estimate them inside the ONNX.
+
 ## Checks
 
 After downloading, the script checks the repo the way model-checkpoint's CI gate
@@ -59,6 +103,11 @@ before the dev server starts; the download stays cached. When everything passes
 it prints `Checked env.yaml and agent.yaml: OK`. Unlike the CI gate, a
 checkpoint's own `tracking_policy.json` is not consulted: the joint list always
 comes from `reference_policy_config.json`.
+
+When the viewer loads the policy, it also checks the ONNX model's input and
+output sizes against the [supported interface](#supported-policies) (78 in,
+23 out). A mismatch is shown as an error in the policy panel and the policy is
+not run.
 
 ## Where downloads go
 
