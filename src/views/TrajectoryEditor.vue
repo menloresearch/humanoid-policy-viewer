@@ -394,7 +394,7 @@ export default {
     async openSaved(fileName) {
       try {
         const seq = await loadSequenceFile(fileName);
-        appState.editorSequence = JSON.parse(JSON.stringify(seq));
+        appState.editorSequence = { ...JSON.parse(JSON.stringify(seq)), _savedLimits: !!seq.limits };
         appState.editorFile = fileName;
         this.file = fileName;
         this.durationInput = this.working.duration;
@@ -407,14 +407,19 @@ export default {
       }
     },
     buildClean() {
+      const limits = {
+        vx: [...this.working.limits.vx],
+        vy: [...this.working.limits.vy],
+        wz: [...this.working.limits.wz]
+      };
+      // A test's own limits override every policy's trained command range, so
+      // only save them when the test had them or they were changed here; the
+      // defaults ensureLimits() fills in for editing must not be baked in.
+      const changed = JSON.stringify(limits) !== JSON.stringify(defaultLimits());
       const clean = {
         name: this.working.name || 'sequence',
         duration: Number(this.working.duration),
-        limits: {
-          vx: [...this.working.limits.vx],
-          vy: [...this.working.limits.vy],
-          wz: [...this.working.limits.wz]
-        },
+        ...(this.working._savedLimits || changed ? { limits } : {}),
         commands: this.working.commands.map((c) => ({
           t: Math.round(c.t * 1000) / 1000,
           vx: Math.round((c.vx ?? 0) * 1000) / 1000,
@@ -448,9 +453,17 @@ export default {
           }
           // Which body the force/torque applies to (default: pelvis).
           if (typeof ev.targetBody === 'string' && ev.targetBody) out.targetBody = ev.targetBody;
+          // Kept as loaded: the label shown in reports and the benchmark tier.
+          if (typeof ev.label === 'string' && ev.label) out.label = ev.label;
+          if (ev.tier === 'reasonable' || ev.tier === 'beyond') out.tier = ev.tier;
           return out;
         });
       }
+      // Test settings the editor has no controls for are kept as loaded.
+      if (Number.isFinite(Number(this.working.footFriction)) && this.working.footFriction !== null) {
+        clean.footFriction = Number(this.working.footFriction);
+      }
+      if (this.working.gaitSymmetry === true) clean.gaitSymmetry = true;
       return clean;
     },
     async save() {

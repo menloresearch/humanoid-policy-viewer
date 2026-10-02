@@ -5,15 +5,18 @@
   "version": "0.0.0",
   "license": "BSD-3-Clause",
   "scripts": {
-    "dev": "vite --host",
+    "dev": "node scripts/dev.mjs",
     "hf": "node scripts/run-hf-model.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "benchmark": "node scripts/run-benchmark.mjs",
-    "test": "node --test \"src/simulation/**/*.test.js\" \"scripts/**/*.test.mjs\""
+    "benchmark:golden": "node scripts/check-golden.mjs",
+    "suite": "node scripts/suite.mjs",
+    "test": "node --test \"src/**/*.test.js\" \"scripts/**/*.test.mjs\""
   },
   "dependencies": {
     "@fontsource/roboto": "5.2.5",
+    "@huggingface/hub": "^2.17.5",
     "@mdi/font": "7.4.47",
     "chart.js": "^4.4.9",
     "katex": "^0.13.24",
@@ -26,7 +29,8 @@
     "vue-chartjs": "^5.3.2",
     "vue-mathjax": "^0.0.11",
     "vue-mathjax-next": "^0.0.6",
-    "vuetify": "^3.8.1"
+    "vuetify": "^3.8.1",
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@playwright/test": "^1.48.0",

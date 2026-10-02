@@ -12,6 +12,8 @@ import { dirname, extname, relative, resolve } from 'node:path'
 import { listModelRoots, listModels as discoverModels } from './scripts/modelDiscovery.mjs'
 import { getBenchmarkRunsDir, getModelLibrary } from './scripts/modelLibraryConfig.mjs'
 import { listSequenceEntries } from './scripts/sequenceCatalog.mjs'
+import { readRows, writeRows } from './scripts/suiteDir.mjs'
+import { rowToSequence, sequenceToRow } from './src/benchmark/testRow.js'
 
 // A submodule checked out under public/ carries a `.git` pointer file that
 // must not be deployed along with the scene assets.
@@ -205,6 +207,9 @@ function humanoidDevPlugin() {
         }
         // Which body the force/torque applies to (default: pelvis).
         if (typeof ev.targetBody === 'string' && ev.targetBody) clean_ev.targetBody = ev.targetBody;
+        // The report label and the benchmark tier (reasonable / beyond).
+        if (typeof ev.label === 'string' && ev.label) clean_ev.label = ev.label;
+        if (ev.tier === 'reasonable' || ev.tier === 'beyond') clean_ev.tier = ev.tier;
         events.push(clean_ev);
       }
       if (events.length) {
@@ -212,7 +217,58 @@ function humanoidDevPlugin() {
         clean.events = events;
       }
     }
+    // Per-test floor grip and the gait-symmetry opt-in; saving must keep them.
+    const footFriction = Number(parsed.footFriction);
+    if (parsed.footFriction !== undefined && parsed.footFriction !== null) {
+      if (!Number.isFinite(footFriction) || footFriction <= 0) throw new Error('"footFriction" must be a number > 0');
+      clean.footFriction = round3(footFriction);
+    }
+    if (parsed.gaitSymmetry === true) clean.gaitSymmetry = true;
     return clean;
+  }
+
+  // ---- Benchmark dataset working copy (HPV_SUITE_DIR) ----
+  // `npm run dev suite=<dir>` points the editor at a benchmark dataset (see
+  // scripts/suiteDir.mjs): each row of data/<config>/test.jsonl shows up as
+  // "<config>/<name>.json" and saving writes the row back.
+  const SUITE_DIR = process.env.HPV_SUITE_DIR ? resolve(process.env.HPV_SUITE_DIR) : null;
+  const rowFile = (row) => `${row.id}.json`;
+
+  function suiteEntries() {
+    return readRows(SUITE_DIR).rows.map((row) => ({
+      file: rowFile(row),
+      folder: row.config,
+      name: row.name,
+      duration: row.duration,
+      keypointCount: row.commands.length,
+      eventCount: row.events.length,
+    })).sort((a, b) => a.file.localeCompare(b.file));
+  }
+
+  function handleSuiteSequences(req, res, file, parsed) {
+    const { rows } = readRows(SUITE_DIR);
+    const id = file?.replace(/\.json$/, '');
+    const index = rows.findIndex((row) => row.id === id);
+    if (req.method === 'GET') {
+      if (index < 0) return sendJson(res, 404, { error: 'Not found' });
+      return sendJson(res, 200, rowToSequence(rows[index]));
+    }
+    if (req.method === 'PUT') {
+      if (!/^[a-z0-9][a-z0-9_]*\/[a-z0-9][a-z0-9_.-]*$/.test(id)) {
+        return sendJson(res, 400, { error: 'In a benchmark dataset a test is saved as <config>/<name>, lower case' });
+      }
+      const row = sequenceToRow(id, parsed, index >= 0 ? rows[index] : null);
+      if (index >= 0) rows[index] = row; else rows.push(row);
+      writeRows(SUITE_DIR, rows.filter((r) => r.config === row.config));
+      return sendJson(res, 200, { ok: true, file, entry: suiteEntries().find((f) => f.file === file) });
+    }
+    if (req.method === 'DELETE') {
+      if (index < 0) return sendJson(res, 404, { error: 'Not found' });
+      const [removed] = rows.splice(index, 1);
+      writeRows(SUITE_DIR, rows.filter((r) => r.config === removed.config), { configs: [removed.config] });
+      return sendJson(res, 200, { ok: true, file });
+    }
+    return sendJson(res, 405, { error: 'Method not allowed' });
   }
 
   function walkJson(dir, prefix, onFile) {
@@ -238,11 +294,24 @@ function humanoidDevPlugin() {
     const file = url.searchParams.get('file');
     try {
       if (req.method === 'GET' && !file) {
-        sendJson(res, 200, { files: listSequences() });
+        sendJson(res, 200, { files: SUITE_DIR ? suiteEntries() : listSequences() });
         return;
       }
       if (file && !FILENAME_RE.test(file)) {
         sendJson(res, 400, { error: 'Invalid filename (use letters, digits, _ , - and .json)' });
+        return;
+      }
+      if (SUITE_DIR) {
+        let parsed = null;
+        if (req.method === 'PUT') {
+          try {
+            parsed = validateSequence(await readRequestJson(req));
+          } catch (e) {
+            sendJson(res, 400, { error: e.message });
+            return;
+          }
+        }
+        handleSuiteSequences(req, res, file, parsed);
         return;
       }
       const filePath = file ? resolve(SEQ_DIR, file) : null;

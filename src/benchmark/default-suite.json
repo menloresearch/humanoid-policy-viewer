@@ -1,0 +1,5 @@
+{
+  "description": "The benchmark dataset `npm run benchmark` uses when no suite is given. Bump the revision (a release tag or commit) in its own commit when a new suite version is released.",
+  "dataset": "menloresearch/asimov-locomotion-bench",
+  "revision": null
+}

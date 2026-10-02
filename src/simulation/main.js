@@ -544,13 +544,30 @@ export class MuJoCoDemo {
     this.resetActionDelay();
   }
 
+  /**
+   * Seeded randomisation for benchmark repeats, or null for none (the default).
+   * `{ random, actionDelay: 'midpoint' | 'env_range', initialJointNoiseRad }`,
+   * where `random()` is a seeded generator returning [0, 1). It is read by
+   * resetSimulation(), so set it before the reset that starts a test.
+   */
+  setBenchmarkRandomization(randomization) {
+    this.benchmarkRandomization = randomization ?? null;
+  }
+
   resetActionDelay(seedTarget = null) {
     const span = this.actionDelayMaxLag - this.actionDelayMinLag + 1;
-    // Pin a fixed, reproducible "typical" lag (the midpoint of the policy's
-    // configured delay range) instead of drawing one — a random draw here was
-    // the sole source of run-to-run flakiness in push-threshold results near a
-    // policy's actual capability boundary (see benchmark/VARIANCE_ANALYSIS.md).
-    this.actionDelayLag = this.actionDelayMinLag + Math.floor((span - 1) / 2);
+    const randomization = this.benchmarkRandomization;
+    if (randomization?.actionDelay === 'env_range') {
+      // A benchmark repeat draws the lag from the env.yaml range with its own
+      // seeded generator, so every repeat is reproducible from its seed.
+      this.actionDelayLag = this.actionDelayMinLag + Math.floor(randomization.random() * span);
+    } else {
+      // Pin a fixed, reproducible "typical" lag (the midpoint of the policy's
+      // configured delay range) instead of drawing one — an unseeded draw here
+      // was the sole source of run-to-run flakiness in push-threshold results
+      // near a policy's actual capability boundary.
+      this.actionDelayLag = this.actionDelayMinLag + Math.floor((span - 1) / 2);
+    }
     this.actionDelayBuffer = [];
     if (seedTarget && this.actionDelayLag > 0) {
       for (let i = 0; i < this.actionDelayLag; i++) {
@@ -605,290 +622,38 @@ export class MuJoCoDemo {
     this.camera.position.add(this.followDelta);
   }
 
-  async main_loop() {
+  /**
+   * Starts the real-time loop, unless one is already running, in which case its
+   * promise is returned. Callers restart the loop with `alive = false ... alive
+   * = true; main_loop()`; if the old loop was still asleep, that used to leave
+   * two loops stepping the same sim at twice the speed.
+   */
+  main_loop() {
     if (!this.policyRunner) {
-      return;
+      return Promise.resolve();
     }
+    if (!this._loopPromise) {
+      this._loopPromise = this._runLoop().finally(() => {
+        this._loopPromise = null;
+      });
+    }
+    return this._loopPromise;
+  }
 
+  /** Stops the real-time loop and waits until its in-flight tick has finished. */
+  async stopMainLoop() {
+    this.alive = false;
+    await this._loopPromise;
+  }
+
+  async _runLoop() {
     while (this.alive) {
       const loopStart = performance.now();
 
       if (!this.params.paused && this.model && this.data && this.simulation && this.policyRunner) {
-        // Advance command playback/recording clock by one policy tick,
-        // before observations are read so the command applies this tick
-        commandSequencer.tick(this.timestep * this.decimation);
-
-        // Integrate the idealized command path and sample both traces. Uses the
-        // same command the policy sees this tick; CoM is read from raw MjData.
-        {
-          const com = this.data?.subtree_com;
-          this.idealPath.update(
-            asimovCommandState,
-            this.timestep * this.decimation,
-            com ? { x: com[0], y: com[1] } : null
-          );
+        if (!(await this.stepPolicyTick())) {
+          break;
         }
-
-        // Tumble/fall detection BEFORE policy inference
-        const gyroMag = Math.abs(this.simulation.qvel[3] || 0)
-                      + Math.abs(this.simulation.qvel[4] || 0)
-                      + Math.abs(this.simulation.qvel[5] || 0);
-
-        // Compute projected gravity z in body frame from quaternion
-        // quat = [w, x, y, z] at qpos[3:7]
-        const qw = this.simulation.qpos[3], qx = this.simulation.qpos[4];
-        const qy = this.simulation.qpos[5], qz = this.simulation.qpos[6];
-        // gravity_z_body = R^T * [0,0,-1] dot [0,0,1] = -(1 - 2(qx²+qy²))
-        const gravZ = -(1.0 - 2.0 * (qx * qx + qy * qy));
-
-        // Fall detection: gravity_z > -0.866 means >30° tilt → DAMP mode
-        if (gravZ > -0.166) this._tumbling = true;
-
-        if (this._tumbling) {
-          // DAMP mode: skip policy, hold current positions with KP=10 KD=3
-          if (!this.actionTarget) {
-            this.actionTarget = new Float32Array(this.numActions);
-          }
-          for (let i = 0; i < this.numActions; i++) {
-            const qpos_adr = this.qpos_adr_policy[i];
-            this.actionTarget[i] = this.simulation.qpos[qpos_adr];
-          }
-          if (this.filteredActionTarget) {
-            this.filteredActionTarget.set(this.actionTarget);
-          } else {
-            this.filteredActionTarget = new Float32Array(this.actionTarget);
-          }
-        } else {
-          // Normal mode: run policy
-          const state = this.readPolicyState();
-          try {
-            this.actionTarget = await this.policyRunner.step(state);
-          } catch (e) {
-            console.error('Inference error in main loop:', e);
-            this.alive = false;
-            break;
-          }
-
-          // Track raw action magnitudes — DAMP if any action saturates
-          if (this.actionTarget) {
-            this.rawActions = this.actionTarget;
-            let maxAbs = 0;
-            for (let i = 0; i < this.actionTarget.length; i++) {
-              const abs = Math.abs(this.actionTarget[i]);
-              if (abs > maxAbs) maxAbs = abs;
-            }
-            this.maxRawAction = maxAbs;
-            if (maxAbs > 100.0) this._tumbling = true;
-          }
-
-          // Jitter computation at policy rate (50Hz) — 3rd finite difference (jerk)
-          // From arXiv:2603.16180: |x_t - 3x_{t-1} + 3x_{t-2} - x_{t-3}| / dt³
-          {
-            const policyDt = this.timestep * this.decimation;
-            const dt3 = policyDt * policyDt * policyDt;
-
-            // Initialize jitter buffers
-            if (!this._jitterActionHist) {
-              this._jitterActionHist = [];
-              this._jitterVelHist = [];
-              this._jitterTorqueHist = [];
-              this._jitterAccum = { action: 0, vel: 0, torque: 0, count: 0 };
-            }
-
-            // Capture current values
-            const nAct = this.numActions || 0;
-            const curAction = this.actionTarget ? Array.from(this.actionTarget) : null;
-            const nv = this.model?.nv || 0;
-            const curVel = nv > 6 ? Array.from(this.simulation.qvel).slice(6, 6 + nAct) : null;
-            const curTorque = this.simulation.ctrl ? Array.from(this.simulation.ctrl).slice(0, nAct) : null;
-
-            this._jitterActionHist.push(curAction);
-            this._jitterVelHist.push(curVel);
-            this._jitterTorqueHist.push(curTorque);
-
-            // Keep only last 4
-            if (this._jitterActionHist.length > 4) this._jitterActionHist.shift();
-            if (this._jitterVelHist.length > 4) this._jitterVelHist.shift();
-            if (this._jitterTorqueHist.length > 4) this._jitterTorqueHist.shift();
-
-            // Compute jerk if 4 frames available
-            if (this._jitterActionHist.length === 4 && this._jitterActionHist[0]) {
-              const jerk = (hist) => {
-                if (!hist[0] || !hist[1] || !hist[2] || !hist[3]) return 0;
-                let sum = 0;
-                for (let i = 0; i < hist[0].length; i++) {
-                  sum += Math.abs(hist[3][i] - 3*hist[2][i] + 3*hist[1][i] - hist[0][i]) / dt3;
-                }
-                return sum / hist[0].length;
-              };
-              this._jitterAccum.action += jerk(this._jitterActionHist);
-              this._jitterAccum.vel += jerk(this._jitterVelHist);
-              this._jitterAccum.torque += jerk(this._jitterTorqueHist);
-              this._jitterAccum.count++;
-            }
-
-            // Expose averaged jitter (reset every 50 steps = 1 second)
-            if (this._jitterAccum.count >= 50) {
-              const c = this._jitterAccum.count;
-              this.jitterMetrics = {
-                action: this._jitterAccum.action / c,
-                vel: this._jitterAccum.vel / c,
-                torque: this._jitterAccum.torque / c,
-              };
-              this._jitterAccum = { action: 0, vel: 0, torque: 0, count: 0 };
-            }
-          }
-
-          // Apply one-pole LPF on action targets if configured
-          if (this.actionTarget) {
-            if (!this.filteredActionTarget) {
-              this.filteredActionTarget = new Float32Array(this.actionTarget);
-            } else {
-              const alpha = this.actionLpfAlpha;
-              for (let i = 0; i < this.numActions; i++) {
-                this.filteredActionTarget[i] = alpha * this.actionTarget[i] + (1 - alpha) * this.filteredActionTarget[i];
-              }
-            }
-          }
-        }
-
-        for (let substep = 0; substep < this.decimation; substep++) {
-          const sourceTarget = this.filteredActionTarget ?? this.actionTarget;
-          const delayedActionTarget = this._tumbling
-            ? sourceTarget
-            : this.getDelayedActionTarget(sourceTarget);
-
-          if (this.control_type === 'joint_position') {
-            for (let i = 0; i < this.numActions; i++) {
-              const qpos_adr = this.qpos_adr_policy[i];
-              const qvel_adr = this.qvel_adr_policy[i];
-              const ctrl_adr = this.ctrl_adr_policy[i];
-
-              const targetJpos = delayedActionTarget ? delayedActionTarget[i] : 0.0;
-              const kp = this._tumbling ? 10.0 : (this.kpPolicy ? this.kpPolicy[i] : 0.0);
-              const vel = this.simulation.qvel[qvel_adr];
-
-              // When feedforward damping is configured, split kd into kd_hw and kd_ff
-              const hasFf = this.kdFfPolicy !== null && this.kdFfPolicy !== undefined;
-              const kd = this._tumbling ? 3.0 : (this.kdPolicy ? this.kdPolicy[i] : 0.0);
-              const kd_hw = this._tumbling ? 3.0 : (hasFf ? Math.min(kd, 5.0) : kd);
-              let torque = kp * (targetJpos - this.simulation.qpos[qpos_adr]) + kd_hw * (0 - vel);
-
-              // Feedforward damping (only when kd_ff array is provided, skip in DAMP mode)
-              if (hasFf && !this._tumbling) {
-                const kd_ff = this.kdFfPolicy[i] ?? 0.0;
-                if (kd_ff > 0) {
-                  const tau_ff = Math.max(-30, Math.min(30, -kd_ff * vel));
-                  torque += tau_ff;
-                }
-              }
-
-              let ctrlValue = torque;
-              const ctrlRange = this.model?.actuator_ctrlrange;
-              if (ctrlRange && ctrlRange.length >= (ctrl_adr + 1) * 2) {
-                const min = ctrlRange[ctrl_adr * 2];
-                const max = ctrlRange[(ctrl_adr * 2) + 1];
-                if (Number.isFinite(min) && Number.isFinite(max) && min < max) {
-                  ctrlValue = Math.min(Math.max(ctrlValue, min), max);
-                }
-              }
-              this.simulation.ctrl[ctrl_adr] = ctrlValue;
-            }
-          } else if (this.control_type === 'torque') {
-            console.error('Torque control not implemented yet.');
-          }
-
-          const applied = this.simulation.qfrc_applied;
-          for (let i = 0; i < applied.length; i++) {
-            applied[i] = 0.0;
-          }
-          const dragged = this.dragStateManager.physicsObject;
-          if (!dragged || !dragged.bodyID) {
-            this.lastDragForce = 0;
-          }
-          if (dragged && dragged.bodyID) {
-            for (let b = 0; b < this.model.nbody; b++) {
-              if (this.bodies[b]) {
-                getPosition(this.simulation.xpos, b, this.bodies[b].position);
-                getQuaternion(this.simulation.xquat, b, this.bodies[b].quaternion);
-                this.bodies[b].updateWorldMatrix();
-              }
-            }
-            const bodyID = dragged.bodyID;
-            this.dragStateManager.update();
-            const force = toMujocoPos(
-              this.dragStateManager.currentWorld.clone()
-                .sub(this.dragStateManager.worldHit)
-                .multiplyScalar(60.0)
-            );
-            // clamp force magnitude
-            const forceMagnitude = Math.sqrt(force.x * force.x + force.y * force.y + force.z * force.z);
-            const maxForce = 50.0;
-            if (forceMagnitude > maxForce) {
-              const scale = maxForce / forceMagnitude;
-              force.x *= scale;
-              force.y *= scale;
-              force.z *= scale;
-            }
-            this.lastDragForce = Math.min(forceMagnitude, maxForce);
-            const point = toMujocoPos(this.dragStateManager.worldHit.clone());
-            this.simulation.applyForce(force.x, force.y, force.z, 0, 0, 0, point.x, point.y, point.z, bodyID);
-          }
-
-          // Click-to-push and scripted (JSON) pushes: apply each active push's
-          // force (and torque, if any — click-to-push/drag entries never set
-          // one, so this falls back to zero for them) for its remaining
-          // substeps, then drop it once exhausted.
-          for (let i = this._activePushes.length - 1; i >= 0; i--) {
-            const p = this._activePushes[i];
-            const tq = p.torque || { x: 0, y: 0, z: 0 };
-            this.simulation.applyForce(p.force.x, p.force.y, p.force.z, tq.x, tq.y, tq.z, p.point.x, p.point.y, p.point.z, p.bodyID);
-            p.stepsLeft--;
-            if (p.stepsLeft <= 0) this._activePushes.splice(i, 1);
-          }
-
-          this.simulation.step();
-        }
-
-        for (const runner of this.__simMetricsRecorders) {
-          runner.captureFrame();
-        }
-
-        for (let b = 0; b < this.model.nbody; b++) {
-          if (!this.bodies[b]) {
-            continue;
-          }
-          if (!this.lastSimState.bodies.has(b)) {
-            this.lastSimState.bodies.set(b, {
-              position: new THREE.Vector3(),
-              quaternion: new THREE.Quaternion()
-            });
-          }
-          const cached = this.lastSimState.bodies.get(b);
-          getPosition(this.simulation.xpos, b, cached.position);
-          getQuaternion(this.simulation.xquat, b, cached.quaternion);
-        }
-
-        const numLights = this.model.nlight;
-        for (let l = 0; l < numLights; l++) {
-          if (!this.lights[l]) {
-            continue;
-          }
-          if (!this.lastSimState.lights.has(l)) {
-            this.lastSimState.lights.set(l, {
-              position: new THREE.Vector3(),
-              direction: new THREE.Vector3()
-            });
-          }
-          const cached = this.lastSimState.lights.get(l);
-          getPosition(this.simulation.light_xpos, l, cached.position);
-          getPosition(this.simulation.light_xdir, l, cached.direction);
-        }
-
-        this.lastSimState.tendons.numWraps = {
-          count: this.model.nwrap,
-          matrix: this.lastSimState.tendons.matrix
-        };
 
         this._stepFrameCount += 1;
         const now = performance.now();
@@ -910,6 +675,292 @@ export class MuJoCoDemo {
       const sleepTime = Math.max(0, target - elapsed);
       await new Promise((resolve) => setTimeout(resolve, sleepTime * 1000));
     }
+  }
+
+  /**
+   * Advances the sim by exactly one policy tick: the command clock, one policy
+   * inference and `decimation` physics substeps. The real-time loop calls it
+   * once per iteration; a benchmark run stops that loop and calls it itself, so
+   * a test is always the same number of ticks however fast the machine is.
+   * Returns false if inference failed (and sets `alive = false`).
+   */
+  async stepPolicyTick() {
+    // Advance command playback/recording clock by one policy tick,
+    // before observations are read so the command applies this tick
+    commandSequencer.tick(this.timestep * this.decimation);
+
+    // Integrate the idealized command path and sample both traces. Uses the
+    // same command the policy sees this tick; CoM is read from raw MjData.
+    {
+      const com = this.data?.subtree_com;
+      this.idealPath.update(
+        asimovCommandState,
+        this.timestep * this.decimation,
+        com ? { x: com[0], y: com[1] } : null
+      );
+    }
+
+    // Tumble/fall detection BEFORE policy inference
+    const gyroMag = Math.abs(this.simulation.qvel[3] || 0)
+                  + Math.abs(this.simulation.qvel[4] || 0)
+                  + Math.abs(this.simulation.qvel[5] || 0);
+
+    // Compute projected gravity z in body frame from quaternion
+    // quat = [w, x, y, z] at qpos[3:7]
+    const qw = this.simulation.qpos[3], qx = this.simulation.qpos[4];
+    const qy = this.simulation.qpos[5], qz = this.simulation.qpos[6];
+    // gravity_z_body = R^T * [0,0,-1] dot [0,0,1] = -(1 - 2(qx²+qy²))
+    const gravZ = -(1.0 - 2.0 * (qx * qx + qy * qy));
+
+    // Fall detection: gravity_z > -0.866 means >30° tilt → DAMP mode
+    if (gravZ > -0.166) this._tumbling = true;
+
+    if (this._tumbling) {
+      // DAMP mode: skip policy, hold current positions with KP=10 KD=3
+      if (!this.actionTarget) {
+        this.actionTarget = new Float32Array(this.numActions);
+      }
+      for (let i = 0; i < this.numActions; i++) {
+        const qpos_adr = this.qpos_adr_policy[i];
+        this.actionTarget[i] = this.simulation.qpos[qpos_adr];
+      }
+      if (this.filteredActionTarget) {
+        this.filteredActionTarget.set(this.actionTarget);
+      } else {
+        this.filteredActionTarget = new Float32Array(this.actionTarget);
+      }
+    } else {
+      // Normal mode: run policy
+      const state = this.readPolicyState();
+      try {
+        this.actionTarget = await this.policyRunner.step(state);
+      } catch (e) {
+        console.error('Inference error in main loop:', e);
+        this.alive = false;
+        return false;
+      }
+
+      // Track raw action magnitudes — DAMP if any action saturates
+      if (this.actionTarget) {
+        this.rawActions = this.actionTarget;
+        let maxAbs = 0;
+        for (let i = 0; i < this.actionTarget.length; i++) {
+          const abs = Math.abs(this.actionTarget[i]);
+          if (abs > maxAbs) maxAbs = abs;
+        }
+        this.maxRawAction = maxAbs;
+        if (maxAbs > 100.0) this._tumbling = true;
+      }
+
+      // Jitter computation at policy rate (50Hz) — 3rd finite difference (jerk)
+      // From arXiv:2603.16180: |x_t - 3x_{t-1} + 3x_{t-2} - x_{t-3}| / dt³
+      {
+        const policyDt = this.timestep * this.decimation;
+        const dt3 = policyDt * policyDt * policyDt;
+
+        // Initialize jitter buffers
+        if (!this._jitterActionHist) {
+          this._jitterActionHist = [];
+          this._jitterVelHist = [];
+          this._jitterTorqueHist = [];
+          this._jitterAccum = { action: 0, vel: 0, torque: 0, count: 0 };
+        }
+
+        // Capture current values
+        const nAct = this.numActions || 0;
+        const curAction = this.actionTarget ? Array.from(this.actionTarget) : null;
+        const nv = this.model?.nv || 0;
+        const curVel = nv > 6 ? Array.from(this.simulation.qvel).slice(6, 6 + nAct) : null;
+        const curTorque = this.simulation.ctrl ? Array.from(this.simulation.ctrl).slice(0, nAct) : null;
+
+        this._jitterActionHist.push(curAction);
+        this._jitterVelHist.push(curVel);
+        this._jitterTorqueHist.push(curTorque);
+
+        // Keep only last 4
+        if (this._jitterActionHist.length > 4) this._jitterActionHist.shift();
+        if (this._jitterVelHist.length > 4) this._jitterVelHist.shift();
+        if (this._jitterTorqueHist.length > 4) this._jitterTorqueHist.shift();
+
+        // Compute jerk if 4 frames available
+        if (this._jitterActionHist.length === 4 && this._jitterActionHist[0]) {
+          const jerk = (hist) => {
+            if (!hist[0] || !hist[1] || !hist[2] || !hist[3]) return 0;
+            let sum = 0;
+            for (let i = 0; i < hist[0].length; i++) {
+              sum += Math.abs(hist[3][i] - 3*hist[2][i] + 3*hist[1][i] - hist[0][i]) / dt3;
+            }
+            return sum / hist[0].length;
+          };
+          this._jitterAccum.action += jerk(this._jitterActionHist);
+          this._jitterAccum.vel += jerk(this._jitterVelHist);
+          this._jitterAccum.torque += jerk(this._jitterTorqueHist);
+          this._jitterAccum.count++;
+        }
+
+        // Expose averaged jitter (reset every 50 steps = 1 second)
+        if (this._jitterAccum.count >= 50) {
+          const c = this._jitterAccum.count;
+          this.jitterMetrics = {
+            action: this._jitterAccum.action / c,
+            vel: this._jitterAccum.vel / c,
+            torque: this._jitterAccum.torque / c,
+          };
+          this._jitterAccum = { action: 0, vel: 0, torque: 0, count: 0 };
+        }
+      }
+
+      // Apply one-pole LPF on action targets if configured
+      if (this.actionTarget) {
+        if (!this.filteredActionTarget) {
+          this.filteredActionTarget = new Float32Array(this.actionTarget);
+        } else {
+          const alpha = this.actionLpfAlpha;
+          for (let i = 0; i < this.numActions; i++) {
+            this.filteredActionTarget[i] = alpha * this.actionTarget[i] + (1 - alpha) * this.filteredActionTarget[i];
+          }
+        }
+      }
+    }
+
+    for (let substep = 0; substep < this.decimation; substep++) {
+      const sourceTarget = this.filteredActionTarget ?? this.actionTarget;
+      const delayedActionTarget = this._tumbling
+        ? sourceTarget
+        : this.getDelayedActionTarget(sourceTarget);
+
+      if (this.control_type === 'joint_position') {
+        for (let i = 0; i < this.numActions; i++) {
+          const qpos_adr = this.qpos_adr_policy[i];
+          const qvel_adr = this.qvel_adr_policy[i];
+          const ctrl_adr = this.ctrl_adr_policy[i];
+
+          const targetJpos = delayedActionTarget ? delayedActionTarget[i] : 0.0;
+          const kp = this._tumbling ? 10.0 : (this.kpPolicy ? this.kpPolicy[i] : 0.0);
+          const vel = this.simulation.qvel[qvel_adr];
+
+          // When feedforward damping is configured, split kd into kd_hw and kd_ff
+          const hasFf = this.kdFfPolicy !== null && this.kdFfPolicy !== undefined;
+          const kd = this._tumbling ? 3.0 : (this.kdPolicy ? this.kdPolicy[i] : 0.0);
+          const kd_hw = this._tumbling ? 3.0 : (hasFf ? Math.min(kd, 5.0) : kd);
+          let torque = kp * (targetJpos - this.simulation.qpos[qpos_adr]) + kd_hw * (0 - vel);
+
+          // Feedforward damping (only when kd_ff array is provided, skip in DAMP mode)
+          if (hasFf && !this._tumbling) {
+            const kd_ff = this.kdFfPolicy[i] ?? 0.0;
+            if (kd_ff > 0) {
+              const tau_ff = Math.max(-30, Math.min(30, -kd_ff * vel));
+              torque += tau_ff;
+            }
+          }
+
+          let ctrlValue = torque;
+          const ctrlRange = this.model?.actuator_ctrlrange;
+          if (ctrlRange && ctrlRange.length >= (ctrl_adr + 1) * 2) {
+            const min = ctrlRange[ctrl_adr * 2];
+            const max = ctrlRange[(ctrl_adr * 2) + 1];
+            if (Number.isFinite(min) && Number.isFinite(max) && min < max) {
+              ctrlValue = Math.min(Math.max(ctrlValue, min), max);
+            }
+          }
+          this.simulation.ctrl[ctrl_adr] = ctrlValue;
+        }
+      } else if (this.control_type === 'torque') {
+        console.error('Torque control not implemented yet.');
+      }
+
+      const applied = this.simulation.qfrc_applied;
+      for (let i = 0; i < applied.length; i++) {
+        applied[i] = 0.0;
+      }
+      const dragged = this.dragStateManager.physicsObject;
+      if (!dragged || !dragged.bodyID) {
+        this.lastDragForce = 0;
+      }
+      if (dragged && dragged.bodyID) {
+        for (let b = 0; b < this.model.nbody; b++) {
+          if (this.bodies[b]) {
+            getPosition(this.simulation.xpos, b, this.bodies[b].position);
+            getQuaternion(this.simulation.xquat, b, this.bodies[b].quaternion);
+            this.bodies[b].updateWorldMatrix();
+          }
+        }
+        const bodyID = dragged.bodyID;
+        this.dragStateManager.update();
+        const force = toMujocoPos(
+          this.dragStateManager.currentWorld.clone()
+            .sub(this.dragStateManager.worldHit)
+            .multiplyScalar(60.0)
+        );
+        // clamp force magnitude
+        const forceMagnitude = Math.sqrt(force.x * force.x + force.y * force.y + force.z * force.z);
+        const maxForce = 50.0;
+        if (forceMagnitude > maxForce) {
+          const scale = maxForce / forceMagnitude;
+          force.x *= scale;
+          force.y *= scale;
+          force.z *= scale;
+        }
+        this.lastDragForce = Math.min(forceMagnitude, maxForce);
+        const point = toMujocoPos(this.dragStateManager.worldHit.clone());
+        this.simulation.applyForce(force.x, force.y, force.z, 0, 0, 0, point.x, point.y, point.z, bodyID);
+      }
+
+      // Click-to-push and scripted (JSON) pushes: apply each active push's
+      // force (and torque, if any — click-to-push/drag entries never set
+      // one, so this falls back to zero for them) for its remaining
+      // substeps, then drop it once exhausted.
+      for (let i = this._activePushes.length - 1; i >= 0; i--) {
+        const p = this._activePushes[i];
+        const tq = p.torque || { x: 0, y: 0, z: 0 };
+        this.simulation.applyForce(p.force.x, p.force.y, p.force.z, tq.x, tq.y, tq.z, p.point.x, p.point.y, p.point.z, p.bodyID);
+        p.stepsLeft--;
+        if (p.stepsLeft <= 0) this._activePushes.splice(i, 1);
+      }
+
+      this.simulation.step();
+    }
+
+    for (const runner of this.__simMetricsRecorders) {
+      runner.captureFrame();
+    }
+
+    for (let b = 0; b < this.model.nbody; b++) {
+      if (!this.bodies[b]) {
+        continue;
+      }
+      if (!this.lastSimState.bodies.has(b)) {
+        this.lastSimState.bodies.set(b, {
+          position: new THREE.Vector3(),
+          quaternion: new THREE.Quaternion()
+        });
+      }
+      const cached = this.lastSimState.bodies.get(b);
+      getPosition(this.simulation.xpos, b, cached.position);
+      getQuaternion(this.simulation.xquat, b, cached.quaternion);
+    }
+
+    const numLights = this.model.nlight;
+    for (let l = 0; l < numLights; l++) {
+      if (!this.lights[l]) {
+        continue;
+      }
+      if (!this.lastSimState.lights.has(l)) {
+        this.lastSimState.lights.set(l, {
+          position: new THREE.Vector3(),
+          direction: new THREE.Vector3()
+        });
+      }
+      const cached = this.lastSimState.lights.get(l);
+      getPosition(this.simulation.light_xpos, l, cached.position);
+      getPosition(this.simulation.light_xdir, l, cached.direction);
+    }
+
+    this.lastSimState.tendons.numWraps = {
+      count: this.model.nwrap,
+      matrix: this.lastSimState.tendons.matrix
+    };
+    return true;
   }
 
   onWindowResize() {
@@ -993,15 +1044,22 @@ export class MuJoCoDemo {
     this.simulation.qpos[5] = 0.0;
     this.simulation.qpos[6] = 0.0;
     if (this.defaultJposPolicy && this.qpos_adr_policy) {
+      const noise = this.benchmarkRandomization?.initialJointNoiseRad || 0;
+      const random = this.benchmarkRandomization?.random;
       for (let i = 0; i < this.numActions; i++) {
         const qpos_adr = this.qpos_adr_policy[i];
-        this.simulation.qpos[qpos_adr] = this.defaultJposPolicy[i];
+        const offset = noise > 0 && random ? (random() * 2 - 1) * noise : 0;
+        this.simulation.qpos[qpos_adr] = this.defaultJposPolicy[i] + offset;
       }
     }
 
     this.simulation.forward();
     this.actionTarget = null;
     this.filteredActionTarget = null;
+    this.rawActions = null;
+    // A push still being applied when the previous test ended must not carry
+    // over into this one.
+    this._activePushes = [];
     this.resetActionDelay();
     if (this.policyRunner) {
       const state = this.readPolicyState();
