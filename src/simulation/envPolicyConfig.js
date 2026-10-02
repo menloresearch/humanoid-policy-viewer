@@ -241,13 +241,15 @@ export function parseEnvPolicySettings(yaml, jointNames) {
 }
 
 // Folder holding a checkpoint's training files: <root>/<model> for a
-// /model-library/ path (the ONNX may sit deeper), otherwise the folder the ONNX
-// itself is in (e.g. a checkpoint bundled under examples/).
+// /model-library/ path (the ONNX may sit deeper), or <root> itself when the ONNX
+// sits directly in it (as with a folder run by `npm run hf <folder>`); otherwise
+// the folder the ONNX itself is in (e.g. a checkpoint bundled under examples/).
 function checkpointDirUrl(onnxPath) {
   if (!onnxPath) return null;
   if (onnxPath.startsWith('/model-library/')) {
     const parts = onnxPath.slice('/model-library/'.length).split('/');
-    return parts.length < 3 ? null : `/model-library/${parts[0]}/${parts[1]}`;
+    if (parts.length < 2) return null;
+    return `/model-library/${parts.slice(0, parts.length === 2 ? 1 : 2).join('/')}`;
   }
   const slash = onnxPath.lastIndexOf('/');
   return slash < 0 ? null : onnxPath.slice(0, slash);

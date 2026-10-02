@@ -14,13 +14,17 @@ export const HF_MODEL_ROOT = 'hf';
 export const HF_META_FILE = '.hf-meta.json';
 const REPO_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
-export const USAGE = `Usage: npm run hf <org/name> [-- options]
+export const USAGE = `Usage: npm run hf <org/name | folder | file.onnx> [-- options]
 
 Downloads a policy from Hugging Face (policy .onnx + env.yaml) and opens the
 viewer with it selected. Example: npm run hf Menlo/asimov1-locomotion-0818
 
+A folder or .onnx file on disk is run in place instead, with no download. The
+folder needs the same files as a Hub repo: the .onnx and env.yaml (or
+params/env.yaml) next to it. Example: npm run hf ./my-policy
+
 Options (npm needs the "--" before these):
-  --revision <ref>     branch, tag or commit (default: main)
+  --revision <ref>     branch, tag or commit of a Hub repo (default: main)
   --port <n>           dev server port (default: 3000, or the next free one)
   --no-open            do not open a browser window
 
