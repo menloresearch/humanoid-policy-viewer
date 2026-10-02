@@ -22,12 +22,29 @@ itself: `npm run hf Menlo/asimov1-locomotion-0818 -- --no-open`.
 
 | Option / variable | Meaning |
 |---|---|
-| `--revision <ref>` | Branch, tag or commit (default `main`) |
+| `--revision <ref>` | Branch, tag or commit of a Hub repo (default `main`) |
 | `--port <n>` | Dev server port (default 3000, or the next free one) |
 | `--no-open` | Do not open a browser window |
 | `HF_TOKEN` | Access token, for private repos |
 | `HF_ENDPOINT` | Alternative Hub endpoint (default `https://huggingface.co`) |
 | `HPV_CACHE_DIR` | Download cache (default `~/.cache/humanoid-policy-viewer`) |
+
+## Run a policy from a folder
+
+`<model>` can also be a folder or an `.onnx` file on disk, for example a policy
+exported by a training repo before (or instead of) uploading it:
+
+```bash
+npm run hf ./my-policy
+npm run hf ./my-policy/policy.onnx
+```
+
+Nothing is downloaded or copied: the folder is linked into a temporary model
+library and served under `/model-library/<folder name>/`, so re-exporting into
+it and reloading the page picks up the new files. The link is removed when the
+server stops. The folder needs the same files as a Hub repo (below) and gets the
+same [checks](#checks), except the model card one. A folder must hold
+`policy.onnx` or exactly one `.onnx`; otherwise pass the file.
 
 ## What the repo needs to contain
 
@@ -166,7 +183,8 @@ offline, the cached copy is used. Delete the folder to clear it.
 ## How it works
 
 `npm run hf` (`scripts/run-hf-model.mjs`, download logic in `scripts/hfModel.mjs`,
-checks in `scripts/checkpointChecks.mjs`) treats the cache as a
+local folders in `scripts/localModel.mjs`, checks in `scripts/checkpointChecks.mjs`)
+treats the cache as a
 [model library](model-library.md), so the download is served under
 `/model-library/hf/<org>__<name>/` and listed in the policy dropdown like any
 other checkpoint. It then opens the page with a

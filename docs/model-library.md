@@ -33,8 +33,10 @@ Each checkpoint is a folder `<root>/<model>/` holding one or more `.onnx` files
 (at any depth) and, in the folder itself or its `params/`, the training run's
 `env.yaml` and `agent.yaml` (see [Policy config](policy-config.md)). Every `.onnx`
 becomes a `ckpt:<root>/<model>/...` entry in the policy dropdown and in the
-benchmark panel.
+benchmark panel. An `.onnx` placed directly in a root, `<root>/policy.onnx`, is
+its own checkpoint and takes its `env.yaml` from the root folder.
 
 `npm run hf` uses this mechanism for its downloads, with its own cache as the
-library: see [Run a policy from Hugging Face](huggingface.md). While it runs,
-`models/` is not served.
+library, and for a local folder, which becomes a root of its own: see
+[Run a policy from Hugging Face](huggingface.md). While it runs, `models/` is
+not served.

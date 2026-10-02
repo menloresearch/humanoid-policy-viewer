@@ -52,6 +52,20 @@ test('the bundled example checkpoint gets its training settings from the env.yam
   });
 });
 
+test('a model-library checkpoint looks for env.yaml in its model folder, or in the root when the onnx sits directly in it', async () => {
+  await withFetchAndWarnings(async ({ requested, warnings }) => {
+    await loadEnvPolicySettings('/model-library/hf/Menlo__x/exported/policy.onnx', reference.policy_joint_names);
+    await loadEnvPolicySettings('/model-library/my-run/policy.onnx', reference.policy_joint_names);
+    assert.deepEqual(requested, [
+      '/model-library/hf/Menlo__x/params/env.yaml',
+      '/model-library/hf/Menlo__x/env.yaml',
+      '/model-library/my-run/params/env.yaml',
+      '/model-library/my-run/env.yaml'
+    ]);
+    assert.equal(warnings.length, 2, 'a missing env.yaml is reported for both');
+  });
+});
+
 test('the reference config points at the bundled onnx and lists the joints in the order env.yaml trained them', () => {
   assert.equal(reference.onnx.path, BUNDLED_ONNX);
   const lines = readFileSync(resolve(checkpoints, 'model_aug_18_1/env.yaml'), 'utf8').split('\n');
