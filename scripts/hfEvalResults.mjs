@@ -11,7 +11,7 @@
 // Re-running replaces the entries for the same task ids and keeps the rest, so
 // results for earlier suite versions (other _v<n> task ids) stay listed.
 
-import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
+import { Scalar, parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 
 export function evalResultsPath(datasetId) {
   return `.eval_results/${datasetId.replace('/', '__')}.yaml`;
@@ -66,5 +66,9 @@ export function mergeEvalResults(existingText, entries) {
   const kept = existing.filter((entry) => !replaced.has(`${entry?.dataset?.id}|${entry?.dataset?.task_id}`));
   const header = '# Benchmark results written by humanoid-policy-viewer (npm run benchmark).\n'
     + '# Format: https://huggingface.co/docs/hub/eval-results\n';
-  return header + stringifyYaml([...kept, ...entries]);
+  // The spec wants `date` as a quoted string (unquoted, YAML 1.1 readers turn
+  // it into a timestamp); no anchors/aliases for repeated values; no folded lines.
+  const quoted = (value) => Object.assign(new Scalar(String(value)), { type: Scalar.QUOTE_DOUBLE });
+  const out = [...kept, ...entries].map((entry) => (entry?.date ? { ...entry, date: quoted(entry.date) } : entry));
+  return header + stringifyYaml(out, { aliasDuplicateObjects: false, lineWidth: 0 });
 }
