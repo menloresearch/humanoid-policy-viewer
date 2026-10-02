@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Reflector } from './utils/Reflector.js';
 import { PolicyRunner } from './policyRunner.js';
 import { toFloatArray } from './utils/math.js';
-import { loadEnvPolicySettings } from './envPolicyConfig.js';
+import { loadCheckpointPolicyConfig, loadEnvPolicySettings } from './envPolicyConfig.js';
 import { setActiveCommandLimits } from './commandSequencer.js';
 import { applyTorqueLimits, withActuatorOverlay } from './sceneOverlay.js';
 
@@ -142,8 +142,15 @@ async function reloadPolicyUnguarded(policy_path, options = {}) {
   if (!response.ok) {
     throw new Error(`Failed to load policy config from ${policy_path}: ${response.status}`);
   }
-  const config = await response.json();
+  let config = await response.json();
   if (options?.onnxPath) {
+    // Fields a checkpoint declares in its own tracking_policy.json replace the
+    // base config's (onnx is merged one level deep so its path still follows
+    // the checkpoint). Checkpoints without one are loaded exactly as before.
+    const own = await loadCheckpointPolicyConfig(options.onnxPath);
+    if (own) {
+      config = { ...config, ...own, onnx: { ...(config.onnx ?? {}), ...(own.onnx ?? {}) } };
+    }
     config.onnx = { ...(config.onnx ?? {}), path: options.onnxPath };
   }
 

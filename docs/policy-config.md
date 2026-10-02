@@ -43,6 +43,26 @@ actuator stiffness/damping and initial joint pose to `policy_joint_names`, and
 applies the actuators' `effort_limit` as each joint's torque cap. If there is no
 `env.yaml`, the JSON arrays are used and torque is unclamped.
 
+## Per-checkpoint `tracking_policy.json`
+
+A checkpoint may also ship a `tracking_policy.json` (looked up like
+`env.yaml`: `params/` first, then the model folder). Its fields replace the
+base policy config's, with `onnx` merged one level deep so the ONNX path still
+follows the checkpoint. Recurrent policies (LSTM, GRU, frame history) use it to
+declare the recurrent interface:
+
+```json
+{"onnx": {"meta": {"in_keys": ["policy", "is_init", "adapt_hx"],
+                   "out_keys": ["action", "next,adapt_hx"],
+                   "in_shapes": [[[1, 78]], [[1]], [[1, 128]]]}}}
+```
+
+The viewer maps `in_keys`/`out_keys` to the ONNX inputs and outputs by position,
+starts each episode with `is_init = true` and a 128-float `adapt_hx`, then feeds
+`next_adapt_hx` back every step, so the carried state may be any width as long
+as the ONNX accepts a 128-float first carry. `npm run hf` downloads the file
+from a Hugging Face repo when present. Checkpoints without one load as before.
+
 ## The robot model is separate
 
 The robot model is in neither file. It comes from the `asimov-1` submodule, and
