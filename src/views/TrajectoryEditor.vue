@@ -410,6 +410,8 @@ export default {
       const clean = {
         name: this.working.name || 'sequence',
         duration: Number(this.working.duration),
+        // A terrain test keeps its course (the editor has no control for it).
+        ...(typeof this.working.terrain === 'string' && this.working.terrain ? { terrain: this.working.terrain } : {}),
         limits: {
           vx: [...this.working.limits.vx],
           vy: [...this.working.limits.vy],
