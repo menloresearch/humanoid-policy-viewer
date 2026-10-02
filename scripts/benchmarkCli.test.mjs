@@ -127,6 +127,11 @@ test('eval results: entries per task, re-runs replace only their own tasks', () 
     ['org/bench', 'upright_rate_v1', 0.5],
   ]);
   assert.throws(() => mergeEvalResults('a: 1\n', entries), /not a YAML list/);
+
+  const text = mergeEvalResults(null, [...entries, { ...entries[0], dataset: { ...entries[0].dataset, task_id: 'b_v1' } }]);
+  assert.match(text, /date: "2026-10-02T00:00:00.000Z"/);
+  assert.doesNotMatch(text, /[&*]a\d/); // no YAML anchors/aliases
+  assert.match(text, /notes: hpv@\S+ protocol=1 suite=smoke v1 asimov-1@\S+ model@\S+\n/);
 });
 
 test('eval.yaml keeps task ids of earlier suite versions', () => {
