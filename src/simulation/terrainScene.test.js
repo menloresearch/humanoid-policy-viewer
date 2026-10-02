@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { spliceTerrain, withTerrain } from './terrainScene.js';
+import { loadTestScene, spliceTerrain, withTerrain } from './terrainScene.js';
 
 const ROBOT = `<mujoco model="robot">
   <asset>
@@ -52,4 +52,31 @@ test('withTerrain writes the combined scene next to the robot XML', () => {
   const path = withTerrain(mujoco, 'robot/xmls/robot.xml', 'terrain/stairs_5cm.xml');
   assert.equal(path, 'robot/xmls/robot.terrain-stairs_5cm.xml');
   assert.match(files['/working/' + path], /name="step1"/);
+});
+
+function fakeDemo() {
+  const files = { '/working/robot/xmls/robot.xml': ROBOT, '/working/terrain/stairs_5cm.xml': FRAGMENT };
+  const demo = {
+    mujoco: { FS: { readFile: (path) => files[path], writeFile: (path, text) => { files[path] = text; } } },
+    defaultScenePath: 'robot/xmls/robot.xml',
+    currentScenePath: 'robot/xmls/robot.xml',
+    params: { paused: false },
+    reloads: [],
+    async reload(path) {
+      assert.equal(this.params.paused, true, 'the sim loop is paused while the model is replaced');
+      this.reloads.push(path);
+      this.currentScenePath = path;
+    },
+  };
+  return demo;
+}
+
+test('loadTestScene switches to a terrain scene and back, reloading only on a change', async () => {
+  const demo = fakeDemo();
+  assert.equal(await loadTestScene(demo, undefined), false);
+  assert.equal(await loadTestScene(demo, 'terrain/stairs_5cm.xml'), true);
+  assert.equal(await loadTestScene(demo, 'terrain/stairs_5cm.xml'), false);
+  assert.equal(await loadTestScene(demo, null), true);
+  assert.deepEqual(demo.reloads, ['robot/xmls/robot.terrain-stairs_5cm.xml', 'robot/xmls/robot.xml']);
+  assert.equal(demo.params.paused, false, 'the pause state is restored');
 });

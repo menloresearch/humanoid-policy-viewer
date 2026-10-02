@@ -51,3 +51,23 @@ export function withTerrain(mujoco, robotFile, terrainFile) {
   mujoco.FS.writeFile('/working/' + combined, spliceTerrain(robot, fragment));
   return combined;
 }
+
+/**
+ * Loads the scene a test runs in: the default robot scene with the test's
+ * terrain fragment spliced in, or the plain default scene when it names none.
+ * Reloads (keeping the current policy) only when that differs from the scene
+ * already loaded, so flat tests after flat tests cost nothing. Used by both
+ * the benchmark and live playback of a test. Returns whether it reloaded.
+ */
+export async function loadTestScene(demo, terrain) {
+  if (!demo?.defaultScenePath || !demo.currentScenePath) return false;
+  const want = terrain ? withTerrain(demo.mujoco, demo.defaultScenePath, terrain) : demo.defaultScenePath;
+  if (want === demo.currentScenePath) return false;
+  const wasPaused = demo.params?.paused;
+  if (demo.params) demo.params.paused = true;
+  // Let an in-flight loop iteration finish before the model is replaced.
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  await demo.reload(want);
+  if (demo.params) demo.params.paused = wasPaused;
+  return true;
+}
