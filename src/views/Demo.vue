@@ -884,7 +884,7 @@
 import { MuJoCoDemo } from '@/simulation/main.js';
 import { asimovCommandState, asimovInterruptState, imuBiasState } from '@/simulation/observationHelpers.js';
 import { commandSequencer } from '@/simulation/commandSequencer.js';
-import { runBenchmark, estimateBenchmarkSeconds } from '@/simulation/benchmarkRunner.js';
+import { runBenchmark, runBenchmarkCell, waitForPolicyReady, estimateBenchmarkSeconds } from '@/simulation/benchmarkRunner.js';
 import { loadTestScene } from '@/simulation/terrainScene.js';
 import { appState, openEditor, newBlankSequence, openResults, setBenchmarkResults } from '@/state/appState.js';
 import { demoRef } from '@/state/demoRef.js';
@@ -1930,18 +1930,18 @@ export default {
       const values = Array.isArray(policyValues) && policyValues.length
         ? policyValues
         : [this.currentPolicy];
+      const unknown = values.filter((value) => !this.policies.some((p) => p.value === value));
+      if (unknown.length) {
+        throw new Error(`Unknown policies: ${unknown.join(', ')}`);
+      }
       const policies = values
         .map((value) => this.policies.find((p) => p.value === value))
-        .filter(Boolean)
         .map((p) => ({
           id: p.value,
           label: p.title,
           configPath: p.policyPath,
           onnxPath: p.onnxPath || undefined
         }));
-      if (!policies.length) {
-        throw new Error(`No matching policies found for: ${values.join(', ')}`);
-      }
 
       let files = Array.isArray(testFiles) && testFiles.length ? testFiles : null;
       if (!files) {
@@ -1986,6 +1986,45 @@ export default {
       } finally {
         commandSequencer.bindSim(this.demo);
       }
+    },
+    /**
+     * Headless entry point for `npm run benchmark` (scripts/run-benchmark.mjs):
+     * runs one benchmark cell (one test, one repeat) for a policy given by its
+     * ONNX URL, so it needs no model catalog. Each browser page keeps the last
+     * policy loaded, which lets the driver send a model's cells to the same page.
+     * `cell` = { sequence, seed, randomize, realtime, timeoutMs }.
+     */
+    async runBenchmarkCellHeadless(policy, cell) {
+      if (!this.demo) throw new Error('Demo not ready yet');
+      this.demo.stopRenderLoop?.();
+      const key = `${policy.configPath ?? REFERENCE_POLICY_CONFIG}|${policy.onnxPath}`;
+      if (this._benchmarkPolicyKey !== key) {
+        this._benchmarkPolicyKey = null;
+        await this.demo.stopMainLoop();
+        try {
+          await this.demo.reloadPolicy(policy.configPath ?? REFERENCE_POLICY_CONFIG, { onnxPath: policy.onnxPath });
+          if (!(await waitForPolicyReady(this.demo, 30000))) throw new Error('it did not become ready within 30s');
+        } catch (error) {
+          // Reported, not thrown: the page is fine, only this policy is not.
+          return { policyLoadError: true, error: `Could not load policy ${policy.onnxPath}: ${error?.message || error}`, metrics: null };
+        }
+        this._benchmarkPolicyKey = key;
+      }
+      const commandView = {
+        get cmdVx() { return asimovCommandState.vx; },
+        get cmdVy() { return asimovCommandState.vy; },
+        get cmdWz() { return asimovCommandState.wz; }
+      };
+      return runBenchmarkCell({
+        demo: this.demo,
+        component: commandView,
+        sequence: cell.sequence,
+        randomization: cell.seed === undefined || cell.seed === null
+          ? null
+          : { seed: cell.seed, randomize: cell.randomize ?? {} },
+        realtime: !!cell.realtime,
+        timeoutMs: cell.timeoutMs ?? undefined,
+      });
     },
     async refreshBenchmarkRuns() {
       try {
@@ -2500,6 +2539,7 @@ export default {
   mounted() {
     window.__humanoidViewerDemoComponent = this;
     window.__runHeadlessBenchmark = (policyValues, testFiles) => this.runHeadlessBenchmark(policyValues, testFiles);
+    window.__runBenchmarkCell = (policy, cell) => this.runBenchmarkCellHeadless(policy, cell);
     this.customMotions = {};
     this.isSafari = this.detectSafari();
     this.restorePanelWidth();
@@ -2556,6 +2596,9 @@ export default {
   beforeUnmount() {
     if (window.__humanoidViewerDemoComponent === this) {
       window.__humanoidViewerDemoComponent = null;
+    }
+    if (window.__runBenchmarkCell) {
+      window.__runBenchmarkCell = null;
     }
     if (window.__runHeadlessBenchmark) {
       window.__runHeadlessBenchmark = null;

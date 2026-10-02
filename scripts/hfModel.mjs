@@ -110,7 +110,7 @@ async function fetchRepoInfo(repo, revision, { endpoint, token, fetchImpl }) {
   };
 }
 
-async function downloadFile(url, destination, { token, fetchImpl }) {
+export async function downloadFile(url, destination, { token, fetchImpl = fetch }) {
   const response = await fetchImpl(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
   if (!response.ok) throw new Error(`Download failed (${response.status}): ${url}`);
   mkdirSync(dirname(destination), { recursive: true });
