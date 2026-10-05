@@ -1,8 +1,8 @@
 // Sanity checks for a downloaded checkpoint before it is run or benchmarked: a
 // checkpoint must ship an env.yaml the viewer can read (with explicit gains and torque limits)
 // and an agent.yaml. Without them the viewer silently falls back to the bundled
-// reference gains and unclamped torque, the shared-gains mistake described in
-// benchmark/METHODOLOGY.md.
+// reference gains and unclamped torque, so every checkpoint would be benchmarked
+// with the same gains.
 
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';

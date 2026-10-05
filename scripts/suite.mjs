@@ -11,14 +11,13 @@
 
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join, relative, resolve } from 'node:path';
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { stringify as stringifyYaml } from 'yaml';
 import { commandSequencer, setActiveCommandLimits } from '../src/simulation/commandSequencer.js';
 import { BENCHMARK_PROTOCOL } from '../src/benchmark/protocol.js';
-import { compatibilityProblems, expandCells, parseSuite, selectTests } from '../src/benchmark/suite.js';
-import { legacyToRow, rowToSequence } from '../src/benchmark/testRow.js';
+import { compatibilityProblems, expandCells, selectTests } from '../src/benchmark/suite.js';
+import { rowToSequence } from '../src/benchmark/testRow.js';
 import { collectProvenance } from './benchmarkProvenance.mjs';
 import { classifyTarget } from './benchmarkTargets.mjs';
 import { parseWords, swallowedNpmFlags } from './cliArgs.mjs';
@@ -31,7 +30,7 @@ const BASE_FILE = '.hpv-suite.json';
 
 const USAGE = `Usage: npm run suite <command> ...
 
-  init <dir> from-legacy=<benchmark dir>   new dataset working copy from the old benchmark/**/*.json tests
+  init <dir>                               new benchmark: starter suite.yaml + one example test
   pull <dataset>[@rev|@refs/pr/<n>] <dir>  working copy of a Hub dataset (e.g. datasets/org/bench@refs/pr/3)
   validate <dir>                           check rows, suite.yaml, generated files and the version bump
   diff <dir>                               what changed since the pulled revision
@@ -71,74 +70,65 @@ export function scoredContentHash(rawSuite, rows) {
 
 // ---------------------------------------------------------------------------
 
-const PROPOSED_TASKS = [
-  { id: 'upright_rate', metric: 'upright_rate', description: 'Share of all tests finished without falling' },
-  { id: 'tracking_score', metric: 'tracking_score', scope: { config: 'locomotion' }, description: '1/(1+velocity tracking RMSE) on the locomotion tests' },
-  { id: 'distance_drift_score', metric: 'drift_score', scope: { config: 'distance' }, description: '1/(1+final drift in m) on the long walk' },
-  { id: 'friction_upright_rate', metric: 'upright_rate', scope: { config: 'friction' }, description: 'Share of low-friction tests finished upright' },
-  { id: 'push_standing_reasonable_pass', metric: 'push_pass_rate', scope: { config: 'push_standing', tier: 'reasonable' } },
-  { id: 'push_walking_reasonable_pass', metric: 'push_pass_rate', scope: { config: 'push_walking', tier: 'reasonable' } },
-  { id: 'push_beyond_pass', metric: 'push_pass_rate', scope: { config: ['push_standing', 'push_walking'], tier: 'beyond' } },
-  { id: 'push_standing_max_force_n', metric: 'max_force_survived_n', scope: { config: 'push_standing' } },
-  { id: 'push_walking_max_force_n', metric: 'max_force_survived_n', scope: { config: 'push_walking' } },
-  { id: 'push_sustained_max_force_n', metric: 'max_force_survived_n', scope: { config: 'push_sustained' } },
-];
-
-function walkJson(root) {
-  const files = [];
-  (function walk(dir) {
-    for (const name of readdirSync(dir).sort()) {
-      const path = join(dir, name);
-      if (statSync(path).isDirectory()) walk(path);
-      else if (name.endsWith('.json')) files.push(relative(root, path));
-    }
-  })(root);
-  return files;
+// A new benchmark starts from this suite.yaml (written as text to keep its comments).
+function starterSuiteYaml({ name, commit }) {
+  return `# What runs and how it is scored. Tests live in data/<category>/test.jsonl, one per line.
+# Reference: humanoid-policy-viewer docs/benchmark-datasets.md
+suite: ${name}
+title: ${name}
+description: Describe what this benchmark measures.
+version: 1                      # bump whenever a change can move a score
+harness:
+  repo: https://github.com/menloresearch/humanoid-policy-viewer
+  protocol: ${BENCHMARK_PROTOCOL}
+  tested_commit: ${commit ?? 'null'}
+requires:
+  robot: { name: asimov-1 }
+  policy_interface: velocity-command
+defaults:
+  repeats: 1                    # more than 1 needs randomize, e.g. { action_delay: env_range }
+  seed: 0
+  randomize: {}
+  aggregate: mean               # mean | median | worst
+  pass_rule: all_repeats        # all_repeats | fraction
+  timeout_s: 600
+tests:                          # { all: true }, { config: <category> } or { id: <category>/<name> }
+  - { all: true }
+tasks:                          # leaderboard numbers; _v<version> is appended to each id
+  - { id: upright_rate, metric: upright_rate }
+  - { id: tracking_score, metric: tracking_score, scope: { config: locomotion } }
+reference_models: []            # models \`npm run suite baseline\` compares
+`;
 }
 
-function init(dir, legacyDir) {
-  if (!legacyDir) throw new Error('init needs from-legacy=<the old benchmark/ folder>');
+const STARTER_ROW = {
+  id: 'locomotion/forward_walk',
+  config: 'locomotion',
+  schema_version: 1,
+  kind: 'velocity-sequence',
+  name: 'forward walk',
+  description: 'Stand, walk forward at 0.6 m/s for 11 s, stop.',
+  tags: [],
+  duration: 12,
+  commands: [{ t: 0, vx: 0, vy: 0, wz: 0 }, { t: 0.3, vx: 0.6, vy: 0, wz: 0 }, { t: 11.5, vx: 0, vy: 0, wz: 0 }],
+  events: [],
+  limits: null,
+  foot_friction: null,
+  metrics_opt_in: ['gait_symmetry'],
+};
+
+/** Creates a new benchmark dataset folder with a starter suite.yaml and one example test. */
+export function initSuite(dir, { log = console.log } = {}) {
   if (existsSync(dir) && readdirSync(dir).length) throw new Error(`${dir} is not empty`);
-  const files = walkJson(legacyDir);
-  if (!files.length) throw new Error(`no .json tests under ${legacyDir}`);
-  const rows = files.map((file) => legacyToRow(file, JSON.parse(readFileSync(join(legacyDir, file), 'utf8'))));
   mkdirSync(dir, { recursive: true });
-  writeRows(dir, rows);
-  const configs = [...new Set(rows.map((row) => row.config))];
-  const rawSuite = {
-    suite: 'asimov-locomotion',
-    title: 'Asimov Locomotion Benchmark',
-    description: 'Velocity tracking, push recovery and low-friction tests for Asimov-1 locomotion policies, run in humanoid-policy-viewer (MuJoCo).',
-    version: 1,
-    harness: {
-      repo: 'https://github.com/menloresearch/humanoid-policy-viewer',
-      protocol: BENCHMARK_PROTOCOL,
-      tested_commit: collectProvenance(appDir).hpv.commit,
-    },
-    requires: { robot: { name: 'asimov-1' }, policy_interface: 'velocity-command' },
-    defaults: {
-      repeats: 5,
-      seed: 0,
-      randomize: { action_delay: 'env_range', initial_joint_noise_rad: 0.02 },
-      aggregate: 'mean',
-      pass_rule: 'all_repeats',
-      timeout_s: 600,
-    },
-    tests: [
-      ...configs.filter((config) => config !== 'distance').map((config) => ({ config })),
-      ...(configs.includes('distance') ? [{ config: 'distance', repeats: 1 }] : []),
-    ],
-    tasks: PROPOSED_TASKS.filter((task) => [].concat(task.scope?.config ?? configs).some((config) => configs.includes(config))),
-    reference_models: [],
-  };
-  writeFileSync(join(dir, 'suite.yaml'), `# What runs and how it is scored; see humanoid-policy-viewer docs/benchmark-datasets.md.\n${stringifyYaml(rawSuite)}`);
-  for (const doc of ['METHODOLOGY.md', 'VARIANCE_ANALYSIS.md']) {
-    if (existsSync(join(legacyDir, doc))) copyFileSync(join(legacyDir, doc), join(dir, doc));
-  }
-  writeFileSync(join(dir, 'README.md'), readmeBody(rawSuite));
-  regenerateGeneratedFiles(dir, { suite: parseSuite(rawSuite), rows, rawSuite });
-  console.log(`Wrote ${rows.length} tests in ${configs.length} configs to ${dir}`);
-  console.log('Next: review suite.yaml (repeats, randomisation, tasks), then npm run suite validate ' + dir);
+  const name = basename(dir).toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || 'my-benchmark';
+  writeFileSync(join(dir, 'suite.yaml'), starterSuiteYaml({ name, commit: collectProvenance(appDir).hpv.commit }));
+  writeRows(dir, [STARTER_ROW]);
+  const loaded = loadSuiteDir(dir);
+  writeFileSync(join(dir, 'README.md'), readmeBody(loaded.rawSuite));
+  regenerateGeneratedFiles(dir, loaded);
+  log(`Created benchmark ${name} in ${dir} with one example test (${STARTER_ROW.id}).`);
+  log(`Edit it with: npm run dev suite=${dir}`);
 }
 
 function readmeBody(rawSuite) {
@@ -150,8 +140,7 @@ ${rawSuite.description}
 This is a benchmark for [humanoid-policy-viewer](${rawSuite.harness.repo}). Each row of
 \`data/<config>/test.jsonl\` is one test scenario: velocity commands over time, timed pushes and the floor
 friction. \`suite.yaml\` says how often each test runs, how runs are randomised and scored, and which numbers
-become leaderboard tasks (\`eval.yaml\`, generated from it). See \`METHODOLOGY.md\` for why the tests are what
-they are.
+become leaderboard tasks (\`eval.yaml\`, generated from it).
 
 ## Run it
 
@@ -404,14 +393,17 @@ async function release(target, rev) {
 }
 
 async function main() {
-  const keys = ['from-legacy', 'model', 'repo', 'rev'];
+  const keys = ['model', 'repo', 'rev'];
   const flags = ['pr', 'create', 'dry-run', 'fix', 'help'];
-  const swallowed = swallowedNpmFlags(process.env, ['from-legacy', 'model', 'repo', 'rev', 'pr', 'create', 'fix']);
+  const swallowed = swallowedNpmFlags(process.env, ['model', 'repo', 'rev', 'pr', 'create', 'fix']);
   if (swallowed.length) throw new Error(`npm kept ${swallowed.map((f) => `--${f}`).join(', ')} for itself; write them without dashes.`);
   const { positionals, options, flags: set } = parseWords(process.argv.slice(2), { keys, flags, repeatable: ['model'] });
   const [command, a, b] = positionals;
   switch (command) {
-    case 'init': return init(resolve(a ?? ''), options['from-legacy'] && resolve(options['from-legacy']));
+    case 'init': {
+      if (!a) throw new Error('init needs <dir>');
+      return initSuite(resolve(a));
+    }
     case 'pull': return pull(a, b && resolve(b));
     case 'validate': {
       if (!a) throw new Error('validate needs <dir>');

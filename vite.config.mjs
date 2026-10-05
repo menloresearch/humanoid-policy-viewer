@@ -7,12 +7,11 @@ import Fonts from 'unplugin-fonts/vite'
 // Utilities
 import { defineConfig } from 'vite'
 import { fileURLToPath, URL } from 'node:url'
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, extname, relative, resolve } from 'node:path'
 import { listModelRoots, listModels as discoverModels } from './scripts/modelDiscovery.mjs'
 import { getBenchmarkRunsDir, getModelLibrary } from './scripts/modelLibraryConfig.mjs'
-import { listSequenceEntries } from './scripts/sequenceCatalog.mjs'
-import { readRows, writeRows } from './scripts/suiteDir.mjs'
+import { loadSuiteDir, readRows, regenerateGeneratedFiles, writeRows } from './scripts/suiteDir.mjs'
 import { rowToSequence, sequenceToRow } from './src/benchmark/testRow.js'
 
 // A submodule checked out under public/ carries a `.git` pointer file that
@@ -69,18 +68,14 @@ function humanoidDevPlugin() {
   }
 
   // ---- Trajectory sequence persistence (/api/sequences) ----
-  // Absorbed from the former vite-plugin-sequences.mjs so this single dev
-  // middleware also saves/loads velocity-command trajectories. Test
-  // definitions live under ./benchmark; completed run outputs live under
-  // ./benchmark_runs (both outside public/, so writing them never triggers a
-  // page reload). Only ./benchmark is gitignored: keeping a test definition in
-  // git requires an intentional `git add -f`, so ad hoc tests never end up
-  // committed by accident. Run outputs are real results worth sharing, so
-  // they're tracked normally once you `git add` one.
-  const SEQ_DIR = resolve(appDir, 'benchmark');
+  // The trajectory editor and the in-app benchmark read and write the tests of
+  // a benchmark dataset working copy (see scripts/suiteDir.mjs): HPV_SUITE_DIR
+  // (`npm run dev suite=<dir>`), by default ./benchmark (gitignored). Run
+  // outputs live under ./benchmark_runs. Both are outside public/, so writing
+  // them never triggers a page reload.
   const BENCH_DIR = getBenchmarkRunsDir(appDir);
   const MAX_DURATION = 600;
-  // Allow nested subfolders, e.g. push/forward.json. The char
+  // Saved benchmark run names; nested subfolders allowed.
   const FILENAME_RE = /^(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+\.json$/;
 
   function round3(v) {
@@ -227,14 +222,13 @@ function humanoidDevPlugin() {
     return clean;
   }
 
-  // ---- Benchmark dataset working copy (HPV_SUITE_DIR) ----
-  // `npm run dev suite=<dir>` points the editor at a benchmark dataset (see
-  // scripts/suiteDir.mjs): each row of data/<config>/test.jsonl shows up as
-  // "<config>/<name>.json" and saving writes the row back.
-  const SUITE_DIR = process.env.HPV_SUITE_DIR ? resolve(process.env.HPV_SUITE_DIR) : null;
+  // Each row of data/<category>/test.jsonl shows up as "<category>/<name>.json";
+  // saving writes the row back, and a new category gets its own file.
+  const SUITE_DIR = resolve(process.env.HPV_SUITE_DIR || resolve(appDir, 'benchmark'));
+  const TEST_ID_RE = /^[a-z0-9][a-z0-9_]*\/[a-z0-9][a-z0-9_.-]*$/;
   const rowFile = (row) => `${row.id}.json`;
 
-  function suiteEntries() {
+  function listSequences() {
     return readRows(SUITE_DIR).rows.map((row) => ({
       file: rowFile(row),
       folder: row.config,
@@ -245,30 +239,68 @@ function humanoidDevPlugin() {
     })).sort((a, b) => a.file.localeCompare(b.file));
   }
 
-  function handleSuiteSequences(req, res, file, parsed) {
-    const { rows } = readRows(SUITE_DIR);
-    const id = file?.replace(/\.json$/, '');
-    const index = rows.findIndex((row) => row.id === id);
-    if (req.method === 'GET') {
-      if (index < 0) return sendJson(res, 404, { error: 'Not found' });
-      return sendJson(res, 200, rowToSequence(rows[index]));
+  // Keep eval.yaml and the dataset card's configs in step with the tests, so a
+  // new category is a new dataset config straight away. Skipped (with a log
+  // line) while suite.yaml or a row is invalid; `npm run suite validate` says why.
+  function refreshGeneratedFiles() {
+    if (!existsSync(resolve(SUITE_DIR, 'suite.yaml'))) return;
+    try {
+      regenerateGeneratedFiles(SUITE_DIR, loadSuiteDir(SUITE_DIR));
+    } catch (e) {
+      console.warn(`[sequences] eval.yaml/README.md not regenerated: ${e.message.split('\n')[0]}`);
     }
-    if (req.method === 'PUT') {
-      if (!/^[a-z0-9][a-z0-9_]*\/[a-z0-9][a-z0-9_.-]*$/.test(id)) {
-        return sendJson(res, 400, { error: 'In a benchmark dataset a test is saved as <config>/<name>, lower case' });
+  }
+
+  async function handleSequences(req, res) {
+    const url = new URL(req.url, 'http://localhost');
+    const file = url.searchParams.get('file');
+    try {
+      if (req.method === 'GET' && !file) {
+        sendJson(res, 200, { files: listSequences(), suiteDir: SUITE_DIR });
+        return;
       }
-      const row = sequenceToRow(id, parsed, index >= 0 ? rows[index] : null);
-      if (index >= 0) rows[index] = row; else rows.push(row);
-      writeRows(SUITE_DIR, rows.filter((r) => r.config === row.config));
-      return sendJson(res, 200, { ok: true, file, entry: suiteEntries().find((f) => f.file === file) });
+      const id = file?.replace(/\.json$/, '');
+      if (!id || !TEST_ID_RE.test(id)) {
+        sendJson(res, 400, { error: 'A test is saved as <category>/<name>: lower case letters, digits and _' });
+        return;
+      }
+      const { rows } = readRows(SUITE_DIR);
+      const index = rows.findIndex((row) => row.id === id);
+      if (req.method === 'GET') {
+        if (index < 0) { sendJson(res, 404, { error: 'Not found' }); return; }
+        sendJson(res, 200, rowToSequence(rows[index]));
+        return;
+      }
+      if (req.method === 'PUT') {
+        let parsed;
+        try {
+          parsed = validateSequence(await readRequestJson(req));
+        } catch (e) {
+          sendJson(res, 400, { error: e.message });
+          return;
+        }
+        const row = sequenceToRow(id, parsed, index >= 0 ? rows[index] : null);
+        if (index >= 0) rows[index] = row; else rows.push(row);
+        writeRows(SUITE_DIR, rows.filter((r) => r.config === row.config));
+        refreshGeneratedFiles();
+        sendJson(res, 200, { ok: true, file, entry: listSequences().find((f) => f.file === file) });
+        return;
+      }
+      if (req.method === 'DELETE') {
+        if (index < 0) { sendJson(res, 404, { error: 'Not found' }); return; }
+        const [removed] = rows.splice(index, 1);
+        const left = rows.filter((r) => r.config === removed.config);
+        writeRows(SUITE_DIR, left, { configs: [removed.config] });
+        // The last test of a category takes its file (and dataset config) with it.
+        if (!left.length) rmSync(resolve(SUITE_DIR, 'data', removed.config), { recursive: true, force: true });
+        refreshGeneratedFiles();
+        sendJson(res, 200, { ok: true, file });
+        return;
+      }
+      sendJson(res, 405, { error: 'Method not allowed' });
+    } catch (e) {
+      sendJson(res, 500, { error: String(e?.message ?? e) });
     }
-    if (req.method === 'DELETE') {
-      if (index < 0) return sendJson(res, 404, { error: 'Not found' });
-      const [removed] = rows.splice(index, 1);
-      writeRows(SUITE_DIR, rows.filter((r) => r.config === removed.config), { configs: [removed.config] });
-      return sendJson(res, 200, { ok: true, file });
-    }
-    return sendJson(res, 405, { error: 'Method not allowed' });
   }
 
   function walkJson(dir, prefix, onFile) {
@@ -285,79 +317,6 @@ function humanoidDevPlugin() {
     }
   }
 
-  function listSequences() {
-    return listSequenceEntries(SEQ_DIR);
-  }
-
-  async function handleSequences(req, res) {
-    const url = new URL(req.url, 'http://localhost');
-    const file = url.searchParams.get('file');
-    try {
-      if (req.method === 'GET' && !file) {
-        sendJson(res, 200, { files: SUITE_DIR ? suiteEntries() : listSequences() });
-        return;
-      }
-      if (file && !FILENAME_RE.test(file)) {
-        sendJson(res, 400, { error: 'Invalid filename (use letters, digits, _ , - and .json)' });
-        return;
-      }
-      if (SUITE_DIR) {
-        let parsed = null;
-        if (req.method === 'PUT') {
-          try {
-            parsed = validateSequence(await readRequestJson(req));
-          } catch (e) {
-            sendJson(res, 400, { error: e.message });
-            return;
-          }
-        }
-        handleSuiteSequences(req, res, file, parsed);
-        return;
-      }
-      const filePath = file ? resolve(SEQ_DIR, file) : null;
-      if (filePath && !isWithinDirectory(SEQ_DIR, filePath)) {
-        sendJson(res, 400, { error: 'Invalid path' });
-        return;
-      }
-      if (req.method === 'GET') {
-        if (!existsSync(filePath)) { sendJson(res, 404, { error: 'Not found' }); return; }
-        res.statusCode = 200;
-        res.setHeader('Content-Type', 'application/json; charset=utf-8');
-        res.setHeader('Cache-Control', 'no-store');
-        res.end(readFileSync(filePath, 'utf8'));
-        return;
-      }
-      if (req.method === 'PUT') {
-        let parsed;
-        try {
-          parsed = await readRequestJson(req);
-        } catch (e) {
-          sendJson(res, 400, { error: `Invalid JSON: ${e.message}` });
-          return;
-        }
-        let clean;
-        try {
-          clean = validateSequence(parsed);
-        } catch (e) {
-          sendJson(res, 400, { error: e.message });
-          return;
-        }
-        mkdirSync(dirname(filePath), { recursive: true });
-        writeFileSync(filePath, JSON.stringify(clean, null, 2) + '\n', 'utf8');
-        sendJson(res, 200, { ok: true, file, entry: listSequences().find((f) => f.file === file) });
-        return;
-      }
-      if (req.method === 'DELETE') {
-        if (!existsSync(filePath)) { sendJson(res, 404, { error: 'Not found' }); return; }
-        unlinkSync(filePath);
-        sendJson(res, 200, { ok: true, file });
-        return;
-      }
-      sendJson(res, 405, { error: 'Method not allowed' });
-    } catch (e) {
-      sendJson(res, 500, { error: String(e?.message ?? e) });
-    }
-  }
   // ---- Model catalog (/api/models): ONNX checkpoints for benchmarking ----
   function listModels() {
     return discoverModels(modelLibraryDir, modelRootNames);

@@ -21,8 +21,8 @@
 //   metrics_opt_in  string[], e.g. ["gait_symmetry"]
 //
 // rowToSequence() turns a row into the sequence object commandSequencer and
-// computeMetrics() play and score; legacyToRow() converts the old one-file-per-
-// test benchmark/**/*.json format.
+// computeMetrics() play and score; sequenceToRow() folds an edited sequence
+// (trajectory editor) back into a row.
 
 import { TEST_KINDS, TEST_SCHEMA_VERSION } from './protocol.js';
 
@@ -145,50 +145,5 @@ export function sequenceToRow(id, sequence, previous = null) {
     limits: sequence.limits ?? null,
     foot_friction: sequence.footFriction ?? null,
     metrics_opt_in: sequence.gaitSymmetry === true ? ['gait_symmetry'] : [],
-  };
-}
-
-/** "push/standing/chest_front.json" -> { config: "push_standing", id: "push_standing/chest_front" } */
-export function legacyIdentity(relativeFile) {
-  const parts = relativeFile.replace(/\\/g, '/').replace(/\.json$/i, '').split('/');
-  const name = parts.pop().toLowerCase();
-  const config = (parts.length ? parts.join('_') : 'misc').toLowerCase();
-  return { config, id: `${config}/${name}` };
-}
-
-/** The tier an old test wrote into a push label, e.g. "... — reasonable (450N)". */
-export function tierFromLabel(label) {
-  const match = /\b(reasonable|beyond)\b/i.exec(label ?? '');
-  return match ? match[1].toLowerCase() : null;
-}
-
-/** Converts one old benchmark/**\/*.json test into a dataset row. */
-export function legacyToRow(relativeFile, legacy) {
-  const { config, id } = legacyIdentity(relativeFile);
-  return {
-    id,
-    config,
-    schema_version: TEST_SCHEMA_VERSION,
-    kind: 'velocity-sequence',
-    name: legacy.name,
-    description: '',
-    tags: [],
-    duration: legacy.duration,
-    commands: legacy.commands.map(({ t, vx = 0, vy = 0, wz = 0 }) => ({ t, vx, vy, wz })),
-    events: (legacy.events ?? []).map((event) => ({
-      t: event.t,
-      type: event.type,
-      dir: event.dir,
-      force: event.force,
-      duration: event.duration,
-      targetBody: event.targetBody ?? null,
-      torqueAxis: event.torqueAxis ?? null,
-      torqueMag: event.torqueMag ?? null,
-      label: event.label ?? null,
-      tier: tierFromLabel(event.label),
-    })),
-    limits: legacy.limits ?? null,
-    foot_friction: legacy.footFriction ?? null,
-    metrics_opt_in: legacy.gaitSymmetry === true ? ['gait_symmetry'] : [],
   };
 }

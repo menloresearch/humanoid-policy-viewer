@@ -93,7 +93,6 @@ same everywhere: the `asimov-1` submodule.
 | [Benchmarking](docs/benchmarking.md) | `npm run benchmark`: running a suite, what gets uploaded, versions, parallelism |
 | [Benchmark datasets](docs/benchmark-datasets.md) | The suite format on the Hub, and `npm run suite` for creating, changing and releasing one |
 | [Adding a robot](docs/adding-a-robot.md) | Bringing your own MJCF, policy and motion clips |
-| [Benchmark methodology](benchmark/METHODOLOGY.md) | How the test suite and its thresholds were chosen |
 | [Scenes](public/examples/scenes/README.md) | The `asimov-1` submodule and how actuators are added at load |
 
 ## Project structure
@@ -106,7 +105,7 @@ same everywhere: the `asimov-1` submodule.
 - `public/examples/checkpoints/` - policy config JSON, bundled ONNX files, and motion clips
 - `scripts/` - `npm run hf`, `npm run benchmark`, `npm run suite`, and dev-server helpers
 - `src/benchmark/` - benchmark protocol, test-row and suite formats, scoring
-- `benchmark/` - the original test definitions, to be moved into the benchmark dataset (`npm run suite init`)
+- `benchmark/` - (gitignored) the local benchmark dataset `npm run dev` edits; created on first run
 - `test/fixtures/smoke-suite/` - a tiny benchmark suite for tests and the golden check
 - an optional [model library](docs/model-library.md) served by local Vite middleware under `/model-library/`
 

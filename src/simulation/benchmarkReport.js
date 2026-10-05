@@ -338,9 +338,9 @@ function section(title, note, body) {
 }
 
 // ---------------------------------------------------------------------------
-// categorization — a test's folder (see benchmark/*/*.json) IS its category,
-// so this needs no separate taxonomy to maintain: reorganizing benchmark/
-// reorganizes the report. A root-level file (no folder) is "general".
+// categorization — a test id is <category>/<name> (the category is the
+// benchmark dataset config the test lives in), so the report needs no separate
+// taxonomy. An id without a category is "general".
 // ---------------------------------------------------------------------------
 
 export function categoryOf(file) {
@@ -353,13 +353,13 @@ const CATEGORY_LABELS = {
   locomotion: 'Locomotion',
   distance: 'Distance / endurance',
   friction: 'Friction stress',
-  'push/standing': 'Push — standing',
-  'push/walking': 'Push — walking',
-  'push/sustained': 'Push — sustained ramp',
+  push_standing: 'Push — standing',
+  push_walking: 'Push — walking',
+  push_sustained: 'Push — sustained ramp',
 };
 
 export function categoryLabel(cat) {
-  return CATEGORY_LABELS[cat] || cat.split('/').map((s) => s[0].toUpperCase() + s.slice(1)).join(' — ');
+  return CATEGORY_LABELS[cat] || cat.split(/[/_]/).filter(Boolean).map((s) => s[0].toUpperCase() + s.slice(1)).join(' — ');
 }
 
 // ---------------------------------------------------------------------------
@@ -623,7 +623,7 @@ export function buildBenchmarkReportHtml(run) {
   // The category rollup above groups by folder (push/standing, push/walking,
   // ...), which still lumps e.g. groin/pelvis pushes in with shoulder pushes
   // — exactly the kind of single-number masking maxForceSurvived exists to
-  // avoid. Each push test file IS one location (see benchmark/push/**), so
+  // avoid. Each push test IS one location, so
   // one row per (test, policy) here is the actual per-location breakdown.
   const pushTests = tests.filter((t) => categoryOf(t.file).startsWith('push/'));
   const pushEnvelopeTable = pushTests.length ? '<table><thead><tr><th>Location</th><th>Policy</th>'
@@ -875,7 +875,7 @@ ${fallTable}
 <h2>Aggregate across all tests</h2>
 ${aggregateTable}
 <h2>Results by category</h2>
-<p class="explain">Same metrics, grouped by each test's folder under benchmark/ — this is what shows whether a policy is uniformly robust or has a specific weak spot (e.g. fine standing, weak mid-walk; fine on rapid pushes, weak on friction).</p>
+<p class="explain">Same metrics, grouped by each test's category — this is what shows whether a policy is uniformly robust or has a specific weak spot (e.g. fine standing, weak mid-walk; fine on rapid pushes, weak on friction).</p>
 ${categoryTable}
 ${pushEnvelopeTable ? `<h2>Push envelope by location</h2>
 <p class="explain">One row per push test file — each file targets one location (groin/pelvis, chest, a specific shoulder axis, ...), so this is the actual per-location breakdown the category table above can't show (e.g. groin/pelvis reliably tolerating far more force than a shoulder push does). "Max force survived" is the highest force among that location's push events the policy actually recovered from.</p>

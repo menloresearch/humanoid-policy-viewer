@@ -402,10 +402,10 @@ export function computeMetrics(samples, { dt = 0.02, jointNames = [], sequence =
     rightContactDuty: round(mean(rows.map((sample) => (sample.footContacts?.right ? 1 : 0)))),
   };
 
-  // Gait symmetry over ALL samples — opt-in per test (see METHODOLOGY.md):
-  // the left/right mirror assumption only holds during sustained,
-  // constant-velocity straight-line walking, so a test must explicitly set
-  // `"gaitSymmetry": true` at its sequence's top level to have this computed.
+  // Gait symmetry over ALL samples — opt-in per test: the left/right mirror
+  // assumption only holds during sustained, constant-velocity straight-line
+  // walking, so a test must explicitly opt in (dataset row
+  // `metrics_opt_in: ["gait_symmetry"]`, i.e. `gaitSymmetry: true` here).
   const gaitSymmetry = sequence?.gaitSymmetry === true ? computeGaitSymmetry(rows, jointNames) : null;
 
   // Action smoothness.

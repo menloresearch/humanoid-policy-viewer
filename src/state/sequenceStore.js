@@ -1,11 +1,9 @@
-// Client for the /api/sequences filesystem persistence endpoint (served by
-// vite-plugin-sequences during dev/preview). All trajectory files — bundled
-// synthetic tests, manual recordings, and newly authored sequences — live on
-// disk under ./sequences and are read/written through here.
+// Client for the /api/sequences endpoint of the dev server (vite.config.mjs),
+// which reads and writes the tests of a benchmark dataset folder: each test is
+// "<category>/<name>.json" here and one row of data/<category>/test.jsonl on disk.
 //
-// There is no such filesystem behind the static (Cloudflare Pages) build.
-// build-static-catalog.mjs bakes ./benchmark's bundled tests into
-// /static-data/sequences.json at build time, so browsing/loading a test still
+// There is no such filesystem behind the static build. The embedding repo's
+// static build bakes a test listing into /static-data/sequences.json, so browsing/loading a test still
 // works there (fetched once and cached below); only *writing* — saving edits
 // or deleting a test — has no static equivalent and still throws. Edits made
 // in the trajectory editor survive via its "Export JSON" download instead.

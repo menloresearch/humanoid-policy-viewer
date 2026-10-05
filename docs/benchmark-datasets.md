@@ -9,7 +9,7 @@ suite.yaml                 what runs, how often, how it is scored, which numbers
 data/<config>/test.jsonl   one test per line; one dataset config per category (locomotion, push_walking, ...)
 eval.yaml                  Hub benchmark registration; generated from suite.yaml
 README.md                  dataset card; its front matter (configs, tags) is generated
-METHODOLOGY.md             why the tests are what they are
+METHODOLOGY.md             optional: why the tests are what they are
 calibration/, suites/      optional: calibration records, extra suite files (e.g. suites/smoke.yaml)
 ```
 
@@ -49,7 +49,7 @@ defaults:
   aggregate: mean                  # mean | median | worst, for continuous metrics over repeats
   pass_rule: all_repeats           # all_repeats | fraction, for upright / push recovered
   timeout_s: 600                   # wall-clock budget per cell
-tests:                             # by config or by id; later entries override earlier ones
+tests:                             # { all: true }, { config: … } or { id: … }; later entries override earlier ones
   - { config: locomotion }
   - { config: push_walking }
   - { id: distance/square_lap_100m, repeats: 1 }
@@ -97,10 +97,23 @@ with the old protocol are then refused for upload until they are re-validated: s
 
 ### Creating a new benchmark
 
+Everything happens locally until `publish`:
+
 ```bash
-npm run suite init ./new-bench from-legacy=<folder of old benchmark/*.json tests>   # or write rows by hand
-npm run suite publish ./new-bench repo=<org>/<name> create      # creates a PRIVATE dataset repo first
+npm run suite init ./new-bench          # starter suite.yaml (tests: [{ all: true }]) + one example test
+npm run dev suite=./new-bench           # add tests; type a new Category in the editor to start a category
+npm run suite validate ./new-bench
+npm run benchmark <model> ./new-bench   # real runs, results stay local
+npm run suite publish ./new-bench repo=<org>/<name> dry-run    # what would be uploaded
+npm run suite publish ./new-bench repo=<org>/<name> create     # creates a PRIVATE dataset repo first
 ```
+
+Plain `npm run dev` uses `./benchmark` (gitignored) and creates a starter benchmark there on first run.
+
+In the editor a test is saved as **Category / Test name** (the test id `<category>/<name>`). A new category
+gets its own `data/<category>/test.jsonl` and dataset config; `eval.yaml` and the card's configs are regenerated
+on every save. Deleting a category's last test removes it. A category only runs if `suite.yaml` selects it (the
+starter's `{ all: true }` selects everything) and only gets a leaderboard if a task scopes it.
 
 To appear as a Hub benchmark, `eval.yaml`'s `evaluation_framework: humanoid-policy-viewer` must be in the Hub's
 list of frameworks (a pull request to `huggingface/huggingface.js`, `packages/tasks/src/eval.ts`), and the

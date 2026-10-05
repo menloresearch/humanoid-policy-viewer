@@ -14,7 +14,7 @@
 //     aggregate: mean          # mean | median | worst
 //     pass_rule: all_repeats   # all_repeats | fraction
 //     timeout_s: 600           # wall-clock budget per cell
-//   tests:
+//   tests:                     # { all: true }, { config: <category> } or { id: <test id> }
 //     - { config: locomotion }
 //     - { id: distance/square_lap_100m, repeats: 1 }
 //   tasks:
@@ -97,8 +97,9 @@ export function parseSuite(raw) {
   const tests = asList(raw.tests);
   if (!tests.length) errors.push('tests must select at least one test');
   tests.forEach((entry, i) => {
-    if (!isPlainObject(entry) || (!entry.id && !entry.config) || (entry.id && entry.config)) {
-      errors.push(`tests[${i}] must have exactly one of id or config`);
+    const selectors = isPlainObject(entry) ? [entry.id, entry.config, entry.all === true ? true : undefined].filter((v) => v !== undefined) : [];
+    if (selectors.length !== 1) {
+      errors.push(`tests[${i}] must have exactly one of id, config or all: true`);
       return;
     }
     checkSettings(entry, `tests[${i}]`, errors);
@@ -149,7 +150,13 @@ export function compatibilityProblems(suite, { protocol = BENCHMARK_PROTOCOL } =
 }
 
 function matches(selector, row) {
+  if (selector.all === true) return true;
   return selector.id ? row.id === selector.id : row.config === selector.config;
+}
+
+function describeSelector(selector) {
+  if (selector.all === true) return 'all';
+  return selector.id ?? `config ${selector.config}`;
 }
 
 /**
@@ -162,9 +169,9 @@ export function selectTests(suite, rows) {
   const problems = [];
   suite.tests.forEach((selector, i) => {
     const hits = rows.filter((row) => matches(selector, row));
-    if (!hits.length) problems.push(`tests[${i}] (${selector.id ?? `config ${selector.config}`}) matches no test in the dataset`);
+    if (!hits.length) problems.push(`tests[${i}] (${describeSelector(selector)}) matches no test in the dataset`);
     for (const row of hits) {
-      const { id, config, ...overrides } = selector;
+      const { id, config, all, ...overrides } = selector;
       const previous = byId.get(row.id);
       byId.set(row.id, {
         row,

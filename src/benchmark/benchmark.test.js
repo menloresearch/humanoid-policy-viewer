@@ -1,9 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { cellSeed, mulberry32 } from './rng.js';
-import { legacyToRow, rowToSequence, tierFromLabel, validateTestRow } from './testRow.js';
+import { rowToSequence, sequenceToRow, validateTestRow } from './testRow.js';
 import { buildEvalYaml, compatibilityProblems, expandCells, parseSuite, selectTests } from './suite.js';
 import { computeTasks, summarizeTests } from './summary.js';
 import { BENCHMARK_PROTOCOL } from './protocol.js';
@@ -43,34 +44,22 @@ test('seeds depend only on suite seed, test id and repeat', () => {
   assert.ok(draws.every((x) => x >= 0 && x < 1));
 });
 
-test('every legacy benchmark test converts to a valid row and back unchanged', () => {
-  const root = new URL('../../benchmark/', import.meta.url).pathname;
-  const files = [];
-  (function walk(dir) {
-    for (const name of readdirSync(dir)) {
-      const path = join(dir, name);
-      if (statSync(path).isDirectory()) walk(path);
-      else if (name.endsWith('.json')) files.push(relative(root, path));
-    }
-  })(root);
-  assert.ok(files.length >= 30, `expected the legacy suite, found ${files.length} files`);
-  const ids = new Set();
-  for (const file of files) {
-    const legacy = JSON.parse(readFileSync(join(root, file), 'utf8'));
-    const converted = legacyToRow(file, legacy);
-    assert.deepEqual(validateTestRow(converted), [], file);
-    assert.ok(!ids.has(converted.id), `duplicate id ${converted.id}`);
-    ids.add(converted.id);
-    const back = rowToSequence(converted);
-    for (const event of back.events ?? []) delete event.tier;
-    assert.deepEqual(back, legacy, file);
+test('a row survives the editor round trip (row -> sequence -> row)', async () => {
+  const { readRows } = await import('../../scripts/suiteDir.mjs');
+  const { rows } = readRows(FIXTURE);
+  assert.ok(rows.length >= 2);
+  for (const original of rows) {
+    const sequence = rowToSequence(original);
+    assert.equal(sequence.events?.[0]?.tier ?? null, original.events[0]?.tier ?? null);
+    assert.equal(sequence.gaitSymmetry === true, original.metrics_opt_in.includes('gait_symmetry'));
+    assert.deepEqual(sequenceToRow(original.id, sequence, original), original);
   }
 });
 
-test('tiers come from push labels', () => {
-  assert.equal(tierFromLabel('pelvis back — reasonable (450N)'), 'reasonable');
-  assert.equal(tierFromLabel('pelvis back — beyond (575N)'), 'beyond');
-  assert.equal(tierFromLabel('sustained step 1'), null);
+test('a new category is just a new id prefix', () => {
+  const created = sequenceToRow('stairs/up_10cm', { name: 'stairs', duration: 3, commands: [{ t: 0, vx: 0.3 }], footFriction: 0.5 });
+  assert.equal(created.config, 'stairs');
+  assert.deepEqual(validateTestRow(created), []);
 });
 
 test('row validation catches bad rows', () => {
@@ -92,6 +81,13 @@ test('protocol and robot mismatches are reported', () => {
   const problems = compatibilityProblems(s);
   assert.equal(problems.length, 2);
   assert.match(problems[0], /abc/);
+});
+
+test('{ all: true } selects every test, including new categories', () => {
+  const rows = [row('loco/a'), row('brand_new/b')];
+  const s = suite({ tests: [{ all: true }] });
+  assert.deepEqual(selectTests(s, rows).map(({ row: r }) => r.id), ['loco/a', 'brand_new/b']);
+  assert.throws(() => suite({ tests: [{ all: true, config: 'loco' }] }), /exactly one of id, config or all/);
 });
 
 test('selection merges overrides and refuses identical repeats', () => {
@@ -168,6 +164,18 @@ test('eval.yaml tasks carry the version and their dataset config', () => {
     { id: 'upright_rate_v2' },
     { id: 'push_v2', config: 'push', split: 'test' },
   ]);
+});
+
+test('suite init writes a valid starter benchmark', async () => {
+  const { initSuite } = await import('../../scripts/suite.mjs');
+  const { loadSuiteDir } = await import('../../scripts/suiteDir.mjs');
+  const dir = join(mkdtempSync(join(tmpdir(), 'hpv-init-')), 'my-bench');
+  initSuite(dir, { log: () => {} });
+  const loaded = loadSuiteDir(dir);
+  assert.equal(loaded.suite.suite, 'my-bench');
+  assert.deepEqual(compatibilityProblems(loaded.suite), []);
+  assert.equal(expandCells(selectTests(loaded.suite, loaded.rows)).length, 1);
+  assert.throws(() => initSuite(dir, { log: () => {} }), /not empty/);
 });
 
 test('the smoke-suite fixture is valid', async () => {

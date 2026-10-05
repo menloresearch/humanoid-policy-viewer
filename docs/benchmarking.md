@@ -87,8 +87,8 @@ identical cells. Each extra page costs some start-up time (loading MuJoCo and th
 fewer pages can be faster.
 
 `watch` shows the browser and runs in real time on one page, for looking at a policy. The in-app
-**Tests & Benchmark** panel runs the same code on the tests of the current folder (or of `npm run dev suite=<dir>`)
-and keeps its results locally; it never uploads.
+**Tests & Benchmark** panel runs the same code, once per test, on the benchmark `npm run dev` is editing (`./benchmark`
+or `suite=<dir>`) and keeps its results locally; it never uploads.
 
 ## Saved runs
 

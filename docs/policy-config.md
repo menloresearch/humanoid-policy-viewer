@@ -74,6 +74,6 @@ hardware maxima that usually differ. See `public/examples/scenes/README.md`.
 Ship `env.yaml` (and `agent.yaml` as a record of the training run) with every
 checkpoint, and make sure `env.yaml` explicitly declares stiffness, damping and
 `effort_limit` for every joint in `policy_joint_names`. Otherwise the viewer
-silently falls back to the JSON's gains and unclamped torque, the shared-gains
-mistake [`benchmark/METHODOLOGY.md`](../benchmark/METHODOLOGY.md) warns about. A
+silently falls back to the JSON's gains and unclamped torque, so every
+checkpoint would be benchmarked with the same gains. A
 CI job can enforce this before running the suite.

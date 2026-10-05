@@ -14,18 +14,21 @@
         </div>
         <v-alert v-if="listError" type="warning" density="compact" class="mb-2">{{ listError }}</v-alert>
         <v-list density="compact" nav>
-          <v-list-item
-            v-for="item in savedList"
-            :key="item.file"
-            :active="item.file === file"
-            :title="item.name"
-            :subtitle="`${item.file} · ${item.duration}s · ${item.keypointCount} pts`"
-            @click="openSaved(item.file)"
-          >
-            <template v-if="!STATIC" #append>
-              <v-btn icon="mdi-delete" size="x-small" variant="text" @click.stop="removeSaved(item.file)"></v-btn>
-            </template>
-          </v-list-item>
+          <template v-for="group in savedGroups" :key="group.category">
+            <v-list-subheader>{{ group.category }}</v-list-subheader>
+            <v-list-item
+              v-for="item in group.items"
+              :key="item.file"
+              :active="item.file === file"
+              :title="item.name"
+              :subtitle="`${item.file.replace(/\.json$/, '')} · ${item.duration}s · ${item.keypointCount} pts`"
+              @click="openSaved(item.file)"
+            >
+              <template v-if="!STATIC" #append>
+                <v-btn icon="mdi-delete" size="x-small" variant="text" @click.stop="removeSaved(item.file)"></v-btn>
+              </template>
+            </v-list-item>
+          </template>
           <v-list-item v-if="savedList.length === 0" title="No saved sequences" class="text-disabled"></v-list-item>
         </v-list>
       </div>
@@ -37,9 +40,13 @@
             v-model="working.name" label="Name" density="compact" hide-details
             style="max-width: 240px" @update:modelValue="onNameChange"
           ></v-text-field>
+          <v-combobox
+            v-model="category" :items="categories" label="Category" density="compact" hide-details
+            placeholder="pick or type a new one" style="max-width: 200px"
+          ></v-combobox>
           <v-text-field
-            v-model="file" label="Filename" density="compact" hide-details
-            placeholder="my_trajectory.json" style="max-width: 240px"
+            v-model="testName" label="Test name" density="compact" hide-details
+            placeholder="my_test" style="max-width: 200px"
           ></v-text-field>
           <v-text-field
             v-model.number="durationInput" label="Duration (s)" type="number"
@@ -49,6 +56,7 @@
           ></v-text-field>
         </div>
         <div v-if="durationError" class="text-error text-caption mb-2">{{ durationError }}</div>
+        <div v-if="idError" class="text-error text-caption mb-2">{{ idError }}</div>
 
         <!-- Editable per-axis command limits -->
         <div class="limits-section mb-3">
@@ -147,6 +155,15 @@ import { listSequences, loadSequenceFile, saveSequenceFile, deleteSequenceFile, 
 import { STATIC } from '@/state/viewerMode.js';
 import { commandSequencer } from '@/simulation/commandSequencer.js';
 
+// Category and test name: the two halves of a test id (<category>/<name>).
+const SLUG_RE = /^[a-z0-9][a-z0-9_]*$/;
+
+function splitTestFile(file) {
+  const id = String(file ?? '').replace(/\.json$/i, '');
+  const slash = id.indexOf('/');
+  return slash < 0 ? { category: '', testName: id } : { category: id.slice(0, slash), testName: id.slice(slash + 1) };
+}
+
 export default {
   name: 'TrajectoryEditor',
   components: { KeypointChart, DerivedChart, PushLane },
@@ -165,10 +182,42 @@ export default {
       statusMsg: '',
       statusIsError: false,
       durationInput: appState.editorSequence?.duration ?? 15,
-      file: appState.editorFile ?? ''
+      // A test is saved as <category>/<test name>; a new category is just a new name here.
+      category: splitTestFile(appState.editorFile).category,
+      testName: splitTestFile(appState.editorFile).testName
     };
   },
   computed: {
+    file: {
+      get() {
+        const category = String(this.category ?? '').trim();
+        const testName = this.testName.trim();
+        return category && testName ? `${category}/${testName}.json` : '';
+      },
+      set(value) {
+        ({ category: this.category, testName: this.testName } = splitTestFile(value));
+      }
+    },
+    categories() {
+      return [...new Set(this.savedList.map((item) => item.folder).filter(Boolean))].sort();
+    },
+    savedGroups() {
+      const groups = new Map();
+      for (const item of this.savedList) {
+        const category = item.folder || '(none)';
+        if (!groups.has(category)) groups.set(category, []);
+        groups.get(category).push(item);
+      }
+      return [...groups].map(([category, items]) => ({ category, items }));
+    },
+    idError() {
+      const category = String(this.category ?? '').trim();
+      const testName = this.testName.trim();
+      if (!category && !testName) return '';
+      if (!SLUG_RE.test(category)) return 'Category: lower case letters, digits and _ (e.g. push_walking)';
+      if (!SLUG_RE.test(testName)) return 'Test name: lower case letters, digits and _ (e.g. chest_front)';
+      return '';
+    },
     working() {
       return appState.editorSequence;
     },
@@ -202,7 +251,7 @@ export default {
       return '';
     },
     canSave() {
-      return this.durationError === '' && this.file.trim().length > 0;
+      return this.durationError === '' && this.idError === '' && this.file.length > 0;
     }
   },
   methods: {
@@ -220,7 +269,7 @@ export default {
       }
     },
     onNameChange() {
-      if (!this.file.trim()) this.file = slugify(this.working.name);
+      if (!this.testName.trim()) this.testName = slugify(this.working.name).replace(/\.json$/, '');
     },
     onDurationChange() {
       const d = Number(this.durationInput);
@@ -385,7 +434,8 @@ export default {
     createNew() {
       newBlankSequence();
       this.durationInput = this.working.duration;
-      this.file = '';
+      // Keep the category: a new test usually goes next to the last one.
+      this.testName = '';
       this.ensureLimits();
       this.ensureEvents();
       this.syncLimitDrafts();
@@ -506,7 +556,7 @@ export default {
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = (this.file.trim() || slugify(this.working.name));
+      link.download = (this.testName.trim() || slugify(this.working.name));
       if (!/\.json$/i.test(link.download)) link.download += '.json';
       link.click();
       URL.revokeObjectURL(url);

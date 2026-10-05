@@ -485,7 +485,7 @@ export async function loadEnvPolicySettings(onnxPath, jointNames) {
   // reloadPolicy) will silently keep whatever
   // stiffness/damping/action_scale/default_joint_pos were already in the
   // reference config. That's the exact shared-gains bug this file
-  // exists to prevent (see benchmark/METHODOLOGY.md), so it's not allowed to
+  // exists to prevent (every checkpoint scored with the same gains), so it's not allowed to
   // pass without a trace even though we still return null rather than throw
   // — throwing here would make an otherwise-loadable checkpoint (e.g. one
   // still mid-export) unviewable in the interactive demo.
