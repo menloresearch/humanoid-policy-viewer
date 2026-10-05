@@ -50,20 +50,15 @@ applies the actuators' `effort_limit` as each joint's torque cap. If there is no
 A checkpoint may also ship a `tracking_policy.json` (looked up like
 `env.yaml`: `params/` first, then the model folder). Its fields replace the
 base policy config's, with `onnx` merged one level deep so the ONNX path still
-follows the checkpoint. Recurrent policies (LSTM, GRU, frame history) use it to
-declare the recurrent interface:
+follows the checkpoint. `npm run hf` downloads the file from a Hugging Face repo
+when present. Checkpoints without one load as before.
 
-```json
-{"onnx": {"meta": {"in_keys": ["policy", "is_init", "adapt_hx"],
-                   "out_keys": ["action", "next,adapt_hx"],
-                   "in_shapes": [[[1, 78]], [[1]], [[1, 128]]]}}}
-```
-
-The viewer maps `in_keys`/`out_keys` to the ONNX inputs and outputs by position,
-starts each episode with `is_init = true` and a 128-float `adapt_hx`, then feeds
-`next_adapt_hx` back every step, so the carried state may be any width as long
-as the ONNX accepts a 128-float first carry. `npm run hf` downloads the file
-from a Hugging Face repo when present. Checkpoints without one load as before.
+Recurrent policies (LSTM, GRU, frame history) do not need one: the viewer finds
+their state inputs and the outputs that feed them in the ONNX itself (see
+[Supported policies](huggingface.md#supported-policies)). Older exports whose
+`tracking_policy.json` declares `"in_keys": ["policy", "is_init", "adapt_hx"]`
+still load; only the first `in_keys` entry, the observation, is used to feed the
+ONNX.
 
 ## The robot model is separate
 

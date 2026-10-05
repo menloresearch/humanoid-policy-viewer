@@ -402,10 +402,10 @@ function checkpointDirUrl(onnxPath) {
 }
 
 // A checkpoint may ship its own tracking_policy.json (params/ or model root) to
-// override parts of the shared base policy config, e.g. onnx.meta for a policy
-// that carries recurrent state through adapt_hx (LSTM, GRU or frame-history
-// actors). Returns the parsed JSON, or null when the checkpoint has none (the
-// common case: the base config applies as-is).
+// override parts of the shared base policy config. Recurrent policies do not
+// need one: their state is read off the ONNX graph (policyState.js). Returns
+// the parsed JSON, or null when the checkpoint has none (the common case: the
+// base config applies as-is).
 export async function loadCheckpointPolicyConfig(onnxPath) {
   const modelUrl = checkpointDirUrl(onnxPath);
   if (!modelUrl) return null;

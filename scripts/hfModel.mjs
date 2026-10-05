@@ -70,7 +70,7 @@ export function defaultCacheDir(env = process.env) {
 
 // Every ONNX in the repo, plus the training config (env.yaml supplies the gains,
 // agent.yaml is only checked for presence) and, when present, the checkpoint's
-// tracking_policy.json (e.g. the recurrent interface of LSTM/GRU policies).
+// tracking_policy.json (its overrides of the base policy config).
 export function selectFiles(files) {
   const onnx = files.filter((f) => f.toLowerCase().endsWith('.onnx')).sort();
   if (onnx.length === 0) throw new Error('The repo contains no .onnx file');
