@@ -28,7 +28,7 @@
 // (trajectory editor) back into a row.
 
 import { TEST_KINDS, TEST_SCHEMA_VERSION } from './protocol.js';
-import { validateTerrain } from '../simulation/terrainGen.js';
+import { TERRAIN_TYPES, validateTerrain } from '../simulation/terrainGen.js';
 
 export const TIERS = ['reasonable', 'beyond'];
 // The dataset config that holds every test (data/*/test.jsonl); not a category.
@@ -36,6 +36,44 @@ export const ALL_CONFIG = 'all';
 const ID_RE = /^[a-z0-9][a-z0-9_]*\/[a-z0-9][a-z0-9_.-]*$/;
 const OPT_IN_METRICS = ['gait_symmetry'];
 const EVENT_KEYS = ['t', 'type', 'dir', 'force', 'duration', 'targetBody', 'torqueAxis', 'torqueMag', 'label', 'tier'];
+
+// The row schema in Hugging Face `datasets` terms, declared in the dataset card
+// (dataset_info.features) so the Hub never has to guess column types. Guessing
+// fails: a column that is null in every row of one file (foot_friction outside
+// the friction tests) cannot be merged with the numbers in another.
+const float = { dtype: 'float64' };
+const floats = { sequence: 'float64' };
+const string = { dtype: 'string' };
+// A struct has one fixed field set, so terrain declares the union of every
+// course type's parameters; parameters another type does not use stay null.
+const terrainFeatures = [['type', string]];
+for (const def of Object.values(TERRAIN_TYPES)) {
+  for (const [key, p] of Object.entries(def.params)) {
+    if (!terrainFeatures.some(([name]) => name === key)) terrainFeatures.push([key, p.integer ? { dtype: 'int64' } : float]);
+  }
+}
+export const ROW_FEATURES = [
+  ['id', string], ['config', string], ['schema_version', { dtype: 'int64' }], ['kind', string], ['name', string],
+  ['description', string], ['tags', { sequence: 'string' }], ['duration', float],
+  ['commands', { list: [['t', float], ['vx', float], ['vy', float], ['wz', float]] }],
+  ['events', {
+    list: [
+      ['t', float], ['type', string], ['dir', floats], ['force', float], ['duration', float], ['targetBody', string],
+      ['torqueAxis', floats], ['torqueMag', float], ['label', string], ['tier', string],
+    ],
+  }],
+  ['limits', { struct: [['vx', floats], ['vy', floats], ['wz', floats]] }],
+  ['foot_friction', float], ['terrain', { struct: terrainFeatures }], ['metrics_opt_in', { sequence: 'string' }],
+];
+
+/** ROW_FEATURES as the YAML structure `datasets` reads from a card. */
+export function rowFeaturesYaml(features = ROW_FEATURES) {
+  return features.map(([name, type]) => {
+    if (type.list) return { name, list: rowFeaturesYaml(type.list) };
+    if (type.struct) return { name, struct: rowFeaturesYaml(type.struct) };
+    return { name, ...type };
+  });
+}
 
 const isNumber = (value) => typeof value === 'number' && Number.isFinite(value);
 

@@ -16,7 +16,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSy
 import { join } from 'node:path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { buildEvalYaml, parseSuite } from '../src/benchmark/suite.js';
-import { ALL_CONFIG, validateTestRow } from '../src/benchmark/testRow.js';
+import { ALL_CONFIG, rowFeaturesYaml, validateTestRow } from '../src/benchmark/testRow.js';
 
 export const SUITE_FILE = 'suite.yaml';
 export const DATA_DIR = 'data';
@@ -95,6 +95,8 @@ export function cardFrontMatter(rows, { license = 'bsd-3-clause', prettyName }) 
     pretty_name: prettyName,
     task_categories: ['robotics'],
     tags: ['benchmark', 'humanoid', 'locomotion', 'humanoid-policy-viewer'],
+    // Declared column types for every config (see ROW_FEATURES).
+    dataset_info: [ALL_CONFIG, ...configs].map((config) => ({ config_name: config, features: rowFeaturesYaml() })),
     // "all" (the default) holds every test; tasks spanning categories score it.
     configs: [
       { config_name: ALL_CONFIG, default: true, data_files: [{ split: 'test', path: `${DATA_DIR}/*/${ROWS_FILE}` }] },

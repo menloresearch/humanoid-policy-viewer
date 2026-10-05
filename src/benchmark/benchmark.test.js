@@ -4,7 +4,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { cellSeed, mulberry32 } from './rng.js';
-import { rowToSequence, sequenceToRow, validateTestRow } from './testRow.js';
+import { ROW_FEATURES, rowToSequence, sequenceToRow, validateTestRow } from './testRow.js';
 import { buildEvalYaml, compatibilityProblems, expandCells, parseSuite, selectTests } from './suite.js';
 import { computeTasks, summarizeTests } from './summary.js';
 import { BENCHMARK_PROTOCOL } from './protocol.js';
@@ -81,6 +81,17 @@ test('a terrain test keeps its course through the editor and is checked before a
   assert.match(errors[0], /^loco\/spawn: the course reaches x = 0\.00 m, inside the spawn area/);
   // row() walks 0.5 m/s for 4 s: it reaches the stairs but not their end; that is not a warning
   assert.deepEqual(warnings.filter((w) => w.startsWith('loco/stairs')), []);
+});
+
+test('the declared dataset schema covers exactly the row and event fields', async () => {
+  const names = (features) => features.map(([name]) => name).sort();
+  assert.deepEqual(names(ROW_FEATURES), Object.keys(row('loco/a')).sort());
+  const events = ROW_FEATURES.find(([name]) => name === 'events')[1].list;
+  assert.deepEqual(names(events), Object.keys(push(1, 100, 'reasonable')).sort());
+  const { TERRAIN_TYPES } = await import('../simulation/terrainGen.js');
+  const terrain = ROW_FEATURES.find(([name]) => name === 'terrain')[1].struct;
+  const params = new Set(Object.values(TERRAIN_TYPES).flatMap((def) => Object.keys(def.params)));
+  assert.deepEqual(names(terrain), ['type', ...params].sort());
 });
 
 test('row validation catches bad rows', () => {
