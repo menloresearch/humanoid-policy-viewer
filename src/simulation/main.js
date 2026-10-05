@@ -200,6 +200,7 @@ export class MuJoCoDemo {
   }
 
   async init() {
+    this.defaultScenePath = defaultScene;
     await downloadExampleScenesFolder(this.mujoco);
     await this.reloadScene(defaultScene);
     commandSequencer.bindSim(this);

@@ -1,0 +1,25 @@
+{
+  "name": "terrain: 15 degree ramp up to 0.4 m and down",
+  "duration": 22,
+  "terrain": "terrain/slope_15deg.xml",
+  "commands": [
+    {
+      "t": 0,
+      "vx": 0,
+      "vy": 0,
+      "wz": 0
+    },
+    {
+      "t": 0.3,
+      "vx": 0.4,
+      "vy": 0,
+      "wz": 0
+    },
+    {
+      "t": 20.5,
+      "vx": 0,
+      "vy": 0,
+      "wz": 0
+    }
+  ]
+}

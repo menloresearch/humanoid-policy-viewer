@@ -80,6 +80,19 @@ function listAfter(lines, key) {
   return result;
 }
 
+// An actuator group's settings. A gain or limit given per joint pattern (a
+// nested map, e.g. one group for every joint with `stiffness: {.*_knee_joint:
+// 150.0, ...}`) is kept as that map and resolved per joint by matchOneActuator.
+function actuatorFields(item, indent) {
+  const config = fields(item, indent);
+  for (const key of ['stiffness', 'damping', 'effort_limit']) {
+    if (config[key] !== '') continue;
+    const map = block(item, [key]);
+    if (map?.length) config[key] = directFields(map);
+  }
+  return config;
+}
+
 function isaacActuators(lines) {
   const entries = [];
   const indent = Math.min(...lines.map((line) => line.indent));
@@ -88,7 +101,7 @@ function isaacActuators(lines) {
     let end = i + 1;
     while (end < lines.length && lines[end].indent > indent) end++;
     const item = lines.slice(i + 1, end);
-    const config = fields(item, indent + 2);
+    const config = actuatorFields(item, indent + 2);
     for (const pattern of listAfter(item, 'joint_names_expr')) {
       entries.push({ pattern, stiffness: config.stiffness, damping: config.damping, effort_limit: config.effort_limit, min_delay: config.min_delay, max_delay: config.max_delay });
     }
@@ -105,7 +118,7 @@ function mjlabActuators(lines) {
     let end = i + 1;
     while (end < lines.length && lines[end].indent > indent) end++;
     const item = lines.slice(i + 1, end);
-    const config = fields(item, indent + 2);
+    const config = actuatorFields(item, indent + 2);
     const firstPattern = lines[i].text.match(/^- target_names_expr:\s*(.+)$/)?.[1];
     const patterns = firstPattern && !firstPattern.startsWith('!!')
       ? [firstPattern]
@@ -191,6 +204,134 @@ function commandRangesFor(lines) {
   return { command_limits: { vx, vy, wz } };
 }
 
+// Children of a YAML block that are themselves maps, as [name, lines] pairs.
+function mapEntries(lines) {
+  const entries = [];
+  const indent = Math.min(...lines.map((line) => line.indent));
+  for (let i = 0; i < lines.length;) {
+    if (lines[i].indent !== indent || !lines[i].text.endsWith(':')) { i++; continue; }
+    let end = i + 1;
+    while (end < lines.length && lines[end].indent > indent) end++;
+    if (end > i + 1) entries.push([lines[i].text.slice(0, -1), lines.slice(i + 1, end)]);
+    i = end;
+  }
+  return entries;
+}
+
+function optionalNumber(value) {
+  const number = Number(value);
+  return value === undefined || value === '' || value === 'null' || !Number.isFinite(number) ? null : number;
+}
+
+// The viewer observation each env.yaml policy term maps to, keyed by the
+// observation function's name (after the module path), the `quantity` param of
+// a delayed-observation wrapper, or the term's own name.
+const OBS_KINDS = {
+  base_ang_vel: 'ang_vel',
+  projected_gravity: 'gravity',
+  generated_commands: 'command',
+  joint_pos_rel: 'joint_pos',
+  joint_vel_rel: 'joint_vel',
+  last_action: 'last_action',
+};
+
+function obsKind(name, func, params) {
+  const funcName = func?.split(/[:.]/).pop();
+  return OBS_KINDS[funcName] ?? OBS_KINDS[params.quantity] ?? OBS_KINDS[name] ?? null;
+}
+
+function slotIndices(name, termLines, jointNames) {
+  const assetLines = block(termLines, ['params', 'asset_cfg']) ?? [];
+  const names = listAfter(assetLines, 'joint_names');
+  if (names.length === 0) throw new Error(`${name} does not list its joint_names, so its joint order is unknown`);
+  if (names.length > 1 && directFields(assetLines).preserve_order !== 'true') {
+    throw new Error(`${name} does not set preserve_order, so its joint order follows the robot asset, which the viewer cannot see`);
+  }
+  return names.map((joint) => {
+    const index = jointNames.indexOf(joint);
+    if (index < 0) throw new Error(`${name} reads ${joint}, which the policy does not drive`);
+    return index;
+  });
+}
+
+function unscaled(name, scale) {
+  if (scale !== null && scale !== 1) throw new Error(`${name} is scaled by ${scale}, which the viewer does not support for this observation`);
+}
+
+function obsEntryFor(name, termLines, kind, scale, lines, jointNames) {
+  const params = directFields(block(termLines, ['params']));
+  if (kind === 'ang_vel') return { name: 'AsimovAngVel', scale: scale ?? 1 };
+  if (kind === 'gravity') { unscaled(name, scale); return { name: 'AsimovProjectedGravity' }; }
+  if (kind === 'last_action') { unscaled(name, scale); return { name: 'AsimovPrevActions' }; }
+  if (kind === 'joint_pos') {
+    unscaled(name, scale);
+    return { name: 'AsimovJointPosSlot', slot_name: name.replace(/^joint_pos_?/, '') || 'all', indices: slotIndices(name, termLines, jointNames) };
+  }
+  if (kind === 'joint_vel') {
+    return { name: 'AsimovJointVelSlot', slot_name: name.replace(/^joint_vel_?/, '') || 'all', scale: scale ?? 1, indices: slotIndices(name, termLines, jointNames) };
+  }
+  // A command term: which command it reads decides what it is.
+  unscaled(name, scale);
+  const command = block(lines, ['commands', params.command_name]);
+  const settings = directFields(command);
+  const classType = settings.class_type ?? '';
+  if (/VelocityCommand$/.test(classType)) return { name: 'AsimovCommand' };
+  if (/GaitClockCommand$/.test(classType)) {
+    const period = (key) => {
+      const value = optionalNumber(settings[key]);
+      if (value === null) throw new Error(`${name} reads command ${params.command_name}, which is missing ${key}`);
+      return value;
+    };
+    return {
+      name: 'AsimovGaitClock',
+      order: 'sin_cos',
+      zero_at_rest: true,
+      period_slow: period('period_slow'),
+      period_fast: period('period_fast'),
+      speed_slow: period('speed_slow'),
+      speed_fast: period('speed_fast'),
+      stand_threshold: optionalNumber(settings.stand_threshold) ?? 0.1,
+    };
+  }
+  throw new Error(`${name} reads command ${params.command_name ?? '(unnamed)'} of type ${classType || 'unknown'}`);
+}
+
+// The policy's observation recipe, read from observations.policy: one viewer
+// observation per term, in order, with the term's history stacked the way
+// Isaac Lab and mjlab flatten it (term by term, oldest first). Returns
+// { obs_config } when every term maps to something the viewer computes,
+// { obs_config_error } naming the terms that do not, and null when env.yaml
+// has no observations.policy (the reference recipe is used then).
+function policyObsConfigFor(lines, jointNames) {
+  const group = block(lines, ['observations', 'policy']);
+  if (!group?.length) return null;
+  const groupSettings = directFields(group);
+  // mjlab nests the terms under `terms:`; Isaac Lab lists them in the group.
+  const terms = mapEntries(block(group, ['terms']) ?? group);
+  const groupHistory = optionalNumber(groupSettings.history_length);
+
+  const policy = [];
+  const problems = [];
+  for (const [name, termLines] of terms) {
+    const settings = directFields(termLines);
+    if (!('func' in settings)) continue;
+    const params = directFields(block(termLines, ['params']));
+    const kind = obsKind(name, settings.func, params);
+    try {
+      if (!kind) throw new Error(`${name} (${settings.func}) is not something the viewer computes`);
+      const entry = obsEntryFor(name, termLines, kind, optionalNumber(settings.scale), lines, jointNames);
+      const history = groupHistory ?? optionalNumber(settings.history_length) ?? 0;
+      const flatten = groupSettings.flatten_history_dim ?? settings.flatten_history_dim;
+      if (history > 1 && flatten === 'false') throw new Error(`${name} keeps its history unflattened`);
+      policy.push(history > 1 ? { ...entry, history_length: history } : entry);
+    } catch (error) {
+      problems.push(error.message);
+    }
+  }
+  if (problems.length) return { obs_config_error: `env.yaml's policy observations cannot be reproduced: ${problems.join('; ')}` };
+  return policy.length ? { obs_config: { policy } } : null;
+}
+
 export function parseEnvPolicySettings(yaml, jointNames) {
   const lines = linesOf(yaml);
   const isaac = block(lines, ['scene', 'robot', 'actuators']);
@@ -208,7 +349,13 @@ export function parseEnvPolicySettings(yaml, jointNames) {
       catch { throw new Error(`Invalid actuator joint pattern in env.yaml: ${pattern}`); }
     });
     if (matching.length !== 1) throw new Error(`Expected one actuator for ${name} in env.yaml; found ${matching.length}`);
-    return matching[0];
+    const actuator = { ...matching[0] };
+    for (const key of ['stiffness', 'damping', 'effort_limit']) {
+      if (actuator[key] && typeof actuator[key] === 'object') {
+        actuator[key] = String(matchValue(Object.entries(actuator[key]), name, key));
+      }
+    }
+    return actuator;
   };
   const gainFor = (name, key) => scalar(matchOneActuator(name)[key]);
 
@@ -237,6 +384,7 @@ export function parseEnvPolicySettings(yaml, jointNames) {
     default_joint_pos: valuesForJoints(directFields(pose), jointNames, 'default pose'),
     ...(delay ?? {}),
     ...(commandRanges ?? {}),
+    ...(policyObsConfigFor(lines, jointNames) ?? {}),
   };
 }
 
@@ -251,6 +399,26 @@ function checkpointDirUrl(onnxPath) {
   }
   const slash = onnxPath.lastIndexOf('/');
   return slash < 0 ? null : onnxPath.slice(0, slash);
+}
+
+// A checkpoint may ship its own tracking_policy.json (params/ or model root) to
+// override parts of the shared base policy config. Recurrent policies do not
+// need one: their state is read off the ONNX graph (policyState.js). Returns
+// the parsed JSON, or null when the checkpoint has none (the common case: the
+// base config applies as-is).
+export async function loadCheckpointPolicyConfig(onnxPath) {
+  const modelUrl = checkpointDirUrl(onnxPath);
+  if (!modelUrl) return null;
+  for (const filename of checkpointFileCandidates('tracking_policy.json')) {
+    const url = `${modelUrl}/${filename}`;
+    const response = await fetch(url);
+    if (response.status === 404) continue;
+    if (!response.ok) throw new Error(`Failed to load ${url}: ${response.status}`);
+    // Static SPA hosts may answer a missing asset request with index.html.
+    if (response.headers.get('content-type')?.includes('text/html')) continue;
+    return await response.json();
+  }
+  return null;
 }
 
 export async function loadEnvPolicySettings(onnxPath, jointNames) {

@@ -1,0 +1,11 @@
+<mujoco model="terrain slope_10deg">
+  <!-- 10 degree ramp up to 0.3 m and down (scripts/make_terrain_benchmark.py) -->
+  <asset>
+    <material name="terrain" rgba="0.55 0.5 0.42 1"/>
+  </asset>
+  <worldbody>
+    <geom name="ramp0" type="box" pos="2.3681 0.0000 0.0515" size="0.8638 3.0000 0.1000" euler="0.00000 -0.17453 0.00000" material="terrain" contype="1" conaffinity="1" condim="3" friction="1.0 0.5 0.1"/>
+    <geom name="ramp1" type="box" pos="5.5347 0.0000 0.0515" size="0.8638 3.0000 0.1000" euler="0.00000 0.17453 0.00000" material="terrain" contype="1" conaffinity="1" condim="3" friction="1.0 0.5 0.1"/>
+    <geom name="ramp_top" type="box" pos="3.9514 0.0000 0.1500" size="0.7700 3.0000 0.1500" material="terrain" contype="1" conaffinity="1" condim="3" friction="1.0 0.5 0.1"/>
+  </worldbody>
+</mujoco>

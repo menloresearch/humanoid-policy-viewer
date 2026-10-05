@@ -1,6 +1,6 @@
 import * as ort from 'onnxruntime-web/wasm';
 import { ONNXModule } from './onnxHelper.js';
-import { Observations } from './observationHelpers.js';
+import { ObsHistory, Observations } from './observationHelpers.js';
 import { policyIOErrorMessage, policyIOErrors } from './policyIO.js';
 import { TrackingHelper } from './trackingHelper.js';
 import { toFloatArray } from './utils/math.js';
@@ -91,14 +91,15 @@ export class PolicyRunner {
   async init() {
     await this.module.init();
     const { session, inKeys, outKeys } = this.module;
-    const ioErrors = policyIOErrors({
+    const ioErrors = [...policyIOErrors({
       inputMetadata: session.inputMetadata,
       outputMetadata: session.outputMetadata,
       inputName: session.inputNames[inKeys.indexOf(this.inputKey)],
       outputName: session.outputNames[outKeys.indexOf(this.outputKey)],
       numObs: this.numObs,
       numActions: this.numActions,
-    });
+      recipeError: this.config.obs_config_error,
+    }), ...this.module.statePlan.errors];
     if (ioErrors.length) {
       throw new Error(policyIOErrorMessage(ioErrors));
     }
@@ -114,7 +115,10 @@ export class PolicyRunner {
       }
       const kwargs = { ...obsConfigEntry };
       delete kwargs.name;
-      return new ObsClass(this, kwargs);
+      delete kwargs.history_length;
+      const obs = new ObsClass(this, kwargs);
+      const historyLength = obsConfigEntry.history_length ?? 1;
+      return historyLength > 1 ? new ObsHistory(obs, historyLength) : obs;
     });
   }
 
@@ -216,51 +220,65 @@ export class PolicyRunner {
 
     for (let entryIdx = 0; entryIdx < obsList.length; entryIdx++) {
       const entry = obsList[entryIdx];
-      const name = entry.name;
       const module = this.obsModules[entryIdx];
       const size = module?.size ?? 0;
       const segment = obs ? obs.slice(offset, offset + size) : null;
 
-      if (name === 'AsimovAngVel' || name === 'RootAngVelB') {
-        this._pushScalarCsvParts(labels, values, ['base_ang_vel_x', 'base_ang_vel_y', 'base_ang_vel_z'], segment);
-      } else if (name === 'AsimovProjectedGravity' || name === 'ProjectedGravityB') {
-        this._pushScalarCsvParts(labels, values, ['projected_gravity_x', 'projected_gravity_y', 'projected_gravity_z'], segment);
-      } else if (name === 'AsimovCommand') {
-        this._pushScalarCsvParts(labels, values, ['command_x', 'command_y', 'command_yaw'], segment);
-      } else if (name === 'AsimovGaitClock') {
-        this._pushScalarCsvParts(labels, values, ['gait_clock_cos', 'gait_clock_sin'], segment);
-      } else if (name === 'AsimovInterruptMask') {
-        this._pushScalarCsvParts(labels, values, ['interrupt_mask'], segment);
-      } else if (name === 'BootIndicator') {
-        this._pushScalarCsvParts(labels, values, ['boot_indicator'], segment);
-      } else if (name === 'ComplianceFlagObs') {
-        this._pushScalarCsvParts(labels, values, ['compliance_enabled', 'compliance_threshold', 'compliance_kp'], segment);
-      } else if (name === 'AsimovJointPosSlot') {
-        this._pushJointSlotCsvParts(labels, values, entry, `joint_pos_${entry.slot_name ?? 'slot'}`, segment);
-      } else if (name === 'AsimovJointVelSlot') {
-        this._pushJointSlotCsvParts(labels, values, entry, `joint_vel_${entry.slot_name ?? 'slot'}`, segment);
-      } else if (name === 'AsimovPrevActions') {
-        this._pushPolicyJointCsvParts(labels, values, 'prev_action', 1, segment);
-      } else if (name === 'PrevActions') {
-        const steps = Math.max(1, Math.floor(entry.history_steps ?? 4));
-        this._pushPolicyJointCsvParts(labels, values, 'prev_action', steps, segment);
-      } else if (name === 'JointPos') {
-        const steps = entry.pos_steps ?? [0, 1, 2, 3, 4, 8];
-        const perStep = this.numActions;
-        for (let stepIdx = 0; stepIdx < steps.length; stepIdx++) {
-          const stepSegment = segment ? segment.slice(stepIdx * perStep, (stepIdx + 1) * perStep) : null;
-          this._pushPolicyJointCsvParts(labels, values, `joint_pos_history_t_minus_${steps[stepIdx]}`, 1, stepSegment);
-        }
-      } else {
-        for (let i = 0; i < size; i++) {
-          labels.push(this._cleanColumnName(`${name ?? 'obs'}_${i}`));
-          if (segment) values.push(segment[i]);
+      // A stacked history repeats the term's columns once per step, oldest first.
+      const steps = module instanceof ObsHistory ? module.length : 1;
+      const perStep = size / steps;
+      for (let step = 0; step < steps; step++) {
+        const first = labels.length;
+        const stepSegment = segment ? segment.slice(step * perStep, (step + 1) * perStep) : null;
+        this._pushEntryCsvParts(labels, values, entry, perStep, stepSegment);
+        if (steps > 1) {
+          for (let i = first; i < labels.length; i++) labels[i] = `${labels[i]}_t_minus_${steps - 1 - step}`;
         }
       }
       offset += size;
     }
 
     return { labels: labels.slice(0, this.numObs), values: values.slice(0, this.numObs) };
+  }
+
+  _pushEntryCsvParts(labels, values, entry, size, segment) {
+    const name = entry.name;
+    if (name === 'AsimovAngVel' || name === 'RootAngVelB') {
+      this._pushScalarCsvParts(labels, values, ['base_ang_vel_x', 'base_ang_vel_y', 'base_ang_vel_z'], segment);
+    } else if (name === 'AsimovProjectedGravity' || name === 'ProjectedGravityB') {
+      this._pushScalarCsvParts(labels, values, ['projected_gravity_x', 'projected_gravity_y', 'projected_gravity_z'], segment);
+    } else if (name === 'AsimovCommand') {
+      this._pushScalarCsvParts(labels, values, ['command_x', 'command_y', 'command_yaw'], segment);
+    } else if (name === 'AsimovGaitClock') {
+      this._pushScalarCsvParts(labels, values, entry.order === 'sin_cos' ? ['gait_clock_sin', 'gait_clock_cos'] : ['gait_clock_cos', 'gait_clock_sin'], segment);
+    } else if (name === 'AsimovInterruptMask') {
+      this._pushScalarCsvParts(labels, values, ['interrupt_mask'], segment);
+    } else if (name === 'BootIndicator') {
+      this._pushScalarCsvParts(labels, values, ['boot_indicator'], segment);
+    } else if (name === 'ComplianceFlagObs') {
+      this._pushScalarCsvParts(labels, values, ['compliance_enabled', 'compliance_threshold', 'compliance_kp'], segment);
+    } else if (name === 'AsimovJointPosSlot') {
+      this._pushJointSlotCsvParts(labels, values, entry, `joint_pos_${entry.slot_name ?? 'slot'}`, segment);
+    } else if (name === 'AsimovJointVelSlot') {
+      this._pushJointSlotCsvParts(labels, values, entry, `joint_vel_${entry.slot_name ?? 'slot'}`, segment);
+    } else if (name === 'AsimovPrevActions') {
+      this._pushPolicyJointCsvParts(labels, values, 'prev_action', 1, segment);
+    } else if (name === 'PrevActions') {
+      const steps = Math.max(1, Math.floor(entry.history_steps ?? 4));
+      this._pushPolicyJointCsvParts(labels, values, 'prev_action', steps, segment);
+    } else if (name === 'JointPos') {
+      const steps = entry.pos_steps ?? [0, 1, 2, 3, 4, 8];
+      const perStep = this.numActions;
+      for (let stepIdx = 0; stepIdx < steps.length; stepIdx++) {
+        const stepSegment = segment ? segment.slice(stepIdx * perStep, (stepIdx + 1) * perStep) : null;
+        this._pushPolicyJointCsvParts(labels, values, `joint_pos_history_t_minus_${steps[stepIdx]}`, 1, stepSegment);
+      }
+    } else {
+      for (let i = 0; i < size; i++) {
+        labels.push(this._cleanColumnName(`${name ?? 'obs'}_${i}`));
+        if (segment) values.push(segment[i]);
+      }
+    }
   }
 
   _pushScalarCsvParts(labels, values, names, segment) {

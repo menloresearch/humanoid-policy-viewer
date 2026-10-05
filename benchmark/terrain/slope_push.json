@@ -1,0 +1,53 @@
+{
+  "name": "terrain: 10 degree ramp with lateral shoulder pushes while climbing",
+  "duration": 22,
+  "terrain": "terrain/slope_10deg.xml",
+  "commands": [
+    {
+      "t": 0,
+      "vx": 0,
+      "vy": 0,
+      "wz": 0
+    },
+    {
+      "t": 0.3,
+      "vx": 0.4,
+      "vy": 0,
+      "wz": 0
+    },
+    {
+      "t": 20.5,
+      "vx": 0,
+      "vy": 0,
+      "wz": 0
+    }
+  ],
+  "events": [
+    {
+      "t": 5.5,
+      "type": "push",
+      "dir": [
+        0,
+        1,
+        0
+      ],
+      "force": 150,
+      "duration": 0.15,
+      "targetBody": "left_shoulder_pitch_link",
+      "label": "shoulder lateral 150 N on the ramp"
+    },
+    {
+      "t": 12.5,
+      "type": "push",
+      "dir": [
+        0,
+        -1,
+        0
+      ],
+      "force": 225,
+      "duration": 0.15,
+      "targetBody": "right_shoulder_pitch_link",
+      "label": "shoulder lateral 225 N going down the ramp"
+    }
+  ]
+}

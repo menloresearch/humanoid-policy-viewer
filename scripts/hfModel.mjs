@@ -69,7 +69,8 @@ export function defaultCacheDir(env = process.env) {
 }
 
 // Every ONNX in the repo, plus the training config (env.yaml supplies the gains,
-// agent.yaml is only checked for presence).
+// agent.yaml is only checked for presence) and, when present, the checkpoint's
+// tracking_policy.json (its overrides of the base policy config).
 export function selectFiles(files) {
   const onnx = files.filter((f) => f.toLowerCase().endsWith('.onnx')).sort();
   if (onnx.length === 0) throw new Error('The repo contains no .onnx file');
@@ -78,6 +79,7 @@ export function selectFiles(files) {
     onnx,
     env: present('env.yaml'),
     agent: present('agent.yaml'),
+    policyConfig: present('tracking_policy.json'),
     primary: onnx.includes('policy.onnx') ? 'policy.onnx' : onnx[0],
   };
 }
@@ -151,8 +153,8 @@ export async function ensureModel(repo, {
   const id = info.id;
   const { modelDir } = layout(id);
   const previous = readMeta(modelDir);
-  const { onnx, env: envFiles, agent: agentFiles, primary } = selectFiles(info.files);
-  const wanted = [...onnx, ...envFiles, ...agentFiles];
+  const { onnx, env: envFiles, agent: agentFiles, policyConfig, primary } = selectFiles(info.files);
+  const wanted = [...onnx, ...envFiles, ...agentFiles, ...policyConfig];
   // A copy cached by an older version may lack files that are wanted now.
   if (previous?.sha === info.sha && wanted.every((file) => previous.files?.includes(file))) {
     log(`Using cached ${id} (${info.sha.slice(0, 7)})`);

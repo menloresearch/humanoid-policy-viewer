@@ -43,11 +43,14 @@ itself: `npm run hf Menlo/asimov1-locomotion-0818 -- --no-open`.
 
 ## Supported policies
 
-The viewer runs Asimov velocity-tracking policies with one fixed interface,
-the one `cyclotron` trains. A policy whose ONNX input or output size does
-not match is refused when it loads, with a message saying which size differs.
+The viewer runs Asimov joint-position policies. The output is fixed by the
+robot; the input follows the observation recipe in the policy's `env.yaml`, so
+policies with extra inputs (such as a gait clock) or a stacked history load as
+long as every input is something the viewer can compute. A policy whose ONNX
+input or output size does not match is refused when it loads, with a message
+saying which size differs and why.
 
-**Output:** 23 joint position actions, in this order. The target for each
+**Output:** 23 joint position actions, one per motor, in this order. The target for each
 joint is `default_joint_pos + action_scale * action`, with both read from
 `env.yaml`.
 
@@ -59,7 +62,9 @@ right_shoulder_pitch  right_shoulder_roll  right_shoulder_yaw  right_elbow  righ
 left_shoulder_pitch   left_shoulder_roll   left_shoulder_yaw   left_elbow   left_wrist_yaw
 ```
 
-**Input:** 78 values per step at 50 Hz, in this order:
+**Input:** built term by term from `env.yaml`'s `observations.policy`, in its
+order. Without one, the reference recipe below (78 values per step at 50 Hz,
+the one `cyclotron` trains) is used:
 
 | Values | Observation | Scale |
 |---|---|---|
@@ -79,11 +84,41 @@ output order. Each group lists output indices from the order above:
 | 2-3 | 2, 3, 8, 9, 15, 16, 20, 21 |
 | 4-5 | 4, 5, 10, 11, 17, 22 |
 
-The recipe lives in `public/examples/checkpoints/asimov/reference_policy_config.json`
-and is not read from `env.yaml` yet, so a policy trained on a different
-recipe of the same size would load but behave wrongly. Base linear velocity,
-foot contacts and other quantities the real robot cannot measure are not
-inputs; a policy that needs them has to estimate them inside the ONNX.
+The reference recipe lives in `public/examples/checkpoints/asimov/reference_policy_config.json`.
+The `env.yaml` terms the viewer can compute, recognised by their function name
+(or a delayed-observation wrapper's `quantity` param):
+
+| `env.yaml` term | Values | Notes |
+|---|---|---|
+| `base_ang_vel` | 3 | `scale` applied |
+| `projected_gravity` | 3 | unscaled |
+| `generated_commands` of a `...VelocityCommand` | 3 | `vx, vy, wz` from the UI |
+| `generated_commands` of a `GaitClockCommand` | 2 | `sin, cos` of the gait phase; the period goes from `period_slow` at `speed_slow` to `period_fast` at `speed_fast` (planar command speed); `0, 0` and phase reset while the command is below `stand_threshold` |
+| `joint_pos_rel` | one per listed joint | relative to `default_joint_pos`; needs `joint_names` with `preserve_order: true` |
+| `joint_vel_rel` | one per listed joint | `scale` applied; same joint rule |
+| `last_action` | 23 | the previous raw action |
+
+A `history_length` above 1, on the group or a term, stacks that many steps of
+each term, oldest first, the way Isaac Lab and mjlab flatten it; after a reset
+every step holds the first value. Any other term (base linear velocity, foot
+contacts, height scans and other quantities the real robot cannot measure) makes
+the policy refused, naming the term; a policy that needs them has to estimate
+them inside the ONNX.
+
+**Recurrent policies:** the first ONNX input is the observation above. Every
+other float input is recurrent state, fed back each step from the output whose
+name pairs with it, so nothing beyond the ONNX and `env.yaml` is needed:
+
+| State input | Fed from | Exported by |
+|---|---|---|
+| `<name>_in` | `<name>_out` | rsl_rl's ONNX export, which Isaac Lab's `play.py` uses: LSTM `h_in`, `c_in`; GRU `h_in` |
+| `<name>` | `next_<name>` or `next,<name>` | GentleHumanoid-style `adapt_hx` carries |
+
+State starts at zero, with the shape the ONNX declares (a size the input leaves
+symbolic comes from its paired output), and is zeroed again on every reset, like
+rsl_rl's own reset. A bool input named `is_init` is set true on the first step
+after a reset and false after it. Any other input, such as the image or
+height-map inputs of rsl_rl's CNN models, makes the policy refused, naming it.
 
 ## Checks
 
@@ -104,10 +139,14 @@ it prints `Checked env.yaml and agent.yaml: OK`. Unlike the CI gate, a
 checkpoint's own `tracking_policy.json` is not consulted: the joint list always
 comes from `reference_policy_config.json`.
 
-When the viewer loads the policy, it also checks the ONNX model's input and
-output sizes against the [supported interface](#supported-policies) (78 in,
-23 out). A mismatch is shown as an error in the policy panel and the policy is
-not run.
+An `env.yaml` whose policy observations include a term the viewer cannot
+compute is also a warning here; the viewer then refuses the policy.
+
+When the viewer loads the policy, it also checks the ONNX model's output size
+against the motor count (23), its input size against the observation recipe
+built for it, and that every other input is recurrent state it can carry (see
+[Supported policies](#supported-policies)). A mismatch is shown as an error in
+the policy panel and the policy is not run.
 
 ## Where downloads go
 

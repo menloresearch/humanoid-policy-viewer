@@ -321,13 +321,17 @@ export const imuBiasState = {
 };
 
 class AsimovAngVel {
+  constructor(_policy, kwargs = {}) {
+    this.scale = kwargs.scale ?? 0.25; // match training obs scale
+  }
+
   get size() {
     return 3;
   }
 
   compute(state) {
     const v = state.rootAngVel;
-    const s = 0.25; // match training obs scale
+    const s = this.scale;
     return new Float32Array([v[0] * s, v[1] * s, v[2] * s]);
   }
 }
@@ -374,15 +378,44 @@ class AsimovGaitClock {
     // velocity_command.py: eff_freq = gait_freq_base + gait_freq_speed_scale * |v_xy|).
     this.gaitFreqBase = 0.5;
     this.gaitFreqSpeedScale = 1.5;
-    this.threshold = 0.1;
+    this.threshold = kwargs.stand_threshold ?? 0.1;
     // zero_at_rest: if true, the clock is DISABLED at v≈0 (returns [0,0] and
     // resets phase) — matches policies trained with the v=0 gait-clock disable.
     // Default false = legacy frozen-phase behavior (e.g. model_4100/sphere).
     this.zeroAtRest = kwargs.zero_at_rest ?? false;
+    // Period schedule (asimov_flex GaitClockCommand): the period goes linearly
+    // from period_slow at speed_slow to period_fast at speed_fast (planar
+    // command speed), replacing the frequency formula above when given.
+    this.periodSchedule = typeof kwargs.period_slow === 'number'
+      ? {
+        slow: kwargs.period_slow,
+        fast: kwargs.period_fast ?? kwargs.period_slow,
+        speedSlow: kwargs.speed_slow ?? 0.0,
+        speedFast: kwargs.speed_fast ?? 0.0
+      }
+      : null;
+    // 'cos_sin' (legacy) or 'sin_cos' (asimov_flex).
+    this.order = kwargs.order ?? 'cos_sin';
+    this.dt = 1.0 / (kwargs.policy_hz ?? 50.0);
   }
 
   get size() {
     return 2;
+  }
+
+  reset() {
+    this.phase = 0.0;
+  }
+
+  frequency(planar) {
+    if (!this.periodSchedule) {
+      return this.gaitFreqBase + this.gaitFreqSpeedScale * planar;
+    }
+    const { slow, fast, speedSlow, speedFast } = this.periodSchedule;
+    const t = speedFast > speedSlow
+      ? Math.min(1, Math.max(0, (planar - speedSlow) / (speedFast - speedSlow)))
+      : 0;
+    return 1.0 / (slow + (fast - slow) * t);
   }
 
   compute() {
@@ -395,8 +428,7 @@ class AsimovGaitClock {
     );
     const cmdMag = planar + Math.abs(asimovCommandState.wz);
     if (cmdMag > this.threshold) {
-      const effFreq = this.gaitFreqBase + this.gaitFreqSpeedScale * planar;
-      this.phase = (this.phase + (1.0 / 50.0) * effFreq) % 1.0;
+      this.phase = (this.phase + this.dt * this.frequency(planar)) % 1.0;
     } else if (this.zeroAtRest) {
       // v=0 disable: reset phase and emit [0,0] (clean "no gait → stand").
       this.phase = 0.0;
@@ -404,7 +436,9 @@ class AsimovGaitClock {
     }
     // else (legacy): phase frozen at current value.
     const p = 2.0 * Math.PI * this.phase;
-    return new Float32Array([Math.cos(p), Math.sin(p)]);
+    return this.order === 'sin_cos'
+      ? new Float32Array([Math.sin(p), Math.cos(p)])
+      : new Float32Array([Math.cos(p), Math.sin(p)]);
   }
 }
 
@@ -484,6 +518,45 @@ class AsimovInterruptMask {
   compute() {
     const out = new Float32Array(1);
     out[0] = asimovInterruptState.active ? 1.0 : 0.0;
+    return out;
+  }
+}
+
+/**
+ * Stacks the last `length` values of another observation, oldest first, the
+ * way Isaac Lab / mjlab flatten a term's history_length. After a reset every
+ * slot is filled with the first value computed.
+ */
+export class ObsHistory {
+  constructor(inner, length) {
+    this.inner = inner;
+    this.length = length;
+    this.buffer = null;
+  }
+
+  get size() {
+    return this.length * this.inner.size;
+  }
+
+  reset(state) {
+    if (typeof this.inner.reset === 'function') this.inner.reset(state);
+    this.buffer = null;
+  }
+
+  update(state) {
+    if (typeof this.inner.update === 'function') this.inner.update(state);
+  }
+
+  compute(state) {
+    const value = Float32Array.from(this.inner.compute(state));
+    if (!this.buffer) {
+      this.buffer = Array.from({ length: this.length }, () => value.slice());
+    } else {
+      this.buffer.shift();
+      this.buffer.push(value);
+    }
+    const out = new Float32Array(this.size);
+    this.buffer.forEach((step, i) => out.set(step, i * step.length));
     return out;
   }
 }

@@ -16,7 +16,7 @@ Three kinds of file describe a policy, and they have different owners:
 |---|---|---|---|
 | ONNX path and input shape | yes | - | the JSON (catalog checkpoints swap in their own `.onnx`) |
 | Joint order (`policy_joint_names`) | yes | `actions.joint_pos.joint_names` | the JSON (not read from `env.yaml` yet) |
-| Observation recipe (`obs_config`) | yes | `observations.policy` | the JSON (not read from `env.yaml` yet) |
+| Observation recipe (`obs_config`) | fallback only | `observations.policy` | **`env.yaml`** when it has `observations.policy` (see [Supported policies](huggingface.md#supported-policies)), else the JSON |
 | `policy_hz`, `action_lpf_hz`, `kd_ff`, `control_type` | yes | `policy_hz` = 1 / (`dt` x `decimation`) | the JSON |
 | `stiffness`, `damping` | fallback only | yes | **`env.yaml`** |
 | `action_scale`, `default_joint_pos` | fallback only | yes | **`env.yaml`** |
@@ -30,7 +30,7 @@ Three kinds of file describe a policy, and they have different owners:
 never the other way round. The JSON's values for those settings are only a
 fallback, used when no `env.yaml` is found beside the `.onnx` (the console warns
 for model-library checkpoints). Settings `env.yaml` does not feed the viewer, such as
-the observation recipe, joint order and rates, always come from the JSON, so
+the joint order and rates, always come from the JSON, so
 keep it consistent with the training run (the tests check that the joint order
 matches the bundled `env.yaml`).
 
@@ -39,9 +39,26 @@ matches the bundled `env.yaml`).
 In the folder the `.onnx` sits in, as `params/env.yaml` first and then
 `env.yaml`. For a [model-library](model-library.md) checkpoint that is its
 `<root>/<model>/` folder. The viewer maps the YAML's joint action scale,
-actuator stiffness/damping and initial joint pose to `policy_joint_names`, and
+actuator stiffness/damping (one value per actuator group, or a map per joint
+pattern) and initial joint pose to `policy_joint_names`, builds the observation
+recipe from `observations.policy`, and
 applies the actuators' `effort_limit` as each joint's torque cap. If there is no
 `env.yaml`, the JSON arrays are used and torque is unclamped.
+
+## Per-checkpoint `tracking_policy.json`
+
+A checkpoint may also ship a `tracking_policy.json` (looked up like
+`env.yaml`: `params/` first, then the model folder). Its fields replace the
+base policy config's, with `onnx` merged one level deep so the ONNX path still
+follows the checkpoint. `npm run hf` downloads the file from a Hugging Face repo
+when present. Checkpoints without one load as before.
+
+Recurrent policies (LSTM, GRU, frame history) do not need one: the viewer finds
+their state inputs and the outputs that feed them in the ONNX itself (see
+[Supported policies](huggingface.md#supported-policies)). Older exports whose
+`tracking_policy.json` declares `"in_keys": ["policy", "is_init", "adapt_hx"]`
+still load; only the first `in_keys` entry, the observation, is used to feed the
+ONNX.
 
 ## The robot model is separate
 

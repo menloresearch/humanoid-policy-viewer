@@ -89,5 +89,11 @@
   "g1/meshes/waist_roll_link_rev_1_0.STL",
   "g1/meshes/waist_support_link.STL",
   "g1/meshes/waist_yaw_link.STL",
-  "g1/meshes/waist_yaw_link_rev_1_0.STL"
+  "g1/meshes/waist_yaw_link_rev_1_0.STL",
+  "terrain/obstacles.xml",
+  "terrain/rough.xml",
+  "terrain/slope_10deg.xml",
+  "terrain/slope_15deg.xml",
+  "terrain/stairs_10cm.xml",
+  "terrain/stairs_5cm.xml"
 ]

@@ -26,9 +26,10 @@ test('normalizeRepoId accepts ids and Hub URLs, rejects anything else', () => {
   for (const bad of ['', 'Menlo', '../x/y', 'a/b/c', 'a/b c']) assert.throws(() => normalizeRepoId(bad), /not a Hugging Face repo id/);
 });
 
-test('selectFiles picks every onnx, the env.yaml and agent.yaml, and prefers policy.onnx', () => {
+test('selectFiles picks every onnx, the env.yaml, agent.yaml and tracking_policy.json, and prefers policy.onnx', () => {
   const picked = selectFiles(['README.md', 'agent.yaml', 'env.yaml', 'exported/a.onnx', 'policy.onnx']);
-  assert.deepEqual(picked, { onnx: ['exported/a.onnx', 'policy.onnx'], env: ['env.yaml'], agent: ['agent.yaml'], primary: 'policy.onnx' });
+  assert.deepEqual(picked, { onnx: ['exported/a.onnx', 'policy.onnx'], env: ['env.yaml'], agent: ['agent.yaml'], policyConfig: [], primary: 'policy.onnx' });
+  assert.deepEqual(selectFiles(['policy.onnx', 'tracking_policy.json']).policyConfig, ['tracking_policy.json']);
   assert.equal(selectFiles(['params/env.yaml', 'm.onnx']).env[0], 'params/env.yaml');
   assert.equal(selectFiles(['b.onnx', 'a.onnx']).primary, 'a.onnx');
   assert.throws(() => selectFiles(['env.yaml']), /no .onnx/);

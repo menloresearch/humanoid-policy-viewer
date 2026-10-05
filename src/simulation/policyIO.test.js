@@ -28,10 +28,23 @@ test('a different observation size is reported', () => {
   assert.match(errors[0], /takes 80 observation values.*builds 78/);
 });
 
-test('a different action size is reported', () => {
+test('a different action size is reported against the motor count', () => {
   const errors = policyIOErrors(io([1, 78], [1, 25]));
   assert.equal(errors.length, 1);
-  assert.match(errors[0], /outputs 25 actions.*drives 23 joints/);
+  assert.match(errors[0], /outputs 25 actions.*robot has 23 motors/);
+});
+
+test('an input that is a whole number of recipe steps hints at an unrecorded history', () => {
+  const errors = policyIOErrors({ ...io([1, 375], [1, 23]), numObs: 75 });
+  assert.match(errors[0], /takes 375.*builds 75 \(375 is 5 steps of 75/);
+});
+
+test('a recipe the viewer cannot reproduce replaces the input size check', () => {
+  const errors = policyIOErrors({ ...io([1, 81], [1, 23]), recipeError: 'foot_contact is not something the viewer computes' });
+  assert.deepEqual(errors, ['foot_contact is not something the viewer computes']);
+  const both = policyIOErrors({ ...io([1, 81], [1, 25]), recipeError: 'x' });
+  assert.equal(both.length, 2);
+  assert.match(both[0], /outputs 25 actions/);
 });
 
 test('symbolic or missing sizes are not checked', () => {
