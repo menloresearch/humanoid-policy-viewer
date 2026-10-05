@@ -91,7 +91,7 @@ export class PolicyRunner {
   async init() {
     await this.module.init();
     const { session, inKeys, outKeys } = this.module;
-    const ioErrors = policyIOErrors({
+    const ioErrors = [...policyIOErrors({
       inputMetadata: session.inputMetadata,
       outputMetadata: session.outputMetadata,
       inputName: session.inputNames[inKeys.indexOf(this.inputKey)],
@@ -99,7 +99,7 @@ export class PolicyRunner {
       numObs: this.numObs,
       numActions: this.numActions,
       recipeError: this.config.obs_config_error,
-    });
+    }), ...this.module.statePlan.errors];
     if (ioErrors.length) {
       throw new Error(policyIOErrorMessage(ioErrors));
     }

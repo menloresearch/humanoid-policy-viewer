@@ -105,6 +105,21 @@ contacts, height scans and other quantities the real robot cannot measure) makes
 the policy refused, naming the term; a policy that needs them has to estimate
 them inside the ONNX.
 
+**Recurrent policies:** the first ONNX input is the observation above. Every
+other float input is recurrent state, fed back each step from the output whose
+name pairs with it, so nothing beyond the ONNX and `env.yaml` is needed:
+
+| State input | Fed from | Exported by |
+|---|---|---|
+| `<name>_in` | `<name>_out` | rsl_rl's ONNX export, which Isaac Lab's `play.py` uses: LSTM `h_in`, `c_in`; GRU `h_in` |
+| `<name>` | `next_<name>` or `next,<name>` | GentleHumanoid-style `adapt_hx` carries |
+
+State starts at zero, with the shape the ONNX declares (a size the input leaves
+symbolic comes from its paired output), and is zeroed again on every reset, like
+rsl_rl's own reset. A bool input named `is_init` is set true on the first step
+after a reset and false after it. Any other input, such as the image or
+height-map inputs of rsl_rl's CNN models, makes the policy refused, naming it.
+
 ## Checks
 
 After downloading, the script checks the repo the way model-checkpoint's CI gate
@@ -128,9 +143,10 @@ An `env.yaml` whose policy observations include a term the viewer cannot
 compute is also a warning here; the viewer then refuses the policy.
 
 When the viewer loads the policy, it also checks the ONNX model's output size
-against the motor count (23) and its input size against the observation recipe
-built for it (see [Supported policies](#supported-policies)). A mismatch is
-shown as an error in the policy panel and the policy is not run.
+against the motor count (23), its input size against the observation recipe
+built for it, and that every other input is recurrent state it can carry (see
+[Supported policies](#supported-policies)). A mismatch is shown as an error in
+the policy panel and the policy is not run.
 
 ## Where downloads go
 
