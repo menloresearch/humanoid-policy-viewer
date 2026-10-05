@@ -885,6 +885,7 @@ import { MuJoCoDemo } from '@/simulation/main.js';
 import { asimovCommandState, asimovInterruptState, imuBiasState } from '@/simulation/observationHelpers.js';
 import { commandSequencer } from '@/simulation/commandSequencer.js';
 import { runBenchmark, estimateBenchmarkSeconds } from '@/simulation/benchmarkRunner.js';
+import { loadTestScene } from '@/simulation/terrainScene.js';
 import { appState, openEditor, newBlankSequence, openResults, setBenchmarkResults } from '@/state/appState.js';
 import { demoRef } from '@/state/demoRef.js';
 import { loadSequenceFile, saveSequenceFile } from '@/state/sequenceStore.js';
@@ -1735,6 +1736,8 @@ export default {
       this.playbackWarning = '';
       try {
         const parsed = await loadSequenceFile(file);
+        // A terrain test plays on its course, any other test on the default scene.
+        await loadTestScene(this.demo, parsed.terrain);
         const { warning } = commandSequencer.loadSequence(parsed, file.replace(/\.json$/i, ''));
         this.currentSequenceFile = file;
         this.playbackWarning = warning;

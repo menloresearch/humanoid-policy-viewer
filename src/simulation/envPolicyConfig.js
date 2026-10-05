@@ -401,6 +401,26 @@ function checkpointDirUrl(onnxPath) {
   return slash < 0 ? null : onnxPath.slice(0, slash);
 }
 
+// A checkpoint may ship its own tracking_policy.json (params/ or model root) to
+// override parts of the shared base policy config, e.g. onnx.meta for a policy
+// that carries recurrent state through adapt_hx (LSTM, GRU or frame-history
+// actors). Returns the parsed JSON, or null when the checkpoint has none (the
+// common case: the base config applies as-is).
+export async function loadCheckpointPolicyConfig(onnxPath) {
+  const modelUrl = checkpointDirUrl(onnxPath);
+  if (!modelUrl) return null;
+  for (const filename of checkpointFileCandidates('tracking_policy.json')) {
+    const url = `${modelUrl}/${filename}`;
+    const response = await fetch(url);
+    if (response.status === 404) continue;
+    if (!response.ok) throw new Error(`Failed to load ${url}: ${response.status}`);
+    // Static SPA hosts may answer a missing asset request with index.html.
+    if (response.headers.get('content-type')?.includes('text/html')) continue;
+    return await response.json();
+  }
+  return null;
+}
+
 export async function loadEnvPolicySettings(onnxPath, jointNames) {
   const modelUrl = checkpointDirUrl(onnxPath);
   if (!modelUrl) return null;

@@ -1,0 +1,13 @@
+<mujoco model="terrain stairs_5cm">
+  <!-- 5 cm stairs up and down (5 steps each way, 35 cm treads) (scripts/make_terrain_benchmark.py) -->
+  <asset>
+    <material name="terrain" rgba="0.55 0.5 0.42 1"/>
+  </asset>
+  <worldbody>
+    <geom name="stair1" type="box" pos="4.0000 0.0000 0.0250" size="2.5000 3.0000 0.0250" material="terrain" contype="1" conaffinity="1" condim="3" friction="1.0 0.5 0.1"/>
+    <geom name="stair2" type="box" pos="4.0000 0.0000 0.0750" size="2.1500 3.0000 0.0250" material="terrain" contype="1" conaffinity="1" condim="3" friction="1.0 0.5 0.1"/>
+    <geom name="stair3" type="box" pos="4.0000 0.0000 0.1250" size="1.8000 3.0000 0.0250" material="terrain" contype="1" conaffinity="1" condim="3" friction="1.0 0.5 0.1"/>
+    <geom name="stair4" type="box" pos="4.0000 0.0000 0.1750" size="1.4500 3.0000 0.0250" material="terrain" contype="1" conaffinity="1" condim="3" friction="1.0 0.5 0.1"/>
+    <geom name="stair5" type="box" pos="4.0000 0.0000 0.2250" size="1.1000 3.0000 0.0250" material="terrain" contype="1" conaffinity="1" condim="3" friction="1.0 0.5 0.1"/>
+  </worldbody>
+</mujoco>

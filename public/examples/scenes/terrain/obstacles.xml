@@ -1,0 +1,22 @@
+<mujoco model="terrain obstacles">
+  <!-- scattered 3-7 cm boxes across the lane (scripts/make_terrain_benchmark.py) -->
+  <asset>
+    <material name="terrain" rgba="0.55 0.5 0.42 1"/>
+  </asset>
+  <worldbody>
+    <geom name="obstacle0" type="box" pos="2.1201 0.0431 0.0280" size="0.1324 0.1151 0.0280" euler="0.00000 0.00000 1.14885" material="terrain" contype="1" conaffinity="1" condim="3" friction="1.0 0.5 0.1"/>
+    <geom name="obstacle1" type="box" pos="4.2151 -0.5162 0.0157" size="0.1058 0.1507 0.0157" euler="0.00000 0.00000 0.28498" material="terrain" contype="1" conaffinity="1" condim="3" friction="1.0 0.5 0.1"/>
+    <geom name="obstacle2" type="box" pos="2.9948 0.1529 0.0175" size="0.1425 0.1827 0.0175" euler="0.00000 0.00000 2.97732" material="terrain" contype="1" conaffinity="1" condim="3" friction="1.0 0.5 0.1"/>
+    <geom name="obstacle3" type="box" pos="1.9702 0.4302 0.0345" size="0.1577 0.1397 0.0345" euler="0.00000 0.00000 0.90983" material="terrain" contype="1" conaffinity="1" condim="3" friction="1.0 0.5 0.1"/>
+    <geom name="obstacle4" type="box" pos="6.4335 -0.3831 0.0212" size="0.1144 0.1118 0.0212" euler="0.00000 0.00000 1.82715" material="terrain" contype="1" conaffinity="1" condim="3" friction="1.0 0.5 0.1"/>
+    <geom name="obstacle5" type="box" pos="2.0642 -0.5285 0.0260" size="0.1639 0.1372 0.0260" euler="0.00000 0.00000 0.64704" material="terrain" contype="1" conaffinity="1" condim="3" friction="1.0 0.5 0.1"/>
+    <geom name="obstacle6" type="box" pos="5.0963 -0.0562 0.0213" size="0.1680 0.1428 0.0213" euler="0.00000 0.00000 0.94175" material="terrain" contype="1" conaffinity="1" condim="3" friction="1.0 0.5 0.1"/>
+    <geom name="obstacle7" type="box" pos="5.0317 0.0302 0.0199" size="0.1794 0.1699 0.0199" euler="0.00000 0.00000 2.74933" material="terrain" contype="1" conaffinity="1" condim="3" friction="1.0 0.5 0.1"/>
+    <geom name="obstacle8" type="box" pos="2.3848 -0.0983 0.0346" size="0.1729 0.1288 0.0346" euler="0.00000 0.00000 2.37863" material="terrain" contype="1" conaffinity="1" condim="3" friction="1.0 0.5 0.1"/>
+    <geom name="obstacle9" type="box" pos="5.5757 0.3175 0.0158" size="0.1152 0.1489 0.0158" euler="0.00000 0.00000 1.80021" material="terrain" contype="1" conaffinity="1" condim="3" friction="1.0 0.5 0.1"/>
+    <geom name="obstacle10" type="box" pos="5.1473 0.0959 0.0289" size="0.1875 0.1314 0.0289" euler="0.00000 0.00000 1.43321" material="terrain" contype="1" conaffinity="1" condim="3" friction="1.0 0.5 0.1"/>
+    <geom name="obstacle11" type="box" pos="5.5521 -0.5272 0.0245" size="0.1840 0.1945 0.0245" euler="0.00000 0.00000 2.20380" material="terrain" contype="1" conaffinity="1" condim="3" friction="1.0 0.5 0.1"/>
+    <geom name="obstacle12" type="box" pos="3.3507 -0.1371 0.0314" size="0.1647 0.1993 0.0314" euler="0.00000 0.00000 2.10063" material="terrain" contype="1" conaffinity="1" condim="3" friction="1.0 0.5 0.1"/>
+    <geom name="obstacle13" type="box" pos="2.3792 -0.5293 0.0184" size="0.1023 0.1462 0.0184" euler="0.00000 0.00000 2.41348" material="terrain" contype="1" conaffinity="1" condim="3" friction="1.0 0.5 0.1"/>
+  </worldbody>
+</mujoco>

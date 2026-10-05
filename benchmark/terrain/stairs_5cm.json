@@ -1,0 +1,25 @@
+{
+  "name": "terrain: 5 cm stairs up and down (5 steps each way, 35 cm treads)",
+  "duration": 22,
+  "terrain": "terrain/stairs_5cm.xml",
+  "commands": [
+    {
+      "t": 0,
+      "vx": 0,
+      "vy": 0,
+      "wz": 0
+    },
+    {
+      "t": 0.3,
+      "vx": 0.4,
+      "vy": 0,
+      "wz": 0
+    },
+    {
+      "t": 20.5,
+      "vx": 0,
+      "vy": 0,
+      "wz": 0
+    }
+  ]
+}

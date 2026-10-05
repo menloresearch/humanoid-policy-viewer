@@ -7,6 +7,7 @@
 import { computeMetrics, TILT_FALL_RAD, HEIGHT_FALL_M } from './metrics.js';
 import { commandSequencer } from './commandSequencer.js';
 import { yawFromQuat } from './idealPath.js';
+import { loadTestScene } from './terrainScene.js';
 
 const CONTACT_FORCE_THRESHOLD_N = 1.0;
 
@@ -319,6 +320,11 @@ export async function runBenchmark({ demo, component, policies, tests, onProgres
         // policy-load failure above fails just that policy's rows, rather
         // than aborting the whole sweep.
         try {
+          // Optional per-test terrain (terrain/*.json name a fragment under
+          // public/examples/scenes/ at the sequence's top level). Tests without
+          // one run in the default scene, which is only reloaded if a previous
+          // test left a terrain scene loaded.
+          await loadTestScene(demo, test.sequence?.terrain);
           const revived = await reviveSimLoop(demo);
           demo.resetSimulation();
           demo.drainBodyResolutionWarnings?.(); // discard anything left over from a prior test
