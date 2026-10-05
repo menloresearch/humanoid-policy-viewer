@@ -28,6 +28,7 @@ import { ensureDataset } from './hfDataset.mjs';
 import { buildEvalResultEntries, evalLogsDir, evalResultsPath, mergeEvalResults } from './hfEvalResults.mjs';
 import { ensureModel } from './hfModel.mjs';
 import { findLocalModel } from './localModel.mjs';
+import { assertTestsRunnable } from './suiteCheck.mjs';
 import { loadSuiteDir } from './suiteDir.mjs';
 
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -235,6 +236,8 @@ async function runBenchmarkCommand(args) {
   if (problems.length && !flags.has('force')) {
     throw new Error(`This viewer cannot run ${describeTarget(suites[0] ?? { source: 'hub', kind: 'suite', id: loaded.info.id })}:\n${problems.map((p) => `  - ${p}`).join('\n')}\n(add "force" to run it anyway; the results will be local-only)`);
   }
+  // Every test must load before any browser starts, so a broken test fails in a second, not mid-run.
+  assertTestsRunnable(loaded);
   const selected = selectTests(loaded.suite, loaded.rows);
   const cells = expandCells(selected, { only, repeats });
 

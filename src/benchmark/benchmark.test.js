@@ -178,6 +178,17 @@ test('suite init writes a valid starter benchmark', async () => {
   assert.throws(() => initSuite(dir, { log: () => {} }), /not empty/);
 });
 
+test('checkTests: player errors stop a run, unselected tests are flagged', async () => {
+  const { checkTests } = await import('../../scripts/suiteCheck.mjs');
+  const s = suite({ tests: [{ config: 'loco' }] });
+  const late = push(1, 100, 'reasonable');
+  late.dir = [0, 0];
+  const result = checkTests({ suite: s, rows: [row('loco/a'), row('loco/b', { events: [late] }), row('other/c')] });
+  assert.equal(result.errors.length, 1);
+  assert.match(result.errors[0], /loco\/b: .*dir/);
+  assert.match(result.warnings.join('\n'), /never run: other\/c/);
+});
+
 test('the smoke-suite fixture is valid', async () => {
   const { loadSuiteDir } = await import('../../scripts/suiteDir.mjs');
   const loaded = loadSuiteDir(FIXTURE);

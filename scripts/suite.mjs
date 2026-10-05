@@ -6,7 +6,7 @@
 // authors pull a working copy, edit it (by hand or in the viewer with
 // `npm run dev suite=<dir>`), check it here, and publish it back as a commit
 // or a pull request on the dataset. Hub dataset PRs have no CI, so a reviewer
-// re-runs `validate` and `baseline` on `pull <id>@refs/pr/<n>`.
+// re-runs `baseline` on `pull <id>@refs/pr/<n>`.
 // Run with no arguments for the usage text.
 
 import { spawnSync } from 'node:child_process';
@@ -14,15 +14,14 @@ import { createHash } from 'node:crypto';
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { commandSequencer, setActiveCommandLimits } from '../src/simulation/commandSequencer.js';
 import { BENCHMARK_PROTOCOL } from '../src/benchmark/protocol.js';
-import { compatibilityProblems, expandCells, selectTests } from '../src/benchmark/suite.js';
-import { rowToSequence } from '../src/benchmark/testRow.js';
+import { compatibilityProblems } from '../src/benchmark/suite.js';
 import { collectProvenance } from './benchmarkProvenance.mjs';
 import { classifyTarget } from './benchmarkTargets.mjs';
 import { parseWords, swallowedNpmFlags } from './cliArgs.mjs';
 import { commitFiles, hubCredentials } from './hfCommit.mjs';
 import { ensureDataset } from './hfDataset.mjs';
+import { checkTests } from './suiteCheck.mjs';
 import { hubFiles, loadSuiteDir, readYamlFile, writeRows } from './suiteDir.mjs';
 
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -32,12 +31,11 @@ const USAGE = `Usage: npm run suite <command> ...
 
   init <dir>                               new benchmark: starter suite.yaml + one example test
   pull <dataset>[@rev|@refs/pr/<n>] <dir>  working copy of a Hub dataset (e.g. datasets/org/bench@refs/pr/3)
-  validate <dir>                           check rows, suite.yaml, generated files and the version bump
   diff <dir>                               what changed since the pulled revision
   baseline <dir> [model=<model>...]        run reference models on the working copy and on the pulled
                                            revision; writes <dir>/baseline.md
   publish <dir> [repo=<org/name>] [pr] [create] [dry-run]
-                                           validate, build eval.yaml + the dataset card, then commit (owner) or
+                                           check, build eval.yaml + the dataset card, then commit (owner) or
                                            open a pull request; "create" makes a new PRIVATE dataset repo
   release <dataset> rev=<commit>           tag a merged revision v<version> and print the default-suite change
 
@@ -157,7 +155,7 @@ leaderboard.
 
 \`\`\`
 npm run suite pull datasets/<this dataset> ./bench && npm run dev suite=./bench    # edit
-npm run suite validate ./bench && npm run suite baseline ./bench
+npm run suite baseline ./bench
 npm run suite publish ./bench pr
 \`\`\`
 `;
@@ -180,40 +178,16 @@ async function pull(target, dir) {
   console.log(`Pulled datasets/${dataset.id}@${dataset.sha.slice(0, 7)} into ${dir}`);
 }
 
-/** Returns { errors, warnings, loaded }. */
-function check(dir) {
-  const errors = [];
-  const warnings = [];
-  let loaded;
-  try {
-    loaded = loadSuiteDir(dir);
-  } catch (error) {
-    return { errors: [error.message], warnings, loaded: null };
-  }
+/**
+ * Everything that must hold before a benchmark is published: the tests run
+ * (checkTests), this viewer implements the suite's protocol, and a change that
+ * can move a score came with a new suite version.
+ */
+function publishCheck(dir) {
+  const loaded = loadSuiteDir(dir);
   const { suite, rawSuite, rows } = loaded;
+  const { errors, warnings } = checkTests(loaded);
   errors.push(...compatibilityProblems(suite).map((p) => `this viewer: ${p}`));
-  try {
-    const cells = expandCells(selectTests(suite, rows));
-    const unused = rows.filter((row) => !cells.some((cell) => cell.testId === row.id));
-    if (unused.length) warnings.push(`tests not selected by suite.yaml: ${unused.map((row) => row.id).join(', ')}`);
-  } catch (error) {
-    errors.push(error.message);
-  }
-  // The player's own checks (event shapes, times, directions); limits are
-  // checked against the default command range, as no policy is loaded.
-  setActiveCommandLimits(null);
-  for (const row of rows) {
-    try {
-      const { warning } = commandSequencer.loadSequence(rowToSequence(row), row.name);
-      if (warning) warnings.push(`${row.id}: ${warning} (default command range)`);
-      if (row.config.startsWith('push') && row.events.some((event) => !event.tier) && row.config !== 'push_sustained') {
-        warnings.push(`${row.id}: push without a tier`);
-      }
-    } catch (error) {
-      errors.push(`${row.id}: ${error.message}`);
-    }
-  }
-  // A change that can move a score needs a new suite version.
   const base = readBase(dir);
   if (base) {
     const changed = base.scoredHash !== scoredContentHash(rawSuite, rows);
@@ -228,15 +202,9 @@ function check(dir) {
       warnings.push(`suite.yaml harness.tested_commit is ${suite.harness.tested_commit.slice(0, 7)}, this viewer is ${commit.slice(0, 7)} (fine if the protocol matches)`);
     }
   }
-  return { errors, warnings, loaded };
-}
-
-function validate(dir) {
-  const { errors, warnings, loaded } = check(dir);
-  for (const warning of warnings) console.warn(`warning: ${warning}`);
-  for (const error of errors) console.error(`error: ${error}`);
-  if (!errors.length) console.log(`OK: ${loaded.rows.length} tests, suite ${loaded.suite.suite} v${loaded.suite.version}`);
-  return { ok: errors.length === 0, errors, warnings, loaded };
+  for (const warning of warnings) console.warn(`Warning: ${warning}`);
+  if (errors.length) throw new Error(`Not published:\n${errors.map((e) => `  - ${e}`).join('\n')}`);
+  return loaded;
 }
 
 async function baseRows(dir) {
@@ -322,8 +290,7 @@ function publishableFiles(dir) {
 }
 
 async function publish(dir, { repo, pr, create, dryRun }) {
-  const { ok, loaded } = validate(dir);
-  if (!ok) throw new Error('Not published: fix the errors above first');
+  const loaded = publishCheck(dir);
   const base = readBase(dir);
   const name = repo ?? base?.id;
   if (!name) throw new Error('publish needs repo=<org/name> (this working copy was not pulled from the Hub)');
@@ -335,7 +302,7 @@ async function publish(dir, { repo, pr, create, dryRun }) {
   ];
   const diffText = base && base.id === name ? await diff(dir).catch((error) => `(diff failed: ${error.message})`) : '(new dataset)';
   const baselineText = existsSync(join(dir, 'baseline.md')) ? readFileSync(join(dir, 'baseline.md'), 'utf8') : '(no baseline run: npm run suite baseline <dir>)';
-  const description = `Published with \`npm run suite publish\` from humanoid-policy-viewer ${collectProvenance(appDir).hpv.commit ?? ''}.\n\n### Changes\n\`\`\`\n${diffText}\n\`\`\`\n\n### Baseline\n${baselineText}\n\nReviewers: \`npm run suite pull datasets/${name}@refs/pr/<n> <dir>\`, then \`validate\` and \`baseline\`.`;
+  const description = `Published with \`npm run suite publish\` from humanoid-policy-viewer ${collectProvenance(appDir).hpv.commit ?? ''}.\n\n### Changes\n\`\`\`\n${diffText}\n\`\`\`\n\n### Baseline\n${baselineText}\n\nReviewers: \`npm run suite pull datasets/${name}@refs/pr/<n> <dir>\`, then \`npm run suite baseline <dir>\`.`;
   if (dryRun) {
     console.log(`dry-run: would write ${files.length} files to datasets/${name}${pr ? ' as a pull request' : ''}:\n  ${files.map((f) => f.path).join('\n  ')}`);
     console.log(`\n--- eval.yaml (generated) ---\n${files.find((f) => f.path === 'eval.yaml').content}`);
@@ -394,11 +361,6 @@ async function main() {
       return initSuite(resolve(a));
     }
     case 'pull': return pull(a, b && resolve(b));
-    case 'validate': {
-      if (!a) throw new Error('validate needs <dir>');
-      if (!validate(resolve(a)).ok) process.exitCode = 1;
-      return;
-    }
     case 'diff': return diff(resolve(a ?? ''));
     case 'baseline': return baseline(resolve(a ?? ''), options.model ?? []);
     case 'publish': return publish(resolve(a ?? ''), { repo: options.repo, pr: set.has('pr'), create: set.has('create'), dryRun: set.has('dry-run') });

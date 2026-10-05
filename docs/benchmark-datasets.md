@@ -75,14 +75,17 @@ a suite change (a version bump).
 ```bash
 npm run suite pull datasets/menloresearch/asimov-locomotion-bench ./bench   # working copy (+ .hpv-suite.json)
 npm run dev suite=./bench          # edit tests in the trajectory editor (or edit data/*/test.jsonl)
-npm run suite validate ./bench     # rows, suite.yaml, version bump
 npm run suite diff ./bench         # what changed since the pulled revision, and whether scores can move
 npm run suite baseline ./bench     # run reference models on the old and new suite -> ./bench/baseline.md
 npm run suite publish ./bench pr   # commit (owners) or pull request; description = diff + baseline
 ```
 
+There is no separate check step. `npm run benchmark` checks the tests before it starts a browser: every row loads
+in the command player, the suite's selection works, and it warns about tests no selector picks. `publish` runs
+the same checks plus "a change that can move a score needs a new `version`".
+
 Hub dataset pull requests have no CI, so the reviewer reproduces the checks:
-`npm run suite pull datasets/<id>@refs/pr/<n> ./review`, then `validate` and `baseline`. After merging, a
+`npm run suite pull datasets/<id>@refs/pr/<n> ./review`, then `baseline`. After merging, a
 maintainer tags the release and points the viewer at it:
 
 ```bash
@@ -105,7 +108,6 @@ Everything happens locally until `publish`:
 ```bash
 npm run suite init ./new-bench          # starter suite.yaml (tests: [{ all: true }]) + one example test
 npm run dev suite=./new-bench           # add tests; type a new Category in the editor to start a category
-npm run suite validate ./new-bench
 npm run benchmark <model> ./new-bench   # real runs, results stay local
 npm run suite publish ./new-bench repo=<org>/<name> dry-run    # what would be uploaded
 npm run suite publish ./new-bench repo=<org>/<name> create     # creates a PRIVATE dataset repo first
