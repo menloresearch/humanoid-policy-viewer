@@ -35,6 +35,9 @@ export function checkpointProblems({ envYaml, agentYaml, jointNames }) {
       if (!settings.torque_limit) {
         warnings.push('env.yaml declares no numeric effort_limit for the actuators, so torque would be unclamped');
       }
+      if (settings.obs_config_error) {
+        warnings.push(`${settings.obs_config_error}, so the viewer will refuse the policy`);
+      }
     } catch (error) {
       warnings.push(`env.yaml is incomplete: ${error.message}`);
     }

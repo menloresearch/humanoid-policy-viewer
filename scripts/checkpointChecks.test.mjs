@@ -39,6 +39,15 @@ test('an env.yaml without effort_limit is warned about as unclamped torque', () 
   assert.deepEqual(warnings.map((w) => w.replace(/,.*/, '')), ['env.yaml declares no numeric effort_limit for the actuators']);
 });
 
+test('policy observations the viewer cannot compute are warned about', () => {
+  const footContact = '\n    foot_contact:\n      func: isaac_asimov.tasks.locomotion.mdp.observations:foot_contact\n      scale: null\n';
+  const withFootContact = envYaml.replace('\n  critic:\n', `${footContact}  critic:\n`);
+  const { errors, warnings } = checkpointProblems({ envYaml: withFootContact, agentYaml, jointNames });
+  assert.deepEqual(errors, []);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /foot_contact .*viewer will refuse the policy$/);
+});
+
 test('an incomplete env.yaml and a junk agent.yaml are warnings', () => {
   const { errors, warnings } = checkpointProblems({ envYaml: 'foo: 1\n', agentYaml: '\n', jointNames });
   assert.deepEqual(errors, []);
