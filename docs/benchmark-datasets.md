@@ -15,7 +15,7 @@ tools/                     optional: scripts that generate the tests (published,
 
 That is all a benchmark needs locally. Publishing adds the Hugging Face files, built from `suite.yaml` and never
 kept in the working copy: `eval.yaml` (the Hub benchmark registration, one task per leaderboard) and the card's
-front matter (a default `all` config with every test, one config per category, tags). A task scoped to one
+front matter (a default `all` config with every test, one config per category, the declared column types, tags). A task scoped to one
 category points at that config; any other task points at `all`, so `all` is not a valid category name. `npm run suite publish <dir> dry-run` shows them.
 
 ## A test (one row)
