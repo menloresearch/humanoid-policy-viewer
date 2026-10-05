@@ -31,6 +31,8 @@ import { TEST_KINDS, TEST_SCHEMA_VERSION } from './protocol.js';
 import { validateTerrain } from '../simulation/terrainGen.js';
 
 export const TIERS = ['reasonable', 'beyond'];
+// The dataset config that holds every test (data/*/test.jsonl); not a category.
+export const ALL_CONFIG = 'all';
 const ID_RE = /^[a-z0-9][a-z0-9_]*\/[a-z0-9][a-z0-9_.-]*$/;
 const OPT_IN_METRICS = ['gait_symmetry'];
 const EVENT_KEYS = ['t', 'type', 'dir', 'force', 'duration', 'targetBody', 'torqueAxis', 'torqueMag', 'label', 'tier'];
@@ -46,6 +48,7 @@ export function validateTestRow(row) {
 
   if (typeof row.id !== 'string' || !ID_RE.test(row.id)) fail('id must look like "<config>/<name>" (lower case, digits, _)');
   if (typeof row.config !== 'string' || !row.id?.startsWith?.(`${row.config}/`)) fail('config must equal the part of id before "/"');
+  if (row.config === ALL_CONFIG) fail(`"${ALL_CONFIG}" is reserved (the dataset config holding every test); pick another category name`);
   if (row.schema_version !== TEST_SCHEMA_VERSION) fail(`schema_version must be ${TEST_SCHEMA_VERSION}`);
   if (!TEST_KINDS.includes(row.kind)) fail(`kind "${row.kind}" is not one of ${TEST_KINDS.join(', ')}`);
   if (typeof row.name !== 'string' || !row.name) fail('name must be a non-empty string');

@@ -84,17 +84,15 @@ requires:
   robot: { name: asimov-1 }
   policy_interface: velocity-command
 defaults:
-  repeats: 1                    # more than 1 needs randomize, e.g. { action_delay: env_range }
+  repeats: 5                    # each repeat draws its own seeded randomisation
   seed: 0
-  randomize: {}
-  aggregate: mean               # mean | median | worst
-  pass_rule: all_repeats        # all_repeats | fraction
+  randomize: { action_delay: env_range, initial_joint_noise_rad: 0.02 }
   timeout_s: 600
 tests:                          # { all: true }, { config: <category> } or { id: <category>/<name> }
   - { all: true }
 tasks:                          # leaderboard numbers; _v<version> is appended to each id
-  - { id: upright_rate, metric: upright_rate }
-  - { id: tracking_score, metric: tracking_score, scope: { config: locomotion } }
+  - { id: survival_rate, metric: survival_rate@1 }    # scope: { config, id, tag, tier } narrows a task
+  - { id: survival_time, metric: survival_time@1 }
 reference_models: []            # models \`npm run suite baseline\` compares
 `;
 }
@@ -275,7 +273,10 @@ async function baseline(dir, models) {
 }
 
 // eval.yaml and README.md are built by hubFiles(), never taken from disk.
-const PUBLISHED = [/^suite\.yaml$/, /^[A-Z_]+\.md$/, /^suites\/[^/]+\.ya?ml$/, /^data\/[^/]+\/test\.jsonl$/, /^calibration\/[^/]+\.json$/];
+const PUBLISHED = [
+  /^suite\.yaml$/, /^[A-Z_]+\.md$/, /^suites\/[^/]+\.ya?ml$/, /^data\/[^/]+\/test\.jsonl$/, /^calibration\/[^/]+\.json$/,
+  /^tools\/[^/]+\.(mjs|js|py)$/, // optional scripts that generate the tests, kept for reviewers
+];
 
 function publishableFiles(dir) {
   const files = [];

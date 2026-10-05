@@ -3,12 +3,15 @@
 // dataset) names the protocol it was validated against; the runner refuses to
 // produce shareable results for a different one.
 //
-// Bump BENCHMARK_PROTOCOL in the same commit as any change that can move a
-// benchmark number: metric or fall-criterion code, the scene or the asimov-1
-// pin, how env.yaml gains/limits/delays are applied, the tick loop, or what a
-// randomisation key does. Docs, UI and refactors that leave every number
-// unchanged do not bump it. `npm run benchmark:golden` catches an accidental
-// change: it compares a smoke run with test/fixtures/smoke-suite/golden.json.
+// Bump BENCHMARK_PROTOCOL in the same commit as any change that can move every
+// benchmark number: the fall criterion, the scene or the asimov-1 pin, how
+// env.yaml gains/limits/delays are applied, the tick loop, or what a
+// randomisation key does. Leaderboard metrics are versioned on their own
+// (summary.js, "survival_rate@1"): adding a metric, or a new version of one,
+// does not bump the protocol, but editing a published metric version does.
+// Docs, UI and refactors that leave every number unchanged do not bump it.
+// `npm run benchmark:golden` catches an accidental change: it compares a smoke
+// run with test/fixtures/smoke-suite/golden.json.
 
 export const BENCHMARK_PROTOCOL = 1;
 

@@ -1,7 +1,8 @@
 // A benchmark suite (suite.yaml at the root of a Hugging Face benchmark dataset)
-// says which tests run, how often, with what randomisation, how repeats are
-// combined and which numbers become leaderboard tasks. The tests themselves are
-// dataset rows (testRow.js). Example:
+// says which tests run, how often, with what randomisation, and which numbers
+// become leaderboard tasks. The tests themselves are dataset rows (testRow.js).
+// How repeats and tests combine is part of each metric's definition (summary.js),
+// not a suite setting. Example:
 //
 //   suite: asimov-locomotion
 //   version: 1
@@ -11,50 +12,45 @@
 //     repeats: 5
 //     seed: 0
 //     randomize: { action_delay: env_range, initial_joint_noise_rad: 0.02 }
-//     aggregate: mean          # mean | median | worst
-//     pass_rule: all_repeats   # all_repeats | fraction
 //     timeout_s: 600           # wall-clock budget per cell
 //   tests:                     # { all: true }, { config: <category> } or { id: <test id> }
 //     - { config: locomotion }
-//     - { id: distance/square_lap_100m, repeats: 1 }
-//   tasks:
-//     - { id: upright_rate, metric: upright_rate }
-//     - { id: push_standing_reasonable_pass, metric: push_pass_rate, scope: { config: push_standing, tier: reasonable } }
+//     - { id: distance/square_lap_100m, repeats: 2 }
+//   tasks:                     # metric = "<name>@<version>"; scope by config, id, tag and/or tier
+//     - { id: survival_rate, metric: survival_rate@1 }
+//     - { id: push_walking_survival_rate, metric: survival_rate@1, scope: { config: push_walking } }
 //
-// Leaderboard task ids get the suite version appended (upright_rate_v1), so a
+// Leaderboard task ids get the suite version appended (survival_rate_v1), so a
 // new version starts new leaderboards instead of mixing incomparable numbers.
 
 import { BENCHMARK_PROTOCOL, POLICY_INTERFACES, RANDOMIZERS, ROBOTS, TEST_KINDS } from './protocol.js';
 import { cellSeed } from './rng.js';
-import { METRICS } from './summary.js';
-import { TIERS } from './testRow.js';
+import { METRICS, latestMetricVersion } from './summary.js';
+import { ALL_CONFIG, TIERS } from './testRow.js';
 
-export const AGGREGATES = ['mean', 'median', 'worst'];
-export const PASS_RULES = ['all_repeats', 'fraction'];
 const TASK_ID_RE = /^[a-z][a-z0-9_]*$/;
 const DEFAULTS = {
   repeats: 1,
   seed: 0,
   randomize: {},
-  aggregate: 'mean',
-  pass_rule: 'all_repeats',
   timeout_s: 600,
 };
+const SETTING_KEYS = Object.keys(DEFAULTS);
+const SCOPE_KEYS = ['config', 'id', 'tag', 'tier'];
 
 const isPlainObject = (value) => !!value && typeof value === 'object' && !Array.isArray(value);
 const asList = (value) => (value === undefined || value === null ? [] : Array.isArray(value) ? value : [value]);
 
-function checkSettings(settings, where, errors) {
+function checkSettings(settings, where, errors, { selector = false } = {}) {
+  for (const key of Object.keys(settings)) {
+    if (SETTING_KEYS.includes(key) || (selector && ['id', 'config', 'all'].includes(key))) continue;
+    const hint = ['aggregate', 'pass_rule'].includes(key) ? '; how repeats combine is part of each metric (e.g. survival_rate@1)' : '';
+    errors.push(`${where}.${key} is not a setting (${SETTING_KEYS.join(', ')})${hint}`);
+  }
   if (settings.repeats !== undefined && (!Number.isInteger(settings.repeats) || settings.repeats < 1)) {
     errors.push(`${where}.repeats must be an integer >= 1`);
   }
   if (settings.seed !== undefined && !Number.isInteger(settings.seed)) errors.push(`${where}.seed must be an integer`);
-  if (settings.aggregate !== undefined && !AGGREGATES.includes(settings.aggregate)) {
-    errors.push(`${where}.aggregate must be one of ${AGGREGATES.join(', ')}`);
-  }
-  if (settings.pass_rule !== undefined && !PASS_RULES.includes(settings.pass_rule)) {
-    errors.push(`${where}.pass_rule must be one of ${PASS_RULES.join(', ')}`);
-  }
   if (settings.timeout_s !== undefined && !(Number.isFinite(settings.timeout_s) && settings.timeout_s > 0)) {
     errors.push(`${where}.timeout_s must be a number > 0`);
   }
@@ -102,7 +98,7 @@ export function parseSuite(raw) {
       errors.push(`tests[${i}] must have exactly one of id, config or all: true`);
       return;
     }
-    checkSettings(entry, `tests[${i}]`, errors);
+    checkSettings(entry, `tests[${i}]`, errors, { selector: true });
   });
 
   const tasks = asList(raw.tasks);
@@ -115,12 +111,17 @@ export function parseSuite(raw) {
     if (seen.has(task.id)) errors.push(`tasks[${i}].id "${task.id}" is used twice`);
     seen.add(task.id);
     if (/_v\d+$/.test(task.id)) errors.push(`tasks[${i}].id must not end in _v<n>; the suite version is appended for you`);
-    if (!METRICS[task.metric]) errors.push(`tasks[${i}].metric "${task.metric}" is unknown; known: ${Object.keys(METRICS).join(', ')}`);
+    if (!METRICS[task.metric]) {
+      const latest = typeof task.metric === 'string' && !task.metric.includes('@') ? latestMetricVersion(task.metric) : null;
+      errors.push(latest
+        ? `tasks[${i}].metric must name a version, e.g. "${latest}"`
+        : `tasks[${i}].metric "${task.metric}" is unknown; known: ${Object.keys(METRICS).join(', ')}`);
+    }
     const scope = task.scope ?? {};
     if (!isPlainObject(scope)) errors.push(`tasks[${i}].scope must be a mapping`);
     else {
-      for (const key of Object.keys(scope)) if (!['config', 'id', 'tier'].includes(key)) errors.push(`tasks[${i}].scope.${key} is unknown (config, id, tier)`);
-      if (scope.tier !== undefined && !TIERS.includes(scope.tier)) errors.push(`tasks[${i}].scope.tier must be ${TIERS.join(' | ')}`);
+      for (const key of Object.keys(scope)) if (!SCOPE_KEYS.includes(key)) errors.push(`tasks[${i}].scope.${key} is unknown (${SCOPE_KEYS.join(', ')})`);
+      for (const tier of asList(scope.tier)) if (!TIERS.includes(tier)) errors.push(`tasks[${i}].scope.tier must be ${TIERS.join(' | ')}`);
     }
   });
 
@@ -234,13 +235,12 @@ export function buildEvalYaml(suite, { name, description }) {
     name,
     description,
     evaluation_framework: 'humanoid-policy-viewer',
-    tasks: suite.tasks.map((task) => {
-      const entry = { id: versionedTaskId(suite, task) };
-      if (typeof task.scope.config === 'string') {
-        entry.config = task.scope.config;
-        entry.split = 'test';
-      }
-      return entry;
-    }),
+    // A task scoped to one category scores that dataset config; any other task
+    // (several categories, or a tag/tier cutting across them) scores "all".
+    tasks: suite.tasks.map((task) => ({
+      id: versionedTaskId(suite, task),
+      config: typeof task.scope.config === 'string' ? task.scope.config : ALL_CONFIG,
+      split: 'test',
+    })),
   };
 }

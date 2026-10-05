@@ -10,11 +10,13 @@ data/<config>/test.jsonl   one test per line; one dataset config per category (l
 README.md                  optional notes; becomes the dataset card
 METHODOLOGY.md             optional: why the tests are what they are
 calibration/, suites/      optional: calibration records, extra suite files (e.g. suites/smoke.yaml)
+tools/                     optional: scripts that generate the tests (published, for reviewers)
 ```
 
 That is all a benchmark needs locally. Publishing adds the Hugging Face files, built from `suite.yaml` and never
 kept in the working copy: `eval.yaml` (the Hub benchmark registration, one task per leaderboard) and the card's
-front matter (one dataset config per category, tags). `npm run suite publish <dir> dry-run` shows them.
+front matter (a default `all` config with every test, one config per category, tags). A task scoped to one
+category points at that config; any other task points at `all`, so `all` is not a valid category name. `npm run suite publish <dir> dry-run` shows them.
 
 ## A test (one row)
 
@@ -88,26 +90,53 @@ defaults:
   repeats: 5
   seed: 0                          # repeat i of test t runs with a seed derived from (seed, t, i)
   randomize: { action_delay: env_range, initial_joint_noise_rad: 0.02 }
-  aggregate: mean                  # mean | median | worst, for continuous metrics over repeats
-  pass_rule: all_repeats           # all_repeats | fraction, for upright / push recovered
   timeout_s: 600                   # wall-clock budget per cell
 tests:                             # { all: true }, { config: … } or { id: … }; later entries override earlier ones
   - { config: locomotion }
   - { config: push_walking }
-  - { id: distance/square_lap_100m, repeats: 1 }
+  - { id: distance/square_lap_100m, repeats: 2 }
 tasks:                             # leaderboard numbers; ids get _v<version> appended
-  - { id: upright_rate, metric: upright_rate }
-  - { id: push_walking_reasonable_pass, metric: push_pass_rate, scope: { config: push_walking, tier: reasonable } }
-  - { id: push_walking_max_force_n, metric: max_force_survived_n, scope: { config: push_walking } }
+  - { id: survival_rate, metric: survival_rate@1 }
+  - { id: survival_time, metric: survival_time@1 }
+  - { id: push_walking_reasonable_survival_rate, metric: survival_rate@1, scope: { config: push_walking, tier: reasonable } }
 reference_models: [menloresearch/asimov1-loco]   # used by `npm run suite baseline`
 ```
 
 The simulation is deterministic, so `repeats > 1` only makes sense with something randomised; the runner refuses
-otherwise. Metrics (`src/benchmark/summary.js`): `upright_rate`, `push_pass_rate`, `max_force_survived_n`,
-`tracking_rmse` / `tracking_score`, `drift_final_m` / `drift_score`. The Hub's leaderboards rank higher values
-first, so prefer the `_score` forms for leaderboards. A scope narrows a task to `config`, `id` (either may be a list)
-and, for push metrics, `tier`. A new metric or randomisation is a viewer change (and a protocol bump); using it is
-a suite change (a version bump).
+otherwise. A scope narrows a task to `config`, `id`, `tag` (a test's tags) and/or `tier` (a test's push tiers);
+each may be a list.
+
+### Metrics and repeats
+
+Metrics live in `src/benchmark/summary.js` and are named with a version, `<name>@<version>`:
+
+| metric | one run (test × repeat) | |
+|---|---|---|
+| `survival_rate@1` | 1 if it never fell, else 0 | probability of finishing a test upright |
+| `survival_time@1` | fraction of the test completed before the first fall (1 = never fell) | separates "fell at 1 s" from "fell at 9 s" |
+
+A fall is the base below 0.35 m, the torso tilted past 78.5°, or a tumble (`src/simulation/benchmarkRunner.js`);
+it is part of `BENCHMARK_PROTOCOL`. A run that errored counts as a fall at t = 0.
+
+Repeats differ only by their seeded randomisation (the action delay drawn from the policy's `env.yaml` range,
+initial joint noise), which moves a policy's limit by tens of Newtons near a push boundary. So outcomes there are
+genuinely probabilistic, and every metric is combined the same way:
+
+1. **Repeats → test**: the mean. For `survival_rate` that is the estimated probability of surviving the test,
+   not a pass/fail.
+2. **Tests → task**: the mean within each category, then the mean of the categories in the task's scope, so a
+   category of 30 push tests does not drown out one of 9 locomotion tests.
+3. **Uncertainty**: the standard error of that mean over the seeds (the tests are fixed; only the randomisation is
+   random) and a 95% interval, clipped to the metric's range. Each test's spread is smoothed as if one more repeat
+   had landed at each end of the range, so 5 survivals out of 5 still show uncertainty. The interval is in
+   `run.json`, printed by `npm run benchmark`, and written into each `.eval_results` entry's `notes` (the Hub has
+   no field for it).
+
+More repeats narrow the interval roughly as 1/√repeats; 5 is a reasonable default. A metric's version fixes how
+it is computed and combined: adding a metric or a new version needs no `BENCHMARK_PROTOCOL` bump, but a published
+version is never changed. Using a metric in a suite (or switching versions) is a suite `version` bump. The other
+numbers `run.json` keeps per run (tracking error, drift, push recovery, balance, gait symmetry, smoothness) feed no
+leaderboard yet; each can become a metric when it is trustworthy.
 
 ## Workflow
 

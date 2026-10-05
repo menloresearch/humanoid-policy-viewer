@@ -28,7 +28,7 @@ function suite(extra = {}) {
   return parseSuite({
     suite: 's', version: 2, harness: { protocol: BENCHMARK_PROTOCOL }, requires: { robot: { name: 'asimov-1' } },
     tests: [{ config: 'loco' }, { config: 'push' }],
-    tasks: [{ id: 'upright_rate', metric: 'upright_rate' }],
+    tasks: [{ id: 'survival_rate', metric: 'survival_rate@1' }],
     ...extra,
   });
 }
@@ -130,61 +130,76 @@ test('selection merges overrides and refuses identical repeats', () => {
   assert.throws(() => selectTests(suite({ tests: [{ config: 'missing' }] }), rows), /matches no test/);
 });
 
-test('summary combines repeats and computes tasks', () => {
-  const rows = [row('loco/a'), row('push/c', { events: [push(1, 100, 'reasonable'), push(3, 300, 'beyond')] })];
+const ran = (fellAt = null) => ({ fell: { fell: fellAt !== null, time: fellAt } });
+
+test('survival metrics: repeats are averaged, categories weigh equally, errors count as falls', () => {
+  // loco: 2 tests; push: 1 test with a tier and a tag. duration is 4 s.
+  const rows = [row('loco/a'), row('loco/b'), row('push/c', { tags: ['walking'], events: [push(1, 100, 'reasonable')] })];
   const s = suite({
-    defaults: { repeats: 2, randomize: { action_delay: 'env_range' } },
+    defaults: { repeats: 4, randomize: { action_delay: 'env_range' } },
     tasks: [
-      { id: 'upright_rate', metric: 'upright_rate' },
-      { id: 'push_reasonable', metric: 'push_pass_rate', scope: { tier: 'reasonable' } },
-      { id: 'push_beyond', metric: 'push_pass_rate', scope: { tier: 'beyond' } },
-      { id: 'max_force', metric: 'max_force_survived_n', scope: { config: 'push' } },
-      { id: 'tracking', metric: 'tracking_rmse', scope: { config: 'loco' } },
-      { id: 'friction', metric: 'upright_rate', scope: { config: 'friction' } },
+      { id: 'survival_rate', metric: 'survival_rate@1' },
+      { id: 'survival_time', metric: 'survival_time@1' },
+      { id: 'loco_survival', metric: 'survival_rate@1', scope: { config: 'loco' } },
+      { id: 'reasonable', metric: 'survival_rate@1', scope: { tier: 'reasonable' } },
+      { id: 'walking', metric: 'survival_rate@1', scope: { tag: 'walking' } },
+      { id: 'friction', metric: 'survival_rate@1', scope: { config: 'friction' } },
     ],
   });
-  const selected = selectTests(s, rows);
-  const metrics = (fell, recovered, rmse) => ({
-    fell: { fell, time: fell ? 3.2 : null },
-    commandTracking: { overall: { vx: rmse, vy: rmse, wz: rmse } },
-    drift: { final_m: 1 },
-    perturbations: { events: recovered.map((r) => ({ recovered: r })) },
-  });
   const cells = [
-    { testId: 'loco/a', repeat: 0, metrics: metrics(false, [], 0.1) },
-    { testId: 'loco/a', repeat: 1, metrics: metrics(false, [], 0.3) },
-    { testId: 'push/c', repeat: 0, metrics: metrics(true, [true, false], 0.2) },
-    { testId: 'push/c', repeat: 1, error: 'boom', metrics: null },
+    ...[0, 1, 2, 3].map((repeat) => ({ testId: 'loco/a', repeat, metrics: ran() })),
+    ...[0, 1, 2, 3].map((repeat) => ({ testId: 'loco/b', repeat, metrics: ran(repeat < 2 ? 2 : null) })),
+    { testId: 'push/c', repeat: 0, metrics: ran(1) },
+    { testId: 'push/c', repeat: 1, metrics: ran() },
+    { testId: 'push/c', repeat: 2, metrics: ran() },
+    { testId: 'push/c', repeat: 3, error: 'boom', metrics: null },
   ];
-  const perTest = summarizeTests(cells, selected);
-  assert.equal(perTest[0].upright.value, 1);
-  assert.equal(perTest[0].trackingRmse, 0.2);
-  assert.equal(perTest[1].errors, 1);
-  assert.equal(perTest[1].events[0].recovered, 1);
-  assert.equal(perTest[1].events[0].value, 0); // all_repeats: the errored repeat fails it
+  const perTest = summarizeTests(cells, selectTests(s, rows));
+  const rate = (id) => perTest.find((t) => t.testId === id).metrics['survival_rate@1'];
+  assert.deepEqual([rate('loco/a').value, rate('loco/b').value, rate('push/c').value], [1, 0.5, 0.5]);
+  assert.deepEqual(perTest.find((t) => t.testId === 'push/c').metrics['survival_time@1'].values, [0.25, 1, 1, 0]);
+  assert.deepEqual(perTest.find((t) => t.testId === 'push/c').fellAt, [1, null, null, 0]);
+  assert.equal(perTest.find((t) => t.testId === 'push/c').errors, 1);
 
-  const tasks = Object.fromEntries(computeTasks(s, perTest).map((t) => [t.taskId, t.value]));
-  assert.deepEqual(tasks, {
-    upright_rate_v2: 0.5,
-    push_reasonable_v2: 0,
-    push_beyond_v2: 0,
-    max_force_v2: 0,
-    tracking_v2: 0.2,
-    friction_v2: null,
-  });
+  const tasks = Object.fromEntries(computeTasks(s, perTest).map((t) => [t.taskId, t]));
+  // (mean(loco) + mean(push)) / 2 = ((1 + 0.5) / 2 + 0.5) / 2, not the plain mean over 3 tests
+  assert.equal(tasks.survival_rate_v2.value, 0.625);
+  // loco = (1 + 0.75) / 2 = 0.875 (loco/b fell at 2 s of 4 in two repeats), push/c = (0.25 + 1 + 1 + 0) / 4
+  assert.equal(tasks.survival_time_v2.value, 0.7188);
+  assert.equal(tasks.loco_survival_v2.value, 0.75);
+  assert.equal(tasks.reasonable_v2.value, 0.5);
+  assert.equal(tasks.walking_v2.value, 0.5);
+  assert.equal(tasks.friction_v2.value, null);
+  assert.equal(tasks.friction_v2.ci95, null);
+  assert.deepEqual([tasks.survival_rate_v2.tests, tasks.survival_rate_v2.cells], [3, 12]);
+  const [lo, hi] = tasks.survival_rate_v2.ci95;
+  assert.ok(lo < 0.625 && hi > 0.625 && lo >= 0 && hi <= 1);
+});
 
-  const fraction = suite({ ...s, defaults: { ...s.defaults, pass_rule: 'fraction' }, tasks: s.tasks });
-  const tasksFraction = computeTasks(fraction, summarizeTests(cells, selectTests(fraction, rows)));
-  assert.equal(tasksFraction.find((t) => t.taskId === 'push_reasonable_v2').value, 0.5);
-  assert.equal(tasksFraction.find((t) => t.taskId === 'max_force_v2').value, 100);
+test('a test survived on every repeat still has an uncertainty', () => {
+  const s = suite({ defaults: { repeats: 5, randomize: { action_delay: 'env_range' } }, tests: [{ config: 'loco' }] });
+  const cells = [0, 1, 2, 3, 4].map((repeat) => ({ testId: 'loco/a', repeat, metrics: ran() }));
+  const [task] = computeTasks(s, summarizeTests(cells, selectTests(s, [row('loco/a')])));
+  assert.equal(task.value, 1);
+  assert.ok(task.stderr > 0.1, `stderr ${task.stderr}`);
+  assert.equal(task.ci95[1], 1);
+});
+
+test('metrics must name a version; aggregate and pass_rule are no longer settings', () => {
+  assert.throws(() => suite({ tasks: [{ id: 'x', metric: 'survival_rate' }] }), /must name a version, e\.g\. "survival_rate@1"/);
+  assert.throws(() => suite({ tasks: [{ id: 'x', metric: 'upright_rate@1' }] }), /unknown; known: survival_rate@1/);
+  assert.throws(() => suite({ defaults: { pass_rule: 'fraction' } }), /defaults\.pass_rule is not a setting.*part of each metric/);
+  assert.throws(() => suite({ tests: [{ config: 'loco', aggregate: 'mean' }] }), /tests\[0\]\.aggregate is not a setting/);
+  assert.throws(() => suite({ tasks: [{ id: 'x', metric: 'survival_rate@1', scope: { body: 'pelvis' } }] }), /scope\.body is unknown/);
 });
 
 test('eval.yaml tasks carry the version and their dataset config', () => {
-  const s = suite({ tasks: [{ id: 'upright_rate', metric: 'upright_rate' }, { id: 'push', metric: 'push_pass_rate', scope: { config: 'push' } }] });
+  const s = suite({ tasks: [{ id: 'survival_rate', metric: 'survival_rate@1' }, { id: 'push', metric: 'survival_rate@1', scope: { config: 'push' } }] });
   assert.deepEqual(buildEvalYaml(s, { name: 'N', description: 'D' }).tasks, [
-    { id: 'upright_rate_v2' },
+    { id: 'survival_rate_v2', config: 'all', split: 'test' },
     { id: 'push_v2', config: 'push', split: 'test' },
   ]);
+  assert.ok(validateTestRow(row('all/x')).some((e) => e.includes('reserved')));
 });
 
 test('suite init writes a valid starter benchmark', async () => {
@@ -195,7 +210,7 @@ test('suite init writes a valid starter benchmark', async () => {
   const loaded = loadSuiteDir(dir);
   assert.equal(loaded.suite.suite, 'my-bench');
   assert.deepEqual(compatibilityProblems(loaded.suite), []);
-  assert.equal(expandCells(selectTests(loaded.suite, loaded.rows)).length, 1);
+  assert.equal(expandCells(selectTests(loaded.suite, loaded.rows)).length, 5);
   assert.throws(() => initSuite(dir, { log: () => {} }), /not empty/);
 });
 

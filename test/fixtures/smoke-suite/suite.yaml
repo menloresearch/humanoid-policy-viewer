@@ -16,14 +16,11 @@ defaults:
   randomize:
     action_delay: env_range
     initial_joint_noise_rad: 0.01
-  aggregate: mean
-  pass_rule: all_repeats
   timeout_s: 300
 tests:
   - { config: locomotion }
   - { config: push_standing }
 tasks:
-  - { id: upright_rate, metric: upright_rate }
-  - { id: tracking_score, metric: tracking_score, scope: { config: locomotion } }
-  - { id: push_reasonable_pass, metric: push_pass_rate, scope: { tier: reasonable } }
-  - { id: push_max_force_n, metric: max_force_survived_n, scope: { config: push_standing } }
+  - { id: survival_rate, metric: survival_rate@1 }
+  - { id: survival_time, metric: survival_time@1 }
+  - { id: push_survival_rate, metric: survival_rate@1, scope: { config: push_standing } }

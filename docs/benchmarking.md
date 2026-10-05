@@ -43,10 +43,13 @@ be uploaded.
 The results have three layers, and only the last is squashed into single numbers:
 
 1. **Cells**: raw metrics of each test repeat (`run.json` `cells`).
-2. **Per test**: repeats combined by the suite's `aggregate` and `pass_rule` (`perTest`).
-3. **Tasks**: the suite's leaderboard numbers (`tasks`), e.g. `push_walking_reasonable_pass_v1`. Each is one
-   leaderboard on the Hub; a suite can define as many as it likes. There is no single overall score unless a
-   suite defines one.
+2. **Per test**: every metric's value for each repeat, and their mean (`perTest`).
+3. **Tasks**: the suite's leaderboard numbers (`tasks`), e.g. `push_walking_survival_rate_v1`, each with a 95%
+   interval over the seeds. Each is one leaderboard on the Hub; a suite can define as many as it likes. There is
+   no single overall score unless a suite defines one.
+
+How repeats and tests combine is part of each metric's versioned definition (see
+[benchmark-datasets.md](benchmark-datasets.md#metrics-and-repeats)).
 
 ## When results are uploaded
 

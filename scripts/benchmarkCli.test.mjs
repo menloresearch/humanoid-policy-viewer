@@ -61,7 +61,7 @@ test('jobs run longest first, shards partition them, pages keep their model', ()
 function fakeRun(overrides = {}) {
   const raw = {
     suite: 'smoke', version: 1, harness: { protocol: 1 }, requires: {},
-    tests: [{ config: 'a' }], tasks: [{ id: 'upright_rate', metric: 'upright_rate' }],
+    tests: [{ config: 'a' }], tasks: [{ id: 'survival_rate', metric: 'survival_rate@1' }],
   };
   const row = {
     id: 'a/x', config: 'a', schema_version: 1, kind: 'velocity-sequence', name: 'x', description: '', tags: [], duration: 1,
@@ -108,30 +108,33 @@ test('merge needs every shard of the same run exactly once', () => {
 });
 
 test('eval results: entries per task, re-runs replace only their own tasks', () => {
-  const run = fakeRun({ tasks: { m0: [{ taskId: 'upright_rate_v1', value: 0.5 }, { taskId: 'nothing_v1', value: null }] } });
+  const run = fakeRun({ tasks: { m0: [
+    { taskId: 'survival_rate_v1', metric: 'survival_rate@1', value: 0.5, ci95: [0.3, 0.7], tests: 4, cells: 20 },
+    { taskId: 'nothing_v1', metric: 'survival_rate@1', value: null, ci95: null, tests: 0, cells: 0 },
+  ] } });
   const entries = buildEvalResultEntries(run, 'm0', { sourceUrl: 'https://example/report.html' });
   assert.equal(entries.length, 1);
-  assert.deepEqual(entries[0].dataset, { id: 'org/bench', task_id: 'upright_rate_v1', revision: 'd'.repeat(40) });
-  assert.match(entries[0].notes, /hpv@cccccccccccc protocol=1 suite=smoke v1/);
+  assert.deepEqual(entries[0].dataset, { id: 'org/bench', task_id: 'survival_rate_v1', revision: 'd'.repeat(40) });
+  assert.match(entries[0].notes, /^metric=survival_rate@1 95%CI=\[0\.3, 0\.7\] tests=4 runs=20 hpv@cccccccccccc protocol=1 suite=smoke v1/);
   assert.equal(evalResultsPath('org/bench'), '.eval_results/org__bench.yaml');
 
   const existing = mergeEvalResults(null, [
-    { dataset: { id: 'org/bench', task_id: 'upright_rate_v1' }, value: 0.1 },
-    { dataset: { id: 'org/bench', task_id: 'upright_rate_v0' }, value: 0.9 },
-    { dataset: { id: 'other/bench', task_id: 'upright_rate_v1' }, value: 0.3 },
+    { dataset: { id: 'org/bench', task_id: 'survival_rate_v1' }, value: 0.1 },
+    { dataset: { id: 'org/bench', task_id: 'survival_rate_v0' }, value: 0.9 },
+    { dataset: { id: 'other/bench', task_id: 'survival_rate_v1' }, value: 0.3 },
   ]);
   const merged = parseYaml(mergeEvalResults(existing, entries));
   assert.deepEqual(merged.map((e) => [e.dataset.id, e.dataset.task_id, e.value]), [
-    ['org/bench', 'upright_rate_v0', 0.9],
-    ['other/bench', 'upright_rate_v1', 0.3],
-    ['org/bench', 'upright_rate_v1', 0.5],
+    ['org/bench', 'survival_rate_v0', 0.9],
+    ['other/bench', 'survival_rate_v1', 0.3],
+    ['org/bench', 'survival_rate_v1', 0.5],
   ]);
   assert.throws(() => mergeEvalResults('a: 1\n', entries), /not a YAML list/);
 
   const text = mergeEvalResults(null, [...entries, { ...entries[0], dataset: { ...entries[0].dataset, task_id: 'b_v1' } }]);
   assert.match(text, /date: "2026-10-02T00:00:00.000Z"/);
   assert.doesNotMatch(text, /[&*]a\d/); // no YAML anchors/aliases
-  assert.match(text, /notes: hpv@\S+ protocol=1 suite=smoke v1 asimov-1@\S+ model@\S+\n/);
+  assert.match(text, /notes: metric=\S+ 95%CI=\[[\d.]+, [\d.]+\] tests=\d+ runs=\d+ hpv@\S+ protocol=1 suite=smoke v1 asimov-1@\S+ model@\S+\n/);
 });
 
 test('eval.yaml keeps task ids of earlier suite versions', () => {

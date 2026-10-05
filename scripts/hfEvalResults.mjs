@@ -35,6 +35,12 @@ export function runNotes(run, model) {
   return parts.join(' ');
 }
 
+/** What the number is and how sure it is; the Hub schema has no field for an interval. */
+export function taskNotes(task) {
+  const interval = task.ci95 ? ` 95%CI=[${task.ci95[0]}, ${task.ci95[1]}]` : '';
+  return `metric=${task.metric}${interval} tests=${task.tests} runs=${task.cells}`;
+}
+
 /**
  * The .eval_results entries for one model of a complete run. Tasks with nothing
  * to measure (value null) are left out.
@@ -50,7 +56,7 @@ export function buildEvalResultEntries(run, modelKey, { sourceUrl, user = null }
       value: task.value,
       date: run.generatedAt,
       source,
-      notes: runNotes(run, model),
+      notes: `${taskNotes(task)} ${runNotes(run, model)}`,
     }));
 }
 

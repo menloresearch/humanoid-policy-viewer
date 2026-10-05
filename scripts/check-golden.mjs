@@ -4,8 +4,9 @@
 // Guards BENCHMARK_PROTOCOL (src/benchmark/protocol.js): runs the smoke suite
 // (test/fixtures/smoke-suite) on the bundled policy and compares the key
 // per-cell numbers with test/fixtures/smoke-suite/golden.json. Run it before
-// merging any change to the sim, the metrics or the runner. If the numbers
-// moved on purpose, bump BENCHMARK_PROTOCOL and refresh the file with `update`.
+// merging any change to the sim, the metrics or the runner. If per-run numbers
+// moved on purpose, bump BENCHMARK_PROTOCOL and refresh the file with `update`;
+// if only task values moved (a new metric or metric version), just `update`.
 
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -54,7 +55,14 @@ function main() {
     return;
   }
   const changed = Object.keys(view.cells).filter((id) => JSON.stringify(view.cells[id]) !== JSON.stringify(golden.cells?.[id]));
-  console.error(`Benchmark numbers changed (${changed.join(', ') || 'tasks'}).`);
+  if (!changed.length && Object.keys(golden.cells ?? {}).length === Object.keys(view.cells).length) {
+    // Per-run numbers held; only the smoke suite's tasks or a metric definition moved.
+    console.error('Only leaderboard task values changed; every per-run number is unchanged, so no protocol bump.');
+    console.error('Adding a metric (or a new @version) is fine: npm run benchmark:golden update.');
+    console.error('Never change what a published metric version computes; add the next version instead.');
+    process.exit(1);
+  }
+  console.error(`Benchmark numbers changed (${changed.join(', ')}).`);
   if (golden.protocol === BENCHMARK_PROTOCOL) {
     console.error('If this is intended, bump BENCHMARK_PROTOCOL in src/benchmark/protocol.js and run: npm run benchmark:golden update');
   } else {

@@ -98,28 +98,43 @@
   },
   "tasks": [
     {
-      "taskId": "upright_rate_v1",
-      "metric": "upright_rate",
+      "taskId": "survival_rate_v1",
+      "metric": "survival_rate@1",
       "higherIsBetter": true,
-      "value": 0.5
+      "value": 0.5,
+      "stderr": 0.2165,
+      "ci95": [
+        0.0756,
+        0.9244
+      ],
+      "tests": 2,
+      "cells": 4
     },
     {
-      "taskId": "tracking_score_v1",
-      "metric": "tracking_score",
+      "taskId": "survival_time_v1",
+      "metric": "survival_time@1",
       "higherIsBetter": true,
-      "value": 0.873
+      "value": 0.876,
+      "stderr": 0.2026,
+      "ci95": [
+        0.4789,
+        1
+      ],
+      "tests": 2,
+      "cells": 4
     },
     {
-      "taskId": "push_reasonable_pass_v1",
-      "metric": "push_pass_rate",
+      "taskId": "push_survival_rate_v1",
+      "metric": "survival_rate@1",
       "higherIsBetter": true,
-      "value": 1
-    },
-    {
-      "taskId": "push_max_force_n_v1",
-      "metric": "max_force_survived_n",
-      "higherIsBetter": true,
-      "value": 150
+      "value": 0,
+      "stderr": 0.3062,
+      "ci95": [
+        0,
+        0.6001
+      ],
+      "tests": 1,
+      "cells": 2
     }
   ]
 }

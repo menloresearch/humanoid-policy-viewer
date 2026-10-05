@@ -189,6 +189,8 @@ export function formatTasks(run, modelKey) {
   return (run.tasks?.[modelKey] ?? []).map((task) => {
     const definition = suite.tasks.find((t) => versionedTaskId(suite, t) === task.taskId);
     const direction = task.higherIsBetter ? '' : ' (lower is better)';
-    return `${task.taskId.padEnd(40)} ${task.value === null ? 'n/a (nothing in scope)' : task.value}${direction}${definition?.description ? `  ${definition.description}` : ''}`;
+    const value = task.value === null ? 'n/a (nothing in scope)' : `${task.value}${task.ci95 ? `  [${task.ci95[0]}, ${task.ci95[1]}]` : ''}`;
+    const counts = task.value === null ? '' : `  (${task.tests} tests, ${task.cells} runs)`;
+    return `${task.taskId.padEnd(40)} ${value}${direction}${counts}${definition?.description ? `  ${definition.description}` : ''}`;
   });
 }
