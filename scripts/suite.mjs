@@ -23,7 +23,7 @@ import { classifyTarget } from './benchmarkTargets.mjs';
 import { parseWords, swallowedNpmFlags } from './cliArgs.mjs';
 import { commitFiles, hubCredentials } from './hfCommit.mjs';
 import { ensureDataset } from './hfDataset.mjs';
-import { cardFrontMatter, loadSuiteDir, readYamlFile, regenerateGeneratedFiles, withFrontMatter, writeRows } from './suiteDir.mjs';
+import { hubFiles, loadSuiteDir, readYamlFile, writeRows } from './suiteDir.mjs';
 
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const BASE_FILE = '.hpv-suite.json';
@@ -37,7 +37,7 @@ const USAGE = `Usage: npm run suite <command> ...
   baseline <dir> [model=<model>...]        run reference models on the working copy and on the pulled
                                            revision; writes <dir>/baseline.md
   publish <dir> [repo=<org/name>] [pr] [create] [dry-run]
-                                           regenerate eval.yaml + card, validate, then commit (owner) or
+                                           validate, build eval.yaml + the dataset card, then commit (owner) or
                                            open a pull request; "create" makes a new PRIVATE dataset repo
   release <dataset> rev=<commit>           tag a merged revision v<version> and print the default-suite change
 
@@ -126,7 +126,6 @@ export function initSuite(dir, { log = console.log } = {}) {
   writeRows(dir, [STARTER_ROW]);
   const loaded = loadSuiteDir(dir);
   writeFileSync(join(dir, 'README.md'), readmeBody(loaded.rawSuite));
-  regenerateGeneratedFiles(dir, loaded);
   log(`Created benchmark ${name} in ${dir} with one example test (${STARTER_ROW.id}).`);
   log(`Edit it with: npm run dev suite=${dir}`);
 }
@@ -140,7 +139,7 @@ ${rawSuite.description}
 This is a benchmark for [humanoid-policy-viewer](${rawSuite.harness.repo}). Each row of
 \`data/<config>/test.jsonl\` is one test scenario: velocity commands over time, timed pushes and the floor
 friction. \`suite.yaml\` says how often each test runs, how runs are randomised and scored, and which numbers
-become leaderboard tasks (\`eval.yaml\`, generated from it).
+become leaderboard tasks.
 
 ## Run it
 
@@ -214,18 +213,6 @@ function check(dir) {
       errors.push(`${row.id}: ${error.message}`);
     }
   }
-  // Generated files must match suite.yaml.
-  const evalPath = join(dir, 'eval.yaml');
-  if (!existsSync(evalPath)) errors.push('eval.yaml is missing (run publish, or validate fix)');
-  else {
-    const ids = new Set((readYamlFile(evalPath)?.tasks ?? []).map((task) => task.id));
-    const missing = suite.tasks.map((task) => `${task.id}_v${suite.version}`).filter((id) => !ids.has(id));
-    if (missing.length) errors.push(`eval.yaml is out of date (missing ${missing.join(', ')}); run: npm run suite validate ${dir} fix`);
-  }
-  const readme = existsSync(join(dir, 'README.md')) ? readFileSync(join(dir, 'README.md'), 'utf8') : '';
-  if (readme !== withFrontMatter(readme, cardFrontMatter(rows, { prettyName: rawSuite.title ?? suite.suite }))) {
-    errors.push(`README.md front matter is out of date; run: npm run suite validate ${dir} fix`);
-  }
   // A change that can move a score needs a new suite version.
   const base = readBase(dir);
   if (base) {
@@ -244,11 +231,7 @@ function check(dir) {
   return { errors, warnings, loaded };
 }
 
-function validate(dir, { fix = false } = {}) {
-  if (fix) {
-    const loaded = loadSuiteDir(dir);
-    regenerateGeneratedFiles(dir, loaded);
-  }
+function validate(dir) {
   const { errors, warnings, loaded } = check(dir);
   for (const warning of warnings) console.warn(`warning: ${warning}`);
   for (const error of errors) console.error(`error: ${error}`);
@@ -322,7 +305,8 @@ async function baseline(dir, models) {
   console.log(`\n${text}\nWrote ${join(dir, 'baseline.md')}`);
 }
 
-const PUBLISHED = [/^suite\.yaml$/, /^eval\.yaml$/, /^README\.md$/, /^[A-Z_]+\.md$/, /^suites\/[^/]+\.ya?ml$/, /^data\/[^/]+\/test\.jsonl$/, /^calibration\/[^/]+\.json$/];
+// eval.yaml and README.md are built by hubFiles(), never taken from disk.
+const PUBLISHED = [/^suite\.yaml$/, /^[A-Z_]+\.md$/, /^suites\/[^/]+\.ya?ml$/, /^data\/[^/]+\/test\.jsonl$/, /^calibration\/[^/]+\.json$/];
 
 function publishableFiles(dir) {
   const files = [];
@@ -331,26 +315,31 @@ function publishableFiles(dir) {
       const rel = sub ? `${sub}/${name}` : name;
       if (statSync(join(dir, rel)).isDirectory()) {
         if (!name.startsWith('.')) walk(rel);
-      } else if (PUBLISHED.some((re) => re.test(rel)) && rel !== 'baseline.md') files.push(rel);
+      } else if (PUBLISHED.some((re) => re.test(rel)) && !['README.md', 'baseline.md'].includes(rel)) files.push(rel);
     }
   })('');
   return files.sort();
 }
 
 async function publish(dir, { repo, pr, create, dryRun }) {
-  const loaded = loadSuiteDir(dir);
-  regenerateGeneratedFiles(dir, loaded);
-  const { ok } = validate(dir);
+  const { ok, loaded } = validate(dir);
   if (!ok) throw new Error('Not published: fix the errors above first');
   const base = readBase(dir);
   const name = repo ?? base?.id;
   if (!name) throw new Error('publish needs repo=<org/name> (this working copy was not pulled from the Hub)');
-  const files = publishableFiles(dir).map((path) => ({ path, content: readFileSync(join(dir, path), 'utf8') }));
+  // A pulled copy carries the Hub's eval.yaml; its older task ids are kept.
+  const previousEvalYaml = existsSync(join(dir, 'eval.yaml')) ? readYamlFile(join(dir, 'eval.yaml')) : null;
+  const files = [
+    ...publishableFiles(dir).map((path) => ({ path, content: readFileSync(join(dir, path), 'utf8') })),
+    ...hubFiles(loaded, { previousEvalYaml }),
+  ];
   const diffText = base && base.id === name ? await diff(dir).catch((error) => `(diff failed: ${error.message})`) : '(new dataset)';
   const baselineText = existsSync(join(dir, 'baseline.md')) ? readFileSync(join(dir, 'baseline.md'), 'utf8') : '(no baseline run: npm run suite baseline <dir>)';
   const description = `Published with \`npm run suite publish\` from humanoid-policy-viewer ${collectProvenance(appDir).hpv.commit ?? ''}.\n\n### Changes\n\`\`\`\n${diffText}\n\`\`\`\n\n### Baseline\n${baselineText}\n\nReviewers: \`npm run suite pull datasets/${name}@refs/pr/<n> <dir>\`, then \`validate\` and \`baseline\`.`;
   if (dryRun) {
-    console.log(`dry-run: would write ${files.length} files to datasets/${name}${pr ? ' as a pull request' : ''}:\n  ${files.map((f) => f.path).join('\n  ')}\n\n${description}`);
+    console.log(`dry-run: would write ${files.length} files to datasets/${name}${pr ? ' as a pull request' : ''}:\n  ${files.map((f) => f.path).join('\n  ')}`);
+    console.log(`\n--- eval.yaml (generated) ---\n${files.find((f) => f.path === 'eval.yaml').content}`);
+    console.log(`--- pull request / commit description ---\n${description}`);
     return;
   }
   if (create) {
@@ -394,8 +383,8 @@ async function release(target, rev) {
 
 async function main() {
   const keys = ['model', 'repo', 'rev'];
-  const flags = ['pr', 'create', 'dry-run', 'fix', 'help'];
-  const swallowed = swallowedNpmFlags(process.env, ['model', 'repo', 'rev', 'pr', 'create', 'fix']);
+  const flags = ['pr', 'create', 'dry-run', 'help'];
+  const swallowed = swallowedNpmFlags(process.env, ['model', 'repo', 'rev', 'pr', 'create']);
   if (swallowed.length) throw new Error(`npm kept ${swallowed.map((f) => `--${f}`).join(', ')} for itself; write them without dashes.`);
   const { positionals, options, flags: set } = parseWords(process.argv.slice(2), { keys, flags, repeatable: ['model'] });
   const [command, a, b] = positionals;
@@ -407,7 +396,7 @@ async function main() {
     case 'pull': return pull(a, b && resolve(b));
     case 'validate': {
       if (!a) throw new Error('validate needs <dir>');
-      if (!validate(resolve(a), { fix: set.has('fix') }).ok) process.exitCode = 1;
+      if (!validate(resolve(a)).ok) process.exitCode = 1;
       return;
     }
     case 'diff': return diff(resolve(a ?? ''));

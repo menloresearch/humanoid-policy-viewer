@@ -11,7 +11,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync,
 import { dirname, extname, relative, resolve } from 'node:path'
 import { listModelRoots, listModels as discoverModels } from './scripts/modelDiscovery.mjs'
 import { getBenchmarkRunsDir, getModelLibrary } from './scripts/modelLibraryConfig.mjs'
-import { loadSuiteDir, readRows, regenerateGeneratedFiles, writeRows } from './scripts/suiteDir.mjs'
+import { readRows, writeRows } from './scripts/suiteDir.mjs'
 import { rowToSequence, sequenceToRow } from './src/benchmark/testRow.js'
 
 // A submodule checked out under public/ carries a `.git` pointer file that
@@ -239,18 +239,6 @@ function humanoidDevPlugin() {
     })).sort((a, b) => a.file.localeCompare(b.file));
   }
 
-  // Keep eval.yaml and the dataset card's configs in step with the tests, so a
-  // new category is a new dataset config straight away. Skipped (with a log
-  // line) while suite.yaml or a row is invalid; `npm run suite validate` says why.
-  function refreshGeneratedFiles() {
-    if (!existsSync(resolve(SUITE_DIR, 'suite.yaml'))) return;
-    try {
-      regenerateGeneratedFiles(SUITE_DIR, loadSuiteDir(SUITE_DIR));
-    } catch (e) {
-      console.warn(`[sequences] eval.yaml/README.md not regenerated: ${e.message.split('\n')[0]}`);
-    }
-  }
-
   async function handleSequences(req, res) {
     const url = new URL(req.url, 'http://localhost');
     const file = url.searchParams.get('file');
@@ -282,7 +270,6 @@ function humanoidDevPlugin() {
         const row = sequenceToRow(id, parsed, index >= 0 ? rows[index] : null);
         if (index >= 0) rows[index] = row; else rows.push(row);
         writeRows(SUITE_DIR, rows.filter((r) => r.config === row.config));
-        refreshGeneratedFiles();
         sendJson(res, 200, { ok: true, file, entry: listSequences().find((f) => f.file === file) });
         return;
       }
@@ -293,7 +280,6 @@ function humanoidDevPlugin() {
         writeRows(SUITE_DIR, left, { configs: [removed.config] });
         // The last test of a category takes its file (and dataset config) with it.
         if (!left.length) rmSync(resolve(SUITE_DIR, 'data', removed.config), { recursive: true, force: true });
-        refreshGeneratedFiles();
         sendJson(res, 200, { ok: true, file });
         return;
       }

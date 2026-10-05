@@ -3,8 +3,11 @@
 //
 //   suite.yaml                 what runs and how it is scored (src/benchmark/suite.js)
 //   data/<config>/test.jsonl   one test per line (src/benchmark/testRow.js)
-//   eval.yaml                  generated from suite.yaml (buildEvalYaml)
-//   README.md                  dataset card; its front matter is generated
+//   README.md                  optional notes; becomes the dataset card
+//
+// Running and editing a benchmark needs only these. The Hugging Face files
+// (eval.yaml and the card's front matter) are built by hubFiles() when the
+// benchmark is published, and are never written to a working copy.
 //
 // The same layout is used for a local working copy, a downloaded revision and
 // the test fixture in test/fixtures/smoke-suite/.
@@ -115,16 +118,20 @@ export function mergeEvalTasks(previous, generated) {
   return { ...generated, tasks: [...generated.tasks, ...kept] };
 }
 
-/** Regenerates eval.yaml and the README front matter from suite.yaml and the rows. */
-export function regenerateGeneratedFiles(dir, { suite, rows, rawSuite }) {
+/**
+ * The Hugging Face files for publishing: eval.yaml built from suite.yaml, and
+ * README.md with the dataset card front matter (configs, tags) put in front of
+ * the working copy's README. `previousEvalYaml` is the eval.yaml already on the
+ * Hub, whose task ids for earlier suite versions are kept. Nothing is written.
+ */
+export function hubFiles({ dir, suite, rows, rawSuite }, { previousEvalYaml = null } = {}) {
   const name = rawSuite.title ?? suite.suite;
   const description = (rawSuite.description ?? '').trim() || `Benchmark suite ${suite.suite}, run with humanoid-policy-viewer.`;
-  const evalPath = join(dir, 'eval.yaml');
-  const previous = existsSync(evalPath) ? readYamlFile(evalPath) : null;
-  const evalYaml = mergeEvalTasks(previous, buildEvalYaml(suite, { name, description }));
-  writeFileSync(evalPath, `# Generated from suite.yaml by \`npm run suite publish\`; do not edit by hand.\n${stringifyYaml(evalYaml)}`);
+  const evalYaml = mergeEvalTasks(previousEvalYaml, buildEvalYaml(suite, { name, description }));
   const readmePath = join(dir, 'README.md');
   const readme = existsSync(readmePath) ? readFileSync(readmePath, 'utf8') : `\n# ${name}\n`;
-  writeFileSync(readmePath, withFrontMatter(readme, cardFrontMatter(rows, { prettyName: name })));
-  return { evalYaml };
+  return [
+    { path: 'eval.yaml', content: `# Generated from suite.yaml by \`npm run suite publish\`; do not edit by hand.\n${stringifyYaml(evalYaml)}` },
+    { path: 'README.md', content: withFrontMatter(readme, cardFrontMatter(rows, { prettyName: name })) },
+  ];
 }

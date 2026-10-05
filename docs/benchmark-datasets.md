@@ -7,11 +7,14 @@ fixture, `test/fixtures/smoke-suite/`, for its own tests).
 ```
 suite.yaml                 what runs, how often, how it is scored, which numbers are leaderboards
 data/<config>/test.jsonl   one test per line; one dataset config per category (locomotion, push_walking, ...)
-eval.yaml                  Hub benchmark registration; generated from suite.yaml
-README.md                  dataset card; its front matter (configs, tags) is generated
+README.md                  optional notes; becomes the dataset card
 METHODOLOGY.md             optional: why the tests are what they are
 calibration/, suites/      optional: calibration records, extra suite files (e.g. suites/smoke.yaml)
 ```
+
+That is all a benchmark needs locally. Publishing adds the Hugging Face files, built from `suite.yaml` and never
+kept in the working copy: `eval.yaml` (the Hub benchmark registration, one task per leaderboard) and the card's
+front matter (one dataset config per category, tags). `npm run suite publish <dir> dry-run` shows them.
 
 ## A test (one row)
 
@@ -72,7 +75,7 @@ a suite change (a version bump).
 ```bash
 npm run suite pull datasets/menloresearch/asimov-locomotion-bench ./bench   # working copy (+ .hpv-suite.json)
 npm run dev suite=./bench          # edit tests in the trajectory editor (or edit data/*/test.jsonl)
-npm run suite validate ./bench     # rows, suite.yaml, generated files, version bump; `fix` regenerates
+npm run suite validate ./bench     # rows, suite.yaml, version bump
 npm run suite diff ./bench         # what changed since the pulled revision, and whether scores can move
 npm run suite baseline ./bench     # run reference models on the old and new suite -> ./bench/baseline.md
 npm run suite publish ./bench pr   # commit (owners) or pull request; description = diff + baseline
@@ -111,8 +114,7 @@ npm run suite publish ./new-bench repo=<org>/<name> create     # creates a PRIVA
 Plain `npm run dev` uses `./benchmark` (gitignored) and creates a starter benchmark there on first run.
 
 In the editor a test is saved as **Category / Test name** (the test id `<category>/<name>`). A new category
-gets its own `data/<category>/test.jsonl` and dataset config; `eval.yaml` and the card's configs are regenerated
-on every save. Deleting a category's last test removes it. A category only runs if `suite.yaml` selects it (the
+gets its own `data/<category>/test.jsonl` (and, once published, its own dataset config). Deleting a category's last test removes it. A category only runs if `suite.yaml` selects it (the
 starter's `{ all: true }` selects everything) and only gets a leaderboard if a task scopes it.
 
 To appear as a Hub benchmark, `eval.yaml`'s `evaluation_framework: humanoid-policy-viewer` must be in the Hub's
