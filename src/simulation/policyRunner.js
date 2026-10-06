@@ -99,6 +99,7 @@ export class PolicyRunner {
       numObs: this.numObs,
       numActions: this.numActions,
       recipeError: this.config.obs_config_error,
+      controlErrors: this.config.control_errors,
     }), ...this.module.statePlan.errors];
     if (ioErrors.length) {
       throw new Error(policyIOErrorMessage(ioErrors));

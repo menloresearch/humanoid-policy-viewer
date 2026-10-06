@@ -223,6 +223,14 @@ function optionalNumber(value) {
   return value === undefined || value === '' || value === 'null' || !Number.isFinite(number) ? null : number;
 }
 
+// Whether a setting such as `clip` holds a value: not absent, null or empty. A
+// tuple or map written on the following lines counts.
+function isSet(lines, key) {
+  const value = directFields(lines)[key];
+  if (value === undefined || ['null', '~', '{}', '[]'].includes(value)) return false;
+  return value !== '' || (block(lines, [key])?.length ?? 0) > 0;
+}
+
 // The viewer observation each env.yaml policy term maps to, keyed by the
 // observation function's name (after the module path), the `quantity` param of
 // a delayed-observation wrapper, or the term's own name.
@@ -319,6 +327,8 @@ function policyObsConfigFor(lines, jointNames) {
     const kind = obsKind(name, settings.func, params);
     try {
       if (!kind) throw new Error(`${name} (${settings.func}) is not something the viewer computes`);
+      if (isSet(termLines, 'clip')) throw new Error(`${name} is clipped, which the viewer does not do`);
+      if (isSet(termLines, 'modifiers')) throw new Error(`${name} has modifiers, which the viewer does not apply`);
       const entry = obsEntryFor(name, termLines, kind, optionalNumber(settings.scale), lines, jointNames);
       const history = groupHistory ?? optionalNumber(settings.history_length) ?? 0;
       const flatten = groupSettings.flatten_history_dim ?? settings.flatten_history_dim;
@@ -330,6 +340,40 @@ function policyObsConfigFor(lines, jointNames) {
   }
   if (problems.length) return { obs_config_error: `env.yaml's policy observations cannot be reproduced: ${problems.join('; ')}` };
   return policy.length ? { obs_config: { policy } } : null;
+}
+
+// The policy period the viewer runs every policy at (main.js, mujocoUtils.js and
+// Demo.vue step it at 50 Hz).
+const POLICY_PERIOD_S = 0.02;
+
+// Where training drove the robot differently than the viewer would: another
+// policy rate, or actions sent to the joints in another order, offset or
+// clipped. The policy would load and run, but every action would land at the
+// wrong time or on the wrong joint. Settings env.yaml does not record (e.g. an
+// mjlab layout's sim.dt or action joints) are not checked.
+function controlErrorsFor(lines, action, jointNames) {
+  const errors = [];
+  const dt = optionalNumber(directFields(block(lines, ['sim']) ?? []).dt);
+  const decimation = optionalNumber(fields(lines, 0).decimation);
+  if (dt !== null && decimation !== null && Math.abs(dt * decimation - POLICY_PERIOD_S) > 1e-9) {
+    errors.push(`it ran every ${+(dt * decimation).toFixed(6)} s in training (sim.dt ${dt} x decimation ${decimation}), but the viewer runs it every ${POLICY_PERIOD_S} s`);
+  }
+  const settings = directFields(action);
+  const actionJoints = listAfter(action, 'joint_names');
+  // Patterns such as `.*` follow the robot asset's order, which the viewer cannot see.
+  if (actionJoints.length > 0 && actionJoints.every((joint) => jointNames.includes(joint))) {
+    const first = jointNames.findIndex((joint, i) => actionJoints[i] !== joint);
+    if (actionJoints.length > 1 && settings.preserve_order !== 'true') {
+      errors.push('its actions.joint_pos does not set preserve_order, so training sent the actions in the robot asset\'s joint order, which the viewer cannot see');
+    } else if (first >= 0) {
+      errors.push(`its actions.joint_pos.joint_names are in another order: action ${first + 1} drove ${actionJoints[first] ?? 'no joint'} in training, but drives ${jointNames[first]} in the viewer`);
+    }
+  }
+  if (settings.use_default_offset === 'false') {
+    errors.push('its actions were not added to the default pose in training (actions.joint_pos.use_default_offset: false), but the viewer adds them');
+  }
+  if (isSet(action, 'clip')) errors.push('its actions were clipped in training (actions.joint_pos.clip), which the viewer does not do');
+  return errors;
 }
 
 export function parseEnvPolicySettings(yaml, jointNames) {
@@ -375,6 +419,7 @@ export function parseEnvPolicySettings(yaml, jointNames) {
   const delay = delayForJoints(actuators, jointNames, matchOneActuator);
   const commandRanges = commandRangesFor(lines);
   const torqueLimit = torqueLimitsFor(jointNames, matchOneActuator);
+  const controlErrors = controlErrorsFor(lines, action, jointNames);
 
   return {
     ...(torqueLimit ? { torque_limit: torqueLimit } : {}),
@@ -385,17 +430,20 @@ export function parseEnvPolicySettings(yaml, jointNames) {
     ...(delay ?? {}),
     ...(commandRanges ?? {}),
     ...(policyObsConfigFor(lines, jointNames) ?? {}),
+    ...(controlErrors.length ? { control_errors: controlErrors } : {}),
   };
 }
 
 // Folder holding a checkpoint's training files: <root>/<model> for a
-// /model-library/ path (the ONNX may sit deeper), otherwise the folder the ONNX
-// itself is in (e.g. a checkpoint bundled under examples/).
+// /model-library/ path (the ONNX may sit deeper), or <root> itself when the ONNX
+// sits directly in it (as with a folder run by `npm run hf <folder>`); otherwise
+// the folder the ONNX itself is in (e.g. a checkpoint bundled under examples/).
 function checkpointDirUrl(onnxPath) {
   if (!onnxPath) return null;
   if (onnxPath.startsWith('/model-library/')) {
     const parts = onnxPath.slice('/model-library/'.length).split('/');
-    return parts.length < 3 ? null : `/model-library/${parts[0]}/${parts[1]}`;
+    if (parts.length < 2) return null;
+    return `/model-library/${parts.slice(0, parts.length === 2 ? 1 : 2).join('/')}`;
   }
   const slash = onnxPath.lastIndexOf('/');
   return slash < 0 ? null : onnxPath.slice(0, slash);

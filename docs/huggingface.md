@@ -22,12 +22,29 @@ itself: `npm run hf Menlo/asimov1-locomotion-0818 -- --no-open`.
 
 | Option / variable | Meaning |
 |---|---|
-| `--revision <ref>` | Branch, tag or commit (default `main`) |
+| `--revision <ref>` | Branch, tag or commit of a Hub repo (default `main`) |
 | `--port <n>` | Dev server port (default 3000, or the next free one) |
-| `--no-open` | Do not open a browser window |
+| `--no-open` | Do not open a browser window; open the printed link instead, which selects the policy (the bare server URL runs the bundled example) |
 | `HF_TOKEN` | Access token, for private repos |
 | `HF_ENDPOINT` | Alternative Hub endpoint (default `https://huggingface.co`) |
 | `HPV_CACHE_DIR` | Download cache (default `~/.cache/humanoid-policy-viewer`) |
+
+## Run a policy from a folder
+
+`<model>` can also be a folder or an `.onnx` file on disk, for example a policy
+exported by a training repo before (or instead of) uploading it:
+
+```bash
+npm run hf ./my-policy
+npm run hf ./my-policy/policy.onnx
+```
+
+Nothing is downloaded or copied: the folder is linked into a temporary model
+library and served under `/model-library/<folder name>/`, so re-exporting into
+it and reloading the page picks up the new files. The link is removed when the
+server stops. The folder needs the same files as a Hub repo (below) and gets the
+same [checks](#checks), except the model card one. A folder must hold
+`policy.onnx` or exactly one `.onnx`; otherwise pass the file.
 
 ## What the repo needs to contain
 
@@ -52,7 +69,10 @@ saying which size differs and why.
 
 **Output:** 23 joint position actions, one per motor, in this order. The target for each
 joint is `default_joint_pos + action_scale * action`, with both read from
-`env.yaml`.
+`env.yaml`. The policy runs at 50 Hz. A policy whose `env.yaml` trained it at
+another rate (`sim.dt` x `decimation`), or whose `actions.joint_pos` lists the
+joints in another order, does not set `preserve_order` or `use_default_offset`,
+or clips the actions, is refused, naming the difference.
 
 ```
 left_hip_pitch   left_hip_roll   left_hip_yaw   left_knee   left_ankle_pitch   left_ankle_roll
@@ -103,7 +123,8 @@ each term, oldest first, the way Isaac Lab and mjlab flatten it; after a reset
 every step holds the first value. Any other term (base linear velocity, foot
 contacts, height scans and other quantities the real robot cannot measure) makes
 the policy refused, naming the term; a policy that needs them has to estimate
-them inside the ONNX.
+them inside the ONNX. So does a term with `clip` or `modifiers` set, since the
+viewer applies neither.
 
 **Recurrent policies:** the first ONNX input is the observation above. Every
 other float input is recurrent state, fed back each step from the output whose
@@ -122,8 +143,7 @@ height-map inputs of rsl_rl's CNN models, makes the policy refused, naming it.
 
 ## Checks
 
-After downloading, the script checks the repo the way model-checkpoint's CI gate
-(`ci/validate-checkpoint-configs.mjs`) checks a checkpoint before benchmarking it:
+After downloading, the script checks the repo before running it:
 
 | Check | If it fails |
 |---|---|
@@ -135,12 +155,15 @@ After downloading, the script checks the repo the way model-checkpoint's CI gate
 
 Warnings are printed and the viewer still starts. An error exits with status 1
 before the dev server starts; the download stays cached. When everything passes
-it prints `Checked env.yaml and agent.yaml: OK`. Unlike the CI gate, a
-checkpoint's own `tracking_policy.json` is not consulted: the joint list always
-comes from `reference_policy_config.json`.
+it prints `Checked env.yaml and agent.yaml: OK`. A checkpoint's own
+`tracking_policy.json` is not consulted: the joint list always comes from
+`reference_policy_config.json`.
 
 An `env.yaml` whose policy observations include a term the viewer cannot
-compute is also a warning here; the viewer then refuses the policy.
+compute is also a warning here; the viewer then refuses the policy. So is one
+that drove the robot differently than the viewer does: another policy rate
+than 50 Hz, or actions sent to the joints in another order, without the default
+pose added, or clipped (see [Supported policies](#supported-policies)).
 
 When the viewer loads the policy, it also checks the ONNX model's output size
 against the motor count (23), its input size against the observation recipe
@@ -166,7 +189,8 @@ offline, the cached copy is used. Delete the folder to clear it.
 ## How it works
 
 `npm run hf` (`scripts/run-hf-model.mjs`, download logic in `scripts/hfModel.mjs`,
-checks in `scripts/checkpointChecks.mjs`) treats the cache as a
+local folders in `scripts/localModel.mjs`, checks in `scripts/checkpointChecks.mjs`)
+treats the cache as a
 [model library](model-library.md), so the download is served under
 `/model-library/hf/<org>__<name>/` and listed in the policy dropdown like any
 other checkpoint. It then opens the page with a

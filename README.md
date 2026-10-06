@@ -35,6 +35,10 @@ from a fresh clone: it installs dependencies, fetches the Asimov robot model,
 downloads the policy and opens the viewer with it selected. It needs Node, `git`
 and `bash`. See [Run a policy from Hugging Face](docs/huggingface.md).
 
+`<model>` can also be a folder or `.onnx` file on disk holding the same files,
+for example `npm run hf ./my-policy`; see
+[Run a policy from a folder](docs/huggingface.md#run-a-policy-from-a-folder).
+
 ## Run local policies
 
 To run policies you have on disk, or to work on the viewer itself, set up once:
@@ -72,6 +76,7 @@ sources:
 | Bundled example | `public/examples/checkpoints/asimov/model_aug_18_1/`, in this repo | The default with `npm run dev` |
 | Hugging Face | `~/.cache/humanoid-policy-viewer/hf/<org>__<name>/`, outside the repo | `npm run hf <model>` |
 | Local folder | `models/<name>/` in this repo (git-ignored), or wherever `HPV_MODEL_LIBRARY_DIR` and `HPV_MODEL_ROOTS` point | Put the files there, then `npm run dev` |
+| Any folder on disk | Wherever it is; linked, not copied | `npm run hf <folder>` |
 
 In every case the gains, action scale and torque limits come from the `env.yaml`
 next to the `.onnx`; see [Policy config](docs/policy-config.md). The robot is the

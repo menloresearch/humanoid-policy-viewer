@@ -22,9 +22,11 @@ function lastDim(metadata) {
  * not checked. `recipeError` is set when the checkpoint's env.yaml records
  * observations the viewer cannot compute; the input size is not compared then,
  * since the recipe it would be compared with is not the policy's.
+ * `controlErrors` lists where env.yaml drove the robot differently than the
+ * viewer does (policy rate, action order); see envPolicyConfig.js.
  */
-export function policyIOErrors({ inputMetadata, outputMetadata, inputName, outputName, numObs, numActions, recipeError }) {
-  const errors = [];
+export function policyIOErrors({ inputMetadata, outputMetadata, inputName, outputName, numObs, numActions, recipeError, controlErrors = [] }) {
+  const errors = [...controlErrors];
   const outputSize = lastDim(outputMetadata?.find((m) => m.name === outputName));
   if (outputSize !== null && outputSize !== numActions) {
     errors.push(`it outputs ${outputSize} actions, but the robot has ${numActions} motors`);
