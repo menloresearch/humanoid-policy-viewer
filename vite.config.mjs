@@ -242,6 +242,8 @@ function humanoidDevPlugin() {
       duration: row.duration,
       keypointCount: row.commands.length,
       eventCount: row.events.length,
+      terrainType: row.terrain?.type ?? null,
+      footFriction: row.foot_friction,
     })).sort((a, b) => a.file.localeCompare(b.file));
   }
 

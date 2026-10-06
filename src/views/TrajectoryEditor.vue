@@ -77,6 +77,46 @@
           </div>
         </div>
 
+        <!-- Environment: the course, the floor grip and the gait-symmetry opt-in -->
+        <div class="env-section mb-3">
+          <div class="text-subtitle-2 mb-1">Environment</div>
+          <div class="d-flex flex-wrap align-center ga-3 mb-2">
+            <v-select
+              v-model="terrainType" :items="terrainTypeItems" item-title="title" item-value="value"
+              label="Terrain" density="compact" hide-details style="max-width: 200px"
+            ></v-select>
+            <v-select
+              v-model="frictionPreset" :items="FRICTION_PRESETS" item-title="title" item-value="value"
+              label="Foot friction" density="compact" hide-details style="max-width: 220px"
+            ></v-select>
+            <v-text-field
+              v-if="frictionPreset === 'custom'"
+              v-model.number="customFriction" label="friction" type="number" min="0.01" step="0.05"
+              density="compact" hide-details style="max-width: 110px"
+            ></v-text-field>
+            <v-checkbox
+              v-model="gaitSymmetry" label="Gait symmetry metric" density="compact" hide-details
+              title="Turns on the gait symmetry metric for this test; it only means something on straight, steady walking"
+            ></v-checkbox>
+          </div>
+          <template v-if="working.terrain">
+            <div class="text-caption text-medium-emphasis mb-1">{{ terrainDescription }}</div>
+            <div class="d-flex flex-wrap ga-2 mb-2">
+              <v-text-field
+                v-for="p in terrainParams" :key="p.key"
+                :model-value="working.terrain[p.key]"
+                :label="p.label" type="number" :min="p.min" :max="p.max" :step="p.integer ? 1 : p.step"
+                density="compact" hide-details style="max-width: 170px"
+                @update:modelValue="(v) => setTerrainParam(p.key, v)"
+              ></v-text-field>
+            </div>
+            <TerrainPreview
+              :terrain="working.terrain" :commands="working.commands" :duration="Number(working.duration) || 0"
+              @problems="(p) => (terrainErrors = p.errors)"
+            />
+          </template>
+        </div>
+
         <div class="charts">
           <KeypointChart
             :commands="working.commands" axis="vx" :duration="working.duration"
@@ -150,10 +190,22 @@
 import KeypointChart from '@/components/KeypointChart.vue';
 import DerivedChart from '@/components/DerivedChart.vue';
 import PushLane from '@/components/PushLane.vue';
+import TerrainPreview from '@/components/TerrainPreview.vue';
 import { appState, closeEditor, newBlankSequence, defaultLimits, MAX_DURATION } from '@/state/appState.js';
 import { listSequences, loadSequenceFile, saveSequenceFile, deleteSequenceFile, slugify } from '@/state/sequenceStore.js';
 import { STATIC } from '@/state/viewerMode.js';
 import { commandSequencer } from '@/simulation/commandSequencer.js';
+import { TERRAIN_TYPES, defaultTerrain } from '@/simulation/terrainGen.js';
+import { loadTestScene } from '@/simulation/terrainScene.js';
+import { demoRef } from '@/state/demoRef.js';
+
+// Floor grip presets; the scene's own foot friction is 0.6.
+const FRICTION_PRESETS = [
+  { title: 'scene default (0.6)', value: 'scene' },
+  { title: 'wet (0.3)', value: 'wet', friction: 0.3 },
+  { title: 'icy (0.08)', value: 'icy', friction: 0.08 },
+  { title: 'custom', value: 'custom' },
+];
 
 // Category and test name: the two halves of a test id (<category>/<name>).
 const SLUG_RE = /^[a-z0-9][a-z0-9_]*$/;
@@ -166,11 +218,14 @@ function splitTestFile(file) {
 
 export default {
   name: 'TrajectoryEditor',
-  components: { KeypointChart, DerivedChart, PushLane },
+  components: { KeypointChart, DerivedChart, PushLane, TerrainPreview },
   data() {
     return {
       STATIC,
       MAX_DURATION,
+      FRICTION_PRESETS,
+      terrainErrors: [],
+      customFrictionMode: false,
       axes: [
         { key: 'vx', label: 'vx', color: '#1976D2' },
         { key: 'vy', label: 'vy', color: '#E69F00' },
@@ -251,7 +306,71 @@ export default {
       return '';
     },
     canSave() {
-      return this.durationError === '' && this.idError === '' && this.file.length > 0;
+      return this.durationError === '' && this.idError === '' && this.file.length > 0 && !this.terrainErrors.length;
+    },
+    terrainTypeItems() {
+      return [
+        { title: 'flat floor', value: 'none' },
+        ...Object.entries(TERRAIN_TYPES).map(([value, def]) => ({ title: def.label, value })),
+      ];
+    },
+    terrainType: {
+      get() {
+        return this.working?.terrain?.type ?? 'none';
+      },
+      set(type) {
+        if (type === 'none') {
+          delete this.working.terrain;
+          this.terrainErrors = [];
+        } else if (type !== this.working.terrain?.type) {
+          this.working.terrain = defaultTerrain(type);
+        }
+        this.setStatus('');
+      }
+    },
+    terrainParams() {
+      const def = TERRAIN_TYPES[this.working?.terrain?.type];
+      if (!def) return [];
+      return Object.entries(def.params).map(([key, p]) => ({
+        key, ...p, step: p.max <= 1 ? 0.01 : p.max <= 5 ? 0.05 : 0.5,
+      }));
+    },
+    terrainDescription() {
+      return TERRAIN_TYPES[this.working?.terrain?.type]?.description ?? '';
+    },
+    frictionPreset: {
+      get() {
+        const f = this.working?.footFriction;
+        if (this.customFrictionMode) return 'custom';
+        if (f === undefined || f === null) return 'scene';
+        return FRICTION_PRESETS.find((p) => p.friction === f)?.value ?? 'custom';
+      },
+      set(value) {
+        this.customFrictionMode = value === 'custom';
+        const preset = FRICTION_PRESETS.find((p) => p.value === value);
+        if (value === 'scene') delete this.working.footFriction;
+        else if (preset?.friction) this.working.footFriction = preset.friction;
+        else if (!Number.isFinite(this.working.footFriction)) this.working.footFriction = 0.6;
+        this.setStatus('');
+      }
+    },
+    customFriction: {
+      get() {
+        return this.working?.footFriction ?? 0.6;
+      },
+      set(value) {
+        const f = Number(value);
+        if (Number.isFinite(f) && f > 0) this.working.footFriction = Math.round(f * 1000) / 1000;
+      }
+    },
+    gaitSymmetry: {
+      get() {
+        return this.working?.gaitSymmetry === true;
+      },
+      set(on) {
+        if (on) this.working.gaitSymmetry = true;
+        else delete this.working.gaitSymmetry;
+      }
     }
   },
   methods: {
@@ -338,9 +457,19 @@ export default {
       this.working.events.splice(index, 1);
       this.setStatus('');
     },
+    setTerrainParam(key, value) {
+      const number = Number(value);
+      if (value === '' || !Number.isFinite(number)) return;
+      this.working.terrain = { ...this.working.terrain, [key]: number };
+      this.setStatus('');
+    },
     updateEvent(index, patch) {
       const ev = this.working.events[index];
       if (!ev) return;
+      if ('tier' in patch) {
+        if (patch.tier == null) delete ev.tier;
+        else ev.tier = patch.tier;
+      }
       if (patch.dir) ev.dir = [...patch.dir];
       if (patch.force != null) ev.force = patch.force;
       if (patch.duration != null) ev.duration = patch.duration;
@@ -469,7 +598,6 @@ export default {
       const clean = {
         name: this.working.name || 'sequence',
         duration: Number(this.working.duration),
-        // A terrain test keeps its course (the editor has no control for it).
         ...(this.working.terrain ? { terrain: { ...this.working.terrain } } : {}),
         ...(this.working._savedLimits || changed ? { limits } : {}),
         commands: this.working.commands.map((c) => ({
@@ -511,7 +639,7 @@ export default {
           return out;
         });
       }
-      // Test settings the editor has no controls for are kept as loaded.
+      // Floor grip and the gait-symmetry opt-in (Environment panel).
       if (Number.isFinite(Number(this.working.footFriction)) && this.working.footFriction !== null) {
         clean.footFriction = Number(this.working.footFriction);
       }
@@ -542,10 +670,13 @@ export default {
         this.setStatus(`Delete failed: ${e.message}`, true);
       }
     },
-    applyToViewer() {
-      if (this.durationError !== '') return;
+    async applyToViewer() {
+      if (this.durationError !== '' || this.terrainErrors.length) return;
       try {
-        const { warning } = commandSequencer.loadSequence(this.buildClean(), this.working.name);
+        const clean = this.buildClean();
+        // The viewer plays the test on its course (or back on the flat floor).
+        if (demoRef.current) await loadTestScene(demoRef.current, clean.terrain);
+        const { warning } = commandSequencer.loadSequence(clean, this.working.name);
         this.setStatus(warning || 'Applied to viewer');
       } catch (e) {
         this.setStatus(`Apply failed: ${e.message}`, true);
@@ -615,6 +746,10 @@ export default {
   flex-direction: column;
   gap: 4px;
   margin: 8px 0;
+}
+.env-section {
+  border-top: 1px solid #eee;
+  padding-top: 8px;
 }
 .limit-axis {
   font: 600 12px monospace;

@@ -19,6 +19,8 @@
       <span v-if="file.duration != null" class="badge">{{ Number(file.duration).toFixed(0) }}s</span>
       <span v-if="file.keypointCount != null" class="badge" title="keypoints">{{ file.keypointCount }}k</span>
       <span v-if="file.eventCount" class="badge" title="push events">{{ file.eventCount }}e</span>
+      <span v-if="file.terrainType" class="badge" title="terrain course">{{ file.terrainType }}</span>
+      <span v-if="file.footFriction != null" class="badge" title="foot friction">μ{{ file.footFriction }}</span>
     </span>
     <v-btn icon size="x-small" variant="text" title="Edit" @click.stop="$emit('edit', file.file)">
       <v-icon size="14">mdi-pencil</v-icon>

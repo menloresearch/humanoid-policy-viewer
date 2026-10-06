@@ -191,6 +191,14 @@ function corners(box) {
   return out;
 }
 
+/** A box's top face seen from above: four [x, y] corners, for drawing a course. */
+export function boxOutline(box) {
+  return [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([sx, sy]) => {
+    const [x, y] = rotate([sx * box.size[0], sy * box.size[1], box.size[2]], box.euler);
+    return [box.pos[0] + x, box.pos[1] + y];
+  });
+}
+
 /** Height of a box's top surface at (x, y), or null when (x, y) is outside it. */
 function topAt(box, x, y) {
   const [, pitch = 0, yaw = 0] = box.euler ?? [];

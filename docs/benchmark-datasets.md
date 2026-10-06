@@ -156,6 +156,12 @@ In the editor a test is saved as **Category / Test name** (the test id `<categor
 gets its own `data/<category>/test.jsonl` (and, once published, its own dataset config). Deleting a category's last test removes it. A category only runs if `suite.yaml` selects it (the
 starter's `{ all: true }` selects everything) and only gets a leaderboard if a task scopes it.
 
+The editor's **Environment** panel sets a test's terrain (type and parameters), foot friction (scene default, wet,
+icy or custom) and the gait-symmetry opt-in. A terrain test shows a top view (course, spawn area, commanded path)
+and a side profile, with the same spawn error and path warnings `npm run benchmark` gives; Save is disabled while
+the course overlaps the spawn. **Apply to viewer** loads the course into the 3D view. A push's benchmark tier is set
+in its push dialog.
+
 To appear as a Hub benchmark, `eval.yaml`'s `evaluation_framework: humanoid-policy-viewer` must be in the Hub's
 list of frameworks (a pull request to `huggingface/huggingface.js`, `packages/tasks/src/eval.ts`), and the
 dataset must be allow-listed by Hugging Face (beta). Until then results still land in model repos; they just are
