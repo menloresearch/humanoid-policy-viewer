@@ -63,17 +63,26 @@ async function main() {
   process.env.HPV_MODEL_LIBRARY_DIR = model.cacheDir;
   process.env.HPV_MODEL_ROOTS = local ? local.root : HF_MODEL_ROOT;
 
+  // The bare URL opens the bundled example policy; this path selects the one just checked.
+  const policyPath = `/?policy=${encodeURIComponent(model.policyValue)}`;
   const { createServer } = await import('vite');
   const server = await createServer({
     root: appDir,
     server: {
       ...(args.port ? { port: args.port } : {}),
-      open: args.open ? `/?policy=${encodeURIComponent(model.policyValue)}` : false,
+      open: args.open ? policyPath : false,
     },
   });
   await server.listen();
   console.log(`\nRunning ${name}${model.primary === 'policy.onnx' ? '' : ` (${model.primary})`}`);
-  server.printUrls();
+  const urls = server.resolvedUrls;
+  if (!urls) {
+    server.printUrls();
+    return;
+  }
+  // Print links that open this policy, so copying one from a headless or SSH session works too.
+  for (const url of urls.local) console.log(`  ➜  Local:   ${new URL(policyPath, url)}`);
+  for (const url of urls.network) console.log(`  ➜  Network: ${new URL(policyPath, url)}`);
 }
 
 main().catch((error) => {

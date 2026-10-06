@@ -24,7 +24,7 @@ itself: `npm run hf Menlo/asimov1-locomotion-0818 -- --no-open`.
 |---|---|
 | `--revision <ref>` | Branch, tag or commit of a Hub repo (default `main`) |
 | `--port <n>` | Dev server port (default 3000, or the next free one) |
-| `--no-open` | Do not open a browser window |
+| `--no-open` | Do not open a browser window; open the printed link instead, which selects the policy (the bare server URL runs the bundled example) |
 | `HF_TOKEN` | Access token, for private repos |
 | `HF_ENDPOINT` | Alternative Hub endpoint (default `https://huggingface.co`) |
 | `HPV_CACHE_DIR` | Download cache (default `~/.cache/humanoid-policy-viewer`) |
