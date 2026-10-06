@@ -41,13 +41,9 @@
             style="max-width: 240px" @update:modelValue="onNameChange"
           ></v-text-field>
           <v-combobox
-            v-model="category" :items="categories" label="Category" density="compact" hide-details
+            v-model="category" :items="categories" label="Category (optional)" density="compact" hide-details
             placeholder="pick or type a new one" style="max-width: 200px"
           ></v-combobox>
-          <v-text-field
-            v-model="testName" label="Test name" density="compact" hide-details
-            placeholder="my_test" style="max-width: 200px"
-          ></v-text-field>
           <v-text-field
             v-model.number="durationInput" label="Duration (s)" type="number"
             density="compact" hide-details :min="minDuration" :max="MAX_DURATION" step="1"
@@ -55,6 +51,7 @@
             :error="durationError !== ''" @update:modelValue="onDurationChange"
           ></v-text-field>
         </div>
+        <div v-if="file" class="text-caption text-medium-emphasis mb-2">Saves as {{ file }}</div>
         <div v-if="durationError" class="text-error text-caption mb-2">{{ durationError }}</div>
         <div v-if="idError" class="text-error text-caption mb-2">{{ idError }}</div>
 
@@ -159,18 +156,6 @@
         </div>
 
         <v-divider class="mb-2"></v-divider>
-        <div class="text-subtitle-2 mb-1">Derived quantities (robot mass ≈ {{ mass.toFixed(1) }} kg)</div>
-        <div class="charts">
-          <DerivedChart kind="momentum" :commands="working.commands" :duration="working.duration"
-            :mass="mass" :v-max="momentumVMax" label="Linear momentum (M·v)" />
-          <DerivedChart kind="impulse" :commands="working.commands" :duration="working.duration"
-            :mass="mass" :v-max="momentumVMax" label="Impulse |Δp| per keypoint transition" />
-        </div>
-        <div class="text-caption text-disabled mb-3">
-          command-derived: momentum = mass × commanded velocity; impulse = mass × |Δv| at each step.
-          Angular terms (wz) are omitted — whole-body yaw inertia varies with pose.
-        </div>
-
         <div class="d-flex align-center ga-2 flex-wrap">
           <v-btn v-if="!STATIC" color="primary" prepend-icon="mdi-content-save" :disabled="!canSave" @click="save">Save</v-btn>
           <v-btn variant="tonal" prepend-icon="mdi-play" :disabled="durationError !== ''" @click="applyToViewer">Apply to viewer</v-btn>
@@ -188,7 +173,6 @@
 
 <script>
 import KeypointChart from '@/components/KeypointChart.vue';
-import DerivedChart from '@/components/DerivedChart.vue';
 import PushLane from '@/components/PushLane.vue';
 import TerrainPreview from '@/components/TerrainPreview.vue';
 import { appState, closeEditor, newBlankSequence, defaultLimits, MAX_DURATION } from '@/state/appState.js';
@@ -218,7 +202,7 @@ function splitTestFile(file) {
 
 export default {
   name: 'TrajectoryEditor',
-  components: { KeypointChart, DerivedChart, PushLane, TerrainPreview },
+  components: { KeypointChart, PushLane, TerrainPreview },
   data() {
     return {
       STATIC,
@@ -245,16 +229,20 @@ export default {
   computed: {
     file: {
       get() {
-        const category = String(this.category ?? '').trim();
+        // No category means the single Hub config "default", so a benchmark
+        // without categories still loads as plain `load_dataset(repo)`.
+        const category = String(this.category ?? '').trim() || 'default';
         const testName = this.testName.trim();
-        return category && testName ? `${category}/${testName}.json` : '';
+        return testName ? `${category}/${testName}.json` : '';
       },
       set(value) {
-        ({ category: this.category, testName: this.testName } = splitTestFile(value));
+        const { category, testName } = splitTestFile(value);
+        this.category = category === 'default' ? '' : category;
+        this.testName = testName;
       }
     },
     categories() {
-      return [...new Set(this.savedList.map((item) => item.folder).filter(Boolean))].sort();
+      return [...new Set(this.savedList.map((item) => item.folder).filter((f) => f && f !== 'default'))].sort();
     },
     savedGroups() {
       const groups = new Map();
@@ -269,27 +257,16 @@ export default {
       const category = String(this.category ?? '').trim();
       const testName = this.testName.trim();
       if (!category && !testName) return '';
-      if (!SLUG_RE.test(category)) return 'Category: lower case letters, digits and _ (e.g. push_walking)';
-      if (!SLUG_RE.test(testName)) return 'Test name: lower case letters, digits and _ (e.g. chest_front)';
+      if (category && !SLUG_RE.test(category)) return 'Category: lower case letters, digits and _ (e.g. push_walking)';
+      if (!testName) return 'Type a Name to give the test a file name';
+      if (!SLUG_RE.test(testName)) return 'Test name (from Name): lower case letters, digits and _ (e.g. chest_front)';
       return '';
     },
     working() {
       return appState.editorSequence;
     },
-    mass() {
-      return appState.mass;
-    },
     bodyNames() {
       return appState.bodyNames;
-    },
-    momentumVMax() {
-      const l = this.working?.limits;
-      if (!l) return 1.5;
-      return Math.max(
-        Math.abs(l.vx[0]), Math.abs(l.vx[1]),
-        Math.abs(l.vy[0]), Math.abs(l.vy[1]),
-        0.1
-      );
     },
     lastT() {
       const cmds = this.working?.commands ?? [];
@@ -388,7 +365,11 @@ export default {
       }
     },
     onNameChange() {
-      if (!this.testName.trim()) this.testName = slugify(this.working.name).replace(/\.json$/, '');
+      // The test name derives from the human-readable Name, but results refer
+      // to tests by id, so a test keeps its id once saved.
+      if (!appState.editorFile) {
+        this.testName = this.working.name.trim() ? slugify(this.working.name).replace(/\.json$/, '') : '';
+      }
     },
     onDurationChange() {
       const d = Number(this.durationInput);

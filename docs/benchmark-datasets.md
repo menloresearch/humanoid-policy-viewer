@@ -29,7 +29,9 @@ A test describes a scenario and nothing else; it does not know how often it runs
  "limits": null, "foot_friction": null, "terrain": null, "metrics_opt_in": []}
 ```
 
-`id` is `<config>/<name>` and is how results refer to the test. `tier` is `reasonable` (a policy should
+`id` is `<config>/<name>` and is how results refer to the test. A benchmark without categories puts every test
+in the one config `default` (the editor does this when Category is left blank); the Hub treats a config named
+`default` as the unnamed one, so `load_dataset(repo)` works without naming it. `tier` is `reasonable` (a policy should
 recover), `beyond` (at or past the observed limit) or `null`. `limits` overrides every policy's trained command
 range, so leave it `null` unless the test needs it. `foot_friction` overrides the feet's sliding friction (the
 scene's is 0.6). `terrain` describes the course the test walks on (below). `metrics_opt_in: ["gait_symmetry"]` turns on
