@@ -48,6 +48,14 @@ test('policy observations the viewer cannot compute are warned about', () => {
   assert.match(warnings[0], /foot_contact .*viewer will refuse the policy$/);
 });
 
+test('a policy trained at another rate is warned about', () => {
+  const faster = envYaml.replace('\ndecimation: 4\n', '\ndecimation: 2\n');
+  assert.deepEqual(checkpointProblems({ envYaml: faster, agentYaml, jointNames }), {
+    errors: [],
+    warnings: ['env.yaml drove the robot differently than the viewer does: it ran every 0.01 s in training (sim.dt 0.005 x decimation 2), but the viewer runs it every 0.02 s, so the viewer will refuse the policy'],
+  });
+});
+
 test('an incomplete env.yaml and a junk agent.yaml are warnings', () => {
   const { errors, warnings } = checkpointProblems({ envYaml: 'foo: 1\n', agentYaml: '\n', jointNames });
   assert.deepEqual(errors, []);

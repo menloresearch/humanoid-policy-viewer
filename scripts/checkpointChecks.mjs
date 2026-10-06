@@ -38,6 +38,9 @@ export function checkpointProblems({ envYaml, agentYaml, jointNames }) {
       if (settings.obs_config_error) {
         warnings.push(`${settings.obs_config_error}, so the viewer will refuse the policy`);
       }
+      if (settings.control_errors) {
+        warnings.push(`env.yaml drove the robot differently than the viewer does: ${settings.control_errors.join('; ')}, so the viewer will refuse the policy`);
+      }
     } catch (error) {
       warnings.push(`env.yaml is incomplete: ${error.message}`);
     }

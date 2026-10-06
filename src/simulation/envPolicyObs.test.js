@@ -72,7 +72,14 @@ const ioFor = (runner, inputSize) => ({
   numObs: runner.numObs,
   numActions: runner.numActions,
   recipeError: runner.config.obs_config_error,
+  controlErrors: runner.config.control_errors,
 });
+
+// The bundled env.yaml with its actions section rewritten by `edit`.
+function actionsWith(edit) {
+  const start = bundledEnv.indexOf('\nactions:\n');
+  return bundledEnv.slice(0, start) + edit(bundledEnv.slice(start));
+}
 
 test('the bundled env.yaml yields the same 78 observations as the reference recipe', () => {
   const fromEnv = runnerFor(parseEnvPolicySettings(bundledEnv, joints));
@@ -149,6 +156,44 @@ test('terms the viewer cannot compute are named, and the policy is refused', () 
   assert.match(settings.obs_config_error, /foot_contact .*is not something the viewer computes/);
   const runner = new PolicyRunner({ ...reference, ...settings });
   assert.match(policyIOErrors(ioFor(runner, 80))[0], /foot_contact/);
+});
+
+test('a clipped or modified observation term is refused, since the viewer feeds it raw', () => {
+  const clipped = parseEnvPolicySettings(envWith((group) => group.replace(
+    '      clip: null\n      scale: 0.25',
+    '      clip: !!python/tuple\n      - -1.0\n      - 1.0\n      scale: 0.25',
+  )), joints);
+  assert.equal(clipped.obs_config_error, "env.yaml's policy observations cannot be reproduced: base_ang_vel is clipped, which the viewer does not do");
+  const modified = parseEnvPolicySettings(envWith((group) => group.replace(
+    '      modifiers: null',
+    '      modifiers:\n      - func: isaaclab.utils.modifiers:bias\n        params: {}',
+  )), joints);
+  assert.match(modified.obs_config_error, /base_ang_vel has modifiers, which the viewer does not apply$/);
+});
+
+test('another policy rate or action order is refused, alongside the size check', () => {
+  assert.equal(parseEnvPolicySettings(bundledEnv, joints).control_errors, undefined);
+
+  const faster = parseEnvPolicySettings(bundledEnv.replace('\ndecimation: 4\n', '\ndecimation: 2\n'), joints);
+  assert.deepEqual(faster.control_errors, ['it ran every 0.01 s in training (sim.dt 0.005 x decimation 2), but the viewer runs it every 0.02 s']);
+  const runner = runnerFor(faster);
+  assert.deepEqual(policyIOErrors(ioFor(runner, 78)), faster.control_errors);
+  assert.equal(policyIOErrors(ioFor(runner, 80)).length, 2);
+
+  const swapped = actionsWith((actions) => actions.replace(
+    '    - left_hip_pitch_joint\n    - left_hip_roll_joint',
+    '    - left_hip_roll_joint\n    - left_hip_pitch_joint',
+  ));
+  assert.deepEqual(parseEnvPolicySettings(swapped, joints).control_errors, [
+    'its actions.joint_pos.joint_names are in another order: action 1 drove left_hip_roll_joint in training, but drives left_hip_pitch_joint in the viewer',
+  ]);
+  const errorsFor = (from, to) => parseEnvPolicySettings(actionsWith((actions) => actions.replace(from, to)), joints).control_errors;
+  assert.match(errorsFor('preserve_order: true', 'preserve_order: false')[0], /does not set preserve_order/);
+  assert.match(errorsFor('use_default_offset: true', 'use_default_offset: false')[0], /not added to the default pose/);
+  assert.match(errorsFor('    clip: null', '    clip:\n      .*: !!python/tuple\n      - -1.0\n      - 1.0')[0], /clipped in training/);
+  // A pattern follows the robot asset's joint order, which the viewer cannot see, so it is not compared.
+  const pattern = actionsWith((actions) => actions.replace(/    joint_names:\n(    - .*\n)+/, '    joint_names:\n    - .*\n'));
+  assert.equal(parseEnvPolicySettings(pattern, joints).control_errors, undefined);
 });
 
 test('per-joint gain maps in a single actuator group are resolved joint by joint', () => {

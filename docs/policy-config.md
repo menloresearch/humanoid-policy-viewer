@@ -15,9 +15,9 @@ Three kinds of file describe a policy, and they have different owners:
 | Setting | `reference_policy_config.json` | `env.yaml` | What the viewer uses |
 |---|---|---|---|
 | ONNX path and input shape | yes | - | the JSON (catalog checkpoints swap in their own `.onnx`) |
-| Joint order (`policy_joint_names`) | yes | `actions.joint_pos.joint_names` | the JSON (not read from `env.yaml` yet) |
+| Joint order (`policy_joint_names`) | yes | `actions.joint_pos.joint_names` | the JSON; a policy whose `env.yaml` lists the action joints in another order is refused |
 | Observation recipe (`obs_config`) | fallback only | `observations.policy` | **`env.yaml`** when it has `observations.policy` (see [Supported policies](huggingface.md#supported-policies)), else the JSON |
-| `policy_hz`, `action_lpf_hz`, `kd_ff`, `control_type` | yes | `policy_hz` = 1 / (`dt` x `decimation`) | the JSON |
+| `policy_hz`, `action_lpf_hz`, `kd_ff`, `control_type` | yes | `policy_hz` = 1 / (`dt` x `decimation`) | the JSON; the policy always runs at 50 Hz, and one trained at another rate is refused |
 | `stiffness`, `damping` | fallback only | yes | **`env.yaml`** |
 | `action_scale`, `default_joint_pos` | fallback only | yes | **`env.yaml`** |
 | Action delay range | fallback only | if declared | `env.yaml` if declared, else the JSON |
@@ -30,9 +30,11 @@ Three kinds of file describe a policy, and they have different owners:
 never the other way round. The JSON's values for those settings are only a
 fallback, used when no `env.yaml` is found beside the `.onnx` (the console warns
 for model-library checkpoints). Settings `env.yaml` does not feed the viewer, such as
-the joint order and rates, always come from the JSON, so
-keep it consistent with the training run (the tests check that the joint order
-matches the bundled `env.yaml`).
+the joint order and rates, always come from the JSON. They are checked against
+`env.yaml` instead: a policy trained at another rate (`sim.dt` x `decimation`
+other than 0.02 s), or whose `actions.joint_pos` lists the joints in another
+order, without `preserve_order`, without `use_default_offset` or with a `clip`,
+is refused when it loads, naming the difference.
 
 ## Where `env.yaml` is looked up
 

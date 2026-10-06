@@ -69,7 +69,10 @@ saying which size differs and why.
 
 **Output:** 23 joint position actions, one per motor, in this order. The target for each
 joint is `default_joint_pos + action_scale * action`, with both read from
-`env.yaml`.
+`env.yaml`. The policy runs at 50 Hz. A policy whose `env.yaml` trained it at
+another rate (`sim.dt` x `decimation`), or whose `actions.joint_pos` lists the
+joints in another order, does not set `preserve_order` or `use_default_offset`,
+or clips the actions, is refused, naming the difference.
 
 ```
 left_hip_pitch   left_hip_roll   left_hip_yaw   left_knee   left_ankle_pitch   left_ankle_roll
@@ -120,7 +123,8 @@ each term, oldest first, the way Isaac Lab and mjlab flatten it; after a reset
 every step holds the first value. Any other term (base linear velocity, foot
 contacts, height scans and other quantities the real robot cannot measure) makes
 the policy refused, naming the term; a policy that needs them has to estimate
-them inside the ONNX.
+them inside the ONNX. So does a term with `clip` or `modifiers` set, since the
+viewer applies neither.
 
 **Recurrent policies:** the first ONNX input is the observation above. Every
 other float input is recurrent state, fed back each step from the output whose
@@ -157,7 +161,10 @@ checkpoint's own `tracking_policy.json` is not consulted: the joint list always
 comes from `reference_policy_config.json`.
 
 An `env.yaml` whose policy observations include a term the viewer cannot
-compute is also a warning here; the viewer then refuses the policy.
+compute is also a warning here; the viewer then refuses the policy. So is one
+that drove the robot differently than the viewer does: another policy rate
+than 50 Hz, or actions sent to the joints in another order, without the default
+pose added, or clipped (see [Supported policies](#supported-policies)).
 
 When the viewer loads the policy, it also checks the ONNX model's output size
 against the motor count (23), its input size against the observation recipe
