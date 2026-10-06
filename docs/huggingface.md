@@ -143,8 +143,7 @@ height-map inputs of rsl_rl's CNN models, makes the policy refused, naming it.
 
 ## Checks
 
-After downloading, the script checks the repo the way model-checkpoint's CI gate
-(`ci/validate-checkpoint-configs.mjs`) checks a checkpoint before benchmarking it:
+After downloading, the script checks the repo before running it:
 
 | Check | If it fails |
 |---|---|
@@ -156,9 +155,9 @@ After downloading, the script checks the repo the way model-checkpoint's CI gate
 
 Warnings are printed and the viewer still starts. An error exits with status 1
 before the dev server starts; the download stays cached. When everything passes
-it prints `Checked env.yaml and agent.yaml: OK`. Unlike the CI gate, a
-checkpoint's own `tracking_policy.json` is not consulted: the joint list always
-comes from `reference_policy_config.json`.
+it prints `Checked env.yaml and agent.yaml: OK`. A checkpoint's own
+`tracking_policy.json` is not consulted: the joint list always comes from
+`reference_policy_config.json`.
 
 An `env.yaml` whose policy observations include a term the viewer cannot
 compute is also a warning here; the viewer then refuses the policy. So is one

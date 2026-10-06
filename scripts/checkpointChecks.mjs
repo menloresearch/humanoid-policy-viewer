@@ -1,6 +1,5 @@
-// Sanity checks for a downloaded checkpoint, matching the gate model-checkpoint's
-// CI (ci/validate-checkpoint-configs.mjs) applies before benchmarking: a checkpoint
-// must ship an env.yaml the viewer can read (with explicit gains and torque limits)
+// Sanity checks for a downloaded checkpoint before it is run or benchmarked: a
+// checkpoint must ship an env.yaml the viewer can read (with explicit gains and torque limits)
 // and an agent.yaml. Without them the viewer silently falls back to the bundled
 // reference gains and unclamped torque, the shared-gains mistake described in
 // benchmark/METHODOLOGY.md.
