@@ -95,10 +95,20 @@ function projectedGravityZ(qpos) {
   return -(1 - 2 * (qy * qy + qz * qz));
 }
 
-function hasFailed(demo) {
+/**
+ * Height of the ground under (x, y): the test's terrain course there, or 0
+ * (the floor). A fall is judged by the base's height above this, so a robot
+ * slumped on a 0.4 m platform counts as fallen just as one on the floor does.
+ */
+export function groundHeight(demo, x, y) {
+  return demo?.terrain?.heightAt?.(x, y) ?? 0;
+}
+
+export function hasFailed(demo) {
   const qpos = demo?.simulation?.qpos;
   if (!qpos) return true;
-  return !!demo._tumbling || (qpos[2] || 0) < HEIGHT_FALL_M || projectedGravityZ(qpos) > -Math.cos(TILT_FALL_RAD);
+  const clearance = (qpos[2] || 0) - groundHeight(demo, qpos[0] || 0, qpos[1] || 0);
+  return !!demo._tumbling || clearance < HEIGHT_FALL_M || projectedGravityZ(qpos) > -Math.cos(TILT_FALL_RAD);
 }
 
 // ---------------------------------------------------------------------------
@@ -193,6 +203,7 @@ function buildSample(demo, component, state) {
       right: rightFootPosition ? roundArray(rightFootPosition) : null,
     },
     supportMargin: balance.supportMargin,
+    groundZ: round(groundHeight(demo, rootPosition[0] || 0, rootPosition[1] || 0)),
     expectedTrajectory: roundArray(state.expectedPosition),
     drift: round(drift),
     fallen: hasFailed(demo),
@@ -250,11 +261,10 @@ export async function runBenchmarkCell({
   let recorder = null;
   let prevFootFriction = null;
   await demo.stopMainLoop();
-  // The scene a test runs in: the default robot scene, or the test's terrain
-  // course spliced into it (terrainScene.js). Reloads only when it differs from
-  // the scene already loaded; the reload keeps the policy, and may restart the
-  // real-time loop, so stop it again.
-  if (await loadTestScene(demo, sequence?.terrain)) await demo.stopMainLoop();
+  // The scene a test runs in: the default robot scene, or the test's course
+  // spliced into it (terrainScene.js). Reloads only when it differs from the
+  // scene already loaded, keeping the policy; the loop stays stopped.
+  await loadTestScene(demo, sequence?.terrain, { restartLoop: false });
   commandSequencer.bindSim(demo);
   try {
     demo.setBenchmarkRandomization(randomization

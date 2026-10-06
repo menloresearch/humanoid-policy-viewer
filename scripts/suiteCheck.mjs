@@ -1,27 +1,17 @@
 // Checks a loaded benchmark (loadSuiteDir() has already validated the row
 // schema and suite.yaml) before anything runs: every test must load in the
-// command player, every terrain course must ship with this viewer, the
+// command player, no terrain course may overlap the spawn area, the
 // suite's selection must work, and a few likely mistakes
 // are flagged. `npm run benchmark` runs this before starting the browser and
 // `npm run suite publish` before uploading.
 
-import { existsSync, readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { commandSequencer, setActiveCommandLimits } from '../src/simulation/commandSequencer.js';
 import { expandCells, selectTests } from '../src/benchmark/suite.js';
+import { terrainProblems } from '../src/benchmark/terrainCheck.js';
 import { rowToSequence } from '../src/benchmark/testRow.js';
 
-const SCENES_DIR = join(dirname(fileURLToPath(import.meta.url)), '../public/examples/scenes');
-
-/** Terrain courses this checkout can load: shipped under public/examples/scenes/ and listed in its files.json. */
-export function availableTerrains(scenesDir = SCENES_DIR) {
-  const listed = JSON.parse(readFileSync(join(scenesDir, 'files.json'), 'utf8'));
-  return new Set(listed.filter((file) => file.startsWith('terrain/') && existsSync(join(scenesDir, file))));
-}
-
 /** Returns { errors, warnings }; errors mean the benchmark cannot run as written. */
-export function checkTests({ suite, rows }, { terrains = availableTerrains() } = {}) {
+export function checkTests({ suite, rows }) {
   const errors = [];
   const warnings = [];
   try {
@@ -42,8 +32,10 @@ export function checkTests({ suite, rows }, { terrains = availableTerrains() } =
       errors.push(`${row.id}: ${error.message}`);
     }
     commandSequencer.stop({ zero: true });
-    if (row.terrain && !terrains.has(row.terrain)) {
-      errors.push(`${row.id}: terrain "${row.terrain}" is not a course this viewer ships (public/examples/scenes/ + files.json)`);
+    if (row.terrain) {
+      const terrain = terrainProblems(rowToSequence(row));
+      errors.push(...terrain.errors.map((e) => `${row.id}: ${e}`));
+      warnings.push(...terrain.warnings.map((w) => `${row.id}: ${w}`));
     }
     const untiered = row.events.filter((event) => event.type === 'push' && !event.tier);
     if (untiered.length && row.events.some((event) => event.tier)) {

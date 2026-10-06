@@ -12,6 +12,7 @@
     "benchmark": "node scripts/run-benchmark.mjs",
     "benchmark:golden": "node scripts/check-golden.mjs",
     "suite": "node scripts/suite.mjs",
+    "terrain-tests": "node scripts/make-terrain-tests.mjs",
     "test": "node --test \"src/**/*.test.js\" \"scripts/**/*.test.mjs\""
   },
   "dependencies": {

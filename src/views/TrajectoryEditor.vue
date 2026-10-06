@@ -470,7 +470,7 @@ export default {
         name: this.working.name || 'sequence',
         duration: Number(this.working.duration),
         // A terrain test keeps its course (the editor has no control for it).
-        ...(typeof this.working.terrain === 'string' && this.working.terrain ? { terrain: this.working.terrain } : {}),
+        ...(this.working.terrain ? { terrain: { ...this.working.terrain } } : {}),
         ...(this.working._savedLimits || changed ? { limits } : {}),
         commands: this.working.commands.map((c) => ({
           t: Math.round(c.t * 1000) / 1000,

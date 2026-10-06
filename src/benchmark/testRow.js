@@ -18,9 +18,9 @@
 //                      "reasonable" | "beyond" | null
 //   limits          { vx, vy, wz: [lo, hi] } | null
 //   foot_friction   number | null
-//   terrain         "terrain/<name>.xml" | null: a course of static geoms under
-//                   public/examples/scenes/, spliced into the robot scene
-//                   for this test (src/simulation/terrainScene.js)
+//   terrain         { type: "stairs" | "slope" | "boxes" | "rough", ...parameters }
+//                   | null: the course this test walks on, built from its
+//                   parameters (src/simulation/terrainGen.js)
 //   metrics_opt_in  string[], e.g. ["gait_symmetry"]
 //
 // rowToSequence() turns a row into the sequence object commandSequencer and
@@ -28,11 +28,11 @@
 // (trajectory editor) back into a row.
 
 import { TEST_KINDS, TEST_SCHEMA_VERSION } from './protocol.js';
+import { validateTerrain } from '../simulation/terrainGen.js';
 
 export const TIERS = ['reasonable', 'beyond'];
 const ID_RE = /^[a-z0-9][a-z0-9_]*\/[a-z0-9][a-z0-9_.-]*$/;
 const OPT_IN_METRICS = ['gait_symmetry'];
-export const TERRAIN_RE = /^terrain\/[A-Za-z0-9_.-]+\.xml$/;
 const EVENT_KEYS = ['t', 'type', 'dir', 'force', 'duration', 'targetBody', 'torqueAxis', 'torqueMag', 'label', 'tier'];
 
 const isNumber = (value) => typeof value === 'number' && Number.isFinite(value);
@@ -86,7 +86,7 @@ export function validateTestRow(row) {
     if (!ok) fail('limits must be null or { vx|vy|wz: [lo, hi] }');
   }
   if (row.foot_friction !== null && (!isNumber(row.foot_friction) || row.foot_friction <= 0)) fail('foot_friction must be null or a number > 0');
-  if (row.terrain !== null && !(typeof row.terrain === 'string' && TERRAIN_RE.test(row.terrain))) fail('terrain must be null or "terrain/<name>.xml"');
+  if (row.terrain !== null) for (const problem of validateTerrain(row.terrain)) fail(`terrain: ${problem}`);
   if (!Array.isArray(row.metrics_opt_in) || row.metrics_opt_in.some((m) => !OPT_IN_METRICS.includes(m))) {
     fail(`metrics_opt_in must list only: ${OPT_IN_METRICS.join(', ')}`);
   }
@@ -102,7 +102,7 @@ export function rowToSequence(row) {
   };
   if (row.limits) sequence.limits = row.limits;
   if (row.foot_friction !== null && row.foot_friction !== undefined) sequence.footFriction = row.foot_friction;
-  if (row.terrain) sequence.terrain = row.terrain;
+  if (row.terrain) sequence.terrain = { ...row.terrain };
   if (row.events.length) {
     sequence.events = row.events.map((event) => {
       const out = { t: event.t, type: 'push', dir: event.dir, force: event.force, duration: event.duration };
@@ -150,7 +150,7 @@ export function sequenceToRow(id, sequence, previous = null) {
     })),
     limits: sequence.limits ?? null,
     foot_friction: sequence.footFriction ?? null,
-    terrain: sequence.terrain ?? null,
+    terrain: sequence.terrain ? { ...sequence.terrain } : null,
     metrics_opt_in: sequence.gaitSymmetry === true ? ['gait_symmetry'] : [],
   };
 }

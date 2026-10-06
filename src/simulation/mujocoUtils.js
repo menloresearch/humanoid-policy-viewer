@@ -89,6 +89,7 @@ export async function reloadScene(mjcf_path) {
   [this.model, this.data, this.simulation, this.bodies, this.lights] =
     await loadSceneFromURL(mujoco, mjcf_path, this);
   this.currentScenePath = mjcf_path;
+  this.terrain = null; // loadTestScene() sets it for a terrain scene
 
   const textDecoder = new TextDecoder();
   const namesArray = new Uint8Array(this.model.names);

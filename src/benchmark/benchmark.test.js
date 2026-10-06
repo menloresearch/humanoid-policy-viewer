@@ -62,19 +62,25 @@ test('a new category is just a new id prefix', () => {
   assert.deepEqual(validateTestRow(created), []);
 });
 
-test('a terrain test keeps its course through the editor and is checked against the shipped courses', async () => {
+test('a terrain test keeps its course through the editor and is checked before a run', async () => {
   const { checkTests } = await import('../../scripts/suiteCheck.mjs');
-  const onStairs = row('loco/stairs', { terrain: 'terrain/stairs_5cm.xml' });
+  const { defaultTerrain } = await import('../simulation/terrainGen.js');
+  const stairs = defaultTerrain('stairs');
+  const onStairs = row('loco/stairs', { terrain: stairs });
   assert.deepEqual(validateTestRow(onStairs), []);
-  assert.equal(rowToSequence(onStairs).terrain, 'terrain/stairs_5cm.xml');
+  assert.deepEqual(rowToSequence(onStairs).terrain, stairs);
   assert.equal('terrain' in rowToSequence(row('loco/a')), false);
   assert.deepEqual(sequenceToRow(onStairs.id, rowToSequence(onStairs), onStairs), onStairs);
-  assert.ok(validateTestRow(row('loco/a', { terrain: '../scene.xml' })).some((e) => e.includes('terrain')));
+  assert.ok(validateTestRow(row('loco/a', { terrain: 'terrain/stairs_5cm.xml' })).some((e) => e.includes('terrain')));
+  assert.ok(validateTestRow(row('loco/a', { terrain: { ...stairs, steps: 0 } })).some((e) => e.includes('terrain: steps')));
 
   const s = suite({ tests: [{ config: 'loco' }] });
-  const missing = row('loco/moon', { terrain: 'terrain/moon.xml' });
-  const { errors } = checkTests({ suite: s, rows: [onStairs, missing] });
-  assert.deepEqual(errors, ['loco/moon: terrain "terrain/moon.xml" is not a course this viewer ships (public/examples/scenes/ + files.json)']);
+  const onSpawn = row('loco/spawn', { terrain: { ...stairs, start_m: 0 } });
+  const { errors, warnings } = checkTests({ suite: s, rows: [onStairs, onSpawn] });
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /^loco\/spawn: the course reaches x = 0\.00 m, inside the spawn area/);
+  // row() walks 0.5 m/s for 4 s: it reaches the stairs but not their end; that is not a warning
+  assert.deepEqual(warnings.filter((w) => w.startsWith('loco/stairs')), []);
 });
 
 test('row validation catches bad rows', () => {

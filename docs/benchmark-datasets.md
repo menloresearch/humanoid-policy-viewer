@@ -32,28 +32,44 @@ A test describes a scenario and nothing else; it does not know how often it runs
 `id` is `<config>/<name>` and is how results refer to the test. `tier` is `reasonable` (a policy should
 recover), `beyond` (at or past the observed limit) or `null`. `limits` overrides every policy's trained command
 range, so leave it `null` unless the test needs it. `foot_friction` overrides the feet's sliding friction (the
-scene's is 0.6). `terrain` names a course the test runs on (below). `metrics_opt_in: ["gait_symmetry"]` turns on
+scene's is 0.6). `terrain` describes the course the test walks on (below). `metrics_opt_in: ["gait_symmetry"]` turns on
 the gait symmetry metric (straight, steady walking only). The full schema is in `src/benchmark/testRow.js`.
 
 ### Terrain
 
-A course is an MJCF file of static geoms under `public/examples/scenes/terrain/`, listed in
-`public/examples/scenes/files.json`. A test with `"terrain": "terrain/<name>.xml"` runs on the default robot scene
-with that course spliced in (`src/simulation/terrainScene.js`); the scene is reloaded, keeping the policy, only
-when it differs from the previous test's. Courses ship with the viewer, not the dataset, so a benchmark can only use
-courses the viewer running it has; `npm run benchmark` refuses a test naming any other.
+A test's `terrain` describes its course with parameters; the viewer builds it (`src/simulation/terrainGen.js`) and
+splices it into the default robot scene for that test (`src/simulation/terrainScene.js`), reloading the scene,
+keeping the policy, only when it differs from the previous test's. A course is part of the test, so a new one is a
+dataset edit, not a viewer change. Every course starts `start_m` in front of the robot and runs along +x, centred on
+y = 0. A spec names every parameter of its type:
 
-`python3 scripts/make_terrain_benchmark.py [<benchmark dir>]` writes the six courses and seven tests (default
-`./benchmark/data/terrain/test.jsonl`). Every course starts 1.5 m in front of the spawn point, is 6 m wide and runs
-along +x; the robot walks forward at 0.4 m/s for 20 s, so a policy that keeps pace ends near x = 8 m.
-
-| test | course |
+| `type` | parameters (defaults) |
 |---|---|
-| `stairs_5cm`, `stairs_10cm` | 5 steps up (35 cm treads), 1.5 m top, 5 steps down |
-| `slope_10deg`, `slope_15deg` | ramp up to 0.3 / 0.4 m, 1.5 m top, ramp down |
-| `slope_push` | the 10 degree course with lateral shoulder pushes (150 N climbing, 225 N descending) |
-| `obstacles` | 14 scattered boxes, 3-7 cm high, 0.2-0.4 m footprint |
-| `rough` | 0.3 m tiles, 0.5-4 cm high |
+| `stairs` | `start_m` 1.5, `width_m` 6, `step_height_m` 0.05, `steps` 5 (each way), `tread_m` 0.35, `top_m` 1.5 |
+| `slope` | `start_m` 1.5, `width_m` 6, `angle_deg` 10, `height_m` 0.3, `top_m` 1.5 |
+| `boxes` | `start_m` 1.5, `width_m` 1.2 (lane), `length_m` 5.8, `count` 14, `min_height_m` 0.03, `max_height_m` 0.07, `min_size_m` 0.2, `max_size_m` 0.4, `seed` 7 |
+| `rough` | `start_m` 1.5, `width_m` 6, `length_m` 6.3, `tile_m` 0.3, `min_height_m` 0.005, `max_height_m` 0.04, `seed` 11 |
+
+```json
+"terrain": {"type": "stairs", "start_m": 1.5, "width_m": 6, "step_height_m": 0.1, "steps": 5, "tread_m": 0.35, "top_m": 1.5}
+```
+
+How terrain interacts with the rest of a test:
+
+- **Falls** are judged by the base's height above the ground under it (and tilt), so a robot slumped on a 0.5 m
+  platform counts as fallen, as it would on the floor. Push instability uses the same height.
+- **Spawn**: the robot always starts at the origin facing +x. `npm run benchmark` refuses a course that comes within
+  0.5 m of it.
+- **Commands**: courses run along +x, so a turning or sideways test can walk off one. `npm run benchmark` and the
+  editor warn when the commanded path never reaches the course or leaves it sideways (the path is the commands
+  integrated, not what a policy walks).
+- **`foot_friction`** applies on terrain too: the feet's contact priority makes their friction win against course
+  geoms as against the floor.
+- Random layouts (`boxes`, `rough`) come from the spec's `seed`, so a test always builds the same course.
+
+What a spec builds is part of `BENCHMARK_PROTOCOL`. `npm run terrain-tests [<benchmark dir>]` writes seven starter
+tests (stairs 5 and 10 cm, ramps 10° and 15°, the 10° ramp with shoulder pushes, boxes, rough tiles), each walked
+at 0.4 m/s for 20 s, to `data/terrain/test.jsonl` (default `./benchmark`).
 
 ## The suite (`suite.yaml`)
 

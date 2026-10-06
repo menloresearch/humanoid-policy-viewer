@@ -168,6 +168,13 @@ function trackingError(sample) {
   };
 }
 
+// Base height above the ground under it (groundZ is the terrain height there,
+// absent or 0 on the floor), so a push on a platform is judged like one on the floor.
+function clearance(sample) {
+  const z = sample.rootPosition?.[2];
+  return Number.isFinite(z) ? z - (sample.groundZ || 0) : undefined;
+}
+
 function tiltRadians(sample) {
   const qx = sample.rootOrientation?.[1] ?? 0;
   const qy = sample.rootOrientation?.[2] ?? 0;
@@ -258,9 +265,9 @@ function computePerturbations(samples, sequence, massByBody, fallbackMassKg) {
       ey: mean(preErrors.map((e) => e.ey)) || 0,
       ew: mean(preErrors.map((e) => e.ew)) || 0,
     };
-    const zPre = mean(anchorWindow.map((s) => s.rootPosition?.[2]));
+    const zPre = mean(anchorWindow.map(clearance));
     const noiseFloor = rmse(preErrors.map((e, i) => {
-      const z = anchorWindow[i].rootPosition?.[2];
+      const z = clearance(anchorWindow[i]);
       const dEz = Number.isFinite(z) && Number.isFinite(zPre) ? z - zPre : 0;
       return Math.hypot(e.ex - baseline.ex, e.ey - baseline.ey, e.ew - baseline.ew, dEz);
     })) || 0;
@@ -275,7 +282,7 @@ function computePerturbations(samples, sequence, massByBody, fallbackMassKg) {
       const dEx = e.ex - baseline.ex;
       const dEy = e.ey - baseline.ey;
       const dEw = e.ew - baseline.ew;
-      const z = sample.rootPosition?.[2];
+      const z = clearance(sample);
       // Included so a purely (or mostly) vertical push — where dEx/dEy/dEw
       // stay near their pre-push baseline — still drives recoveryTau off the
       // disturbance it actually causes (a height dip) instead of reading as

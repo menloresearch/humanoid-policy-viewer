@@ -13,6 +13,7 @@ import { listModelRoots, listModels as discoverModels } from './scripts/modelDis
 import { getBenchmarkRunsDir, getModelLibrary } from './scripts/modelLibraryConfig.mjs'
 import { readRows, writeRows } from './scripts/suiteDir.mjs'
 import { rowToSequence, sequenceToRow } from './src/benchmark/testRow.js'
+import { validateTerrain } from './src/simulation/terrainGen.js'
 
 // A submodule checked out under public/ carries a `.git` pointer file that
 // must not be deployed along with the scene assets.
@@ -219,10 +220,9 @@ function humanoidDevPlugin() {
       clean.footFriction = round3(footFriction);
     }
     if (parsed.terrain !== undefined && parsed.terrain !== null) {
-      if (typeof parsed.terrain !== 'string' || !/^terrain\/[A-Za-z0-9_.-]+\.xml$/.test(parsed.terrain)) {
-        throw new Error('"terrain" must be "terrain/<name>.xml"');
-      }
-      clean.terrain = parsed.terrain;
+      const problems = validateTerrain(parsed.terrain);
+      if (problems.length) throw new Error(`"terrain": ${problems.join('; ')}`);
+      clean.terrain = { ...parsed.terrain };
     }
     if (parsed.gaitSymmetry === true) clean.gaitSymmetry = true;
     return clean;
