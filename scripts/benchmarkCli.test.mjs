@@ -65,7 +65,7 @@ function fakeRun(overrides = {}) {
   };
   const row = {
     id: 'a/x', config: 'a', schema_version: 1, kind: 'velocity-sequence', name: 'x', description: '', tags: [], duration: 1,
-    commands: [{ t: 0, vx: 0, vy: 0, wz: 0 }], events: [], limits: null, foot_friction: null, metrics_opt_in: [],
+    commands: [{ t: 0, vx: 0, vy: 0, wz: 0 }], events: [], limits: null, foot_friction: null, terrain: null, metrics_opt_in: [],
   };
   return {
     schema: RUN_SCHEMA,

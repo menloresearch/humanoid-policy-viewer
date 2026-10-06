@@ -212,11 +212,17 @@ function humanoidDevPlugin() {
         clean.events = events;
       }
     }
-    // Per-test floor grip and the gait-symmetry opt-in; saving must keep them.
+    // Per-test floor grip, terrain course and the gait-symmetry opt-in; saving must keep them.
     const footFriction = Number(parsed.footFriction);
     if (parsed.footFriction !== undefined && parsed.footFriction !== null) {
       if (!Number.isFinite(footFriction) || footFriction <= 0) throw new Error('"footFriction" must be a number > 0');
       clean.footFriction = round3(footFriction);
+    }
+    if (parsed.terrain !== undefined && parsed.terrain !== null) {
+      if (typeof parsed.terrain !== 'string' || !/^terrain\/[A-Za-z0-9_.-]+\.xml$/.test(parsed.terrain)) {
+        throw new Error('"terrain" must be "terrain/<name>.xml"');
+      }
+      clean.terrain = parsed.terrain;
     }
     if (parsed.gaitSymmetry === true) clean.gaitSymmetry = true;
     return clean;

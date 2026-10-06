@@ -7,19 +7,21 @@ Every course starts 1.5 m in front of the spawn point, is 6 m wide and runs alon
 The robot is commanded to walk forward at 0.4 m/s for 20 s, so a policy that keeps pace ends near x = 8 m; getting
 stuck shows up as drift from the ideal path, a fall as a fall.
 
-    python3 scripts/make_terrain_benchmark.py      (from humanoid-policy-viewer/)
+    python3 scripts/make_terrain_benchmark.py [<benchmark dir>]      (from humanoid-policy-viewer/; default ./benchmark)
 
-Writes public/examples/scenes/terrain/<name>.xml, benchmark/terrain/<name>.json and appends the fragments to
-public/examples/scenes/files.json. Existing scenes and tests are not touched.
+Writes public/examples/scenes/terrain/<name>.xml (the courses ship with the viewer; a test can only use a course
+the viewer running it has), appends them to public/examples/scenes/files.json, and writes the tests as rows of
+<benchmark dir>/data/terrain/test.jsonl (docs/benchmark-datasets.md), replacing that file.
 """
 import json
 import math
 import random
+import sys
 from pathlib import Path
 
 APP = Path(__file__).resolve().parent.parent
 SCENES = APP / "public" / "examples" / "scenes"
-TESTS = APP / "benchmark" / "terrain"
+SUITE = Path(sys.argv[1]) if len(sys.argv) > 1 else APP / "benchmark"
 
 X0 = 1.5       # course start (m)
 WIDTH = 6.0    # course width (m): wide enough that a drifting policy is scored on drift, not on walking off an edge
@@ -101,41 +103,45 @@ def write_fragment(name, desc, geoms):
     (SCENES / "terrain" / f"{name}.xml").write_text(xml)
 
 
+def push(t, dy, force, body, label):
+    return {"t": t, "type": "push", "dir": [0, dy, 0], "force": force, "duration": 0.15, "targetBody": body,
+            "torqueAxis": None, "torqueMag": None, "label": label, "tier": None}
+
+
 def walk_test(name, desc, terrain, events=None):
-    seq = {
-        "name": f"terrain: {desc}",
-        "duration": 22,
-        "terrain": terrain,
+    """One benchmark row (src/benchmark/testRow.js): walk forward over the course."""
+    return {
+        "id": f"terrain/{name}", "config": "terrain", "schema_version": 1, "kind": "velocity-sequence",
+        "name": f"terrain: {desc}", "description": "", "tags": ["terrain"], "duration": 22,
         "commands": [
             {"t": 0, "vx": 0, "vy": 0, "wz": 0},
             {"t": 0.3, "vx": SPEED, "vy": 0, "wz": 0},
             {"t": 20.5, "vx": 0, "vy": 0, "wz": 0},
         ],
+        "events": events or [], "limits": None, "foot_friction": None, "terrain": terrain, "metrics_opt_in": [],
     }
-    if events:
-        seq["events"] = events
-    (TESTS / f"{name}.json").write_text(json.dumps(seq, indent=2) + "\n")
 
 
 def main():
-    TESTS.mkdir(parents=True, exist_ok=True)
+    rows = []
     for name, (desc, geoms) in COURSES.items():
         write_fragment(name, desc, geoms)
-        walk_test(name, desc, f"terrain/{name}.xml")
+        rows.append(walk_test(name, desc, f"terrain/{name}.xml"))
     # climbing the 10 degree ramp while a lateral shoulder push (walking tier, 150 N then 225 N) hits
-    walk_test("slope_push", "10 degree ramp with lateral shoulder pushes while climbing", "terrain/slope_10deg.xml",
-              events=[
-                  {"t": 5.5, "type": "push", "dir": [0, 1, 0], "force": 150, "duration": 0.15,
-                   "targetBody": "left_shoulder_pitch_link", "label": "shoulder lateral 150 N on the ramp"},
-                  {"t": 12.5, "type": "push", "dir": [0, -1, 0], "force": 225, "duration": 0.15,
-                   "targetBody": "right_shoulder_pitch_link", "label": "shoulder lateral 225 N going down the ramp"},
-              ])
+    rows.append(walk_test("slope_push", "10 degree ramp with lateral shoulder pushes while climbing", "terrain/slope_10deg.xml",
+                          events=[
+                              push(5.5, 1, 150, "left_shoulder_pitch_link", "shoulder lateral 150 N on the ramp"),
+                              push(12.5, -1, 225, "right_shoulder_pitch_link", "shoulder lateral 225 N going down the ramp"),
+                          ]))
+    tests = SUITE / "data" / "terrain" / "test.jsonl"
+    tests.parent.mkdir(parents=True, exist_ok=True)
+    tests.write_text("".join(json.dumps(row) + "\n" for row in rows))
     # append the fragments to the download index (keeping its existing order, so the change stays additive)
     index = SCENES / "files.json"
     files = json.loads(index.read_text())
     files += sorted(f"terrain/{n}.xml" for n in COURSES if f"terrain/{n}.xml" not in files)
     index.write_text(json.dumps(files, indent=2) + ("\n" if index.read_text().endswith("\n") else ""))
-    print(f"wrote {len(COURSES)} terrain fragments and {len(COURSES) + 1} tests")
+    print(f"wrote {len(COURSES)} terrain fragments and {len(rows)} tests ({tests})")
 
 
 if __name__ == "__main__":

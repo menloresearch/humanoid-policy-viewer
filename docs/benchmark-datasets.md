@@ -26,13 +26,34 @@ A test describes a scenario and nothing else; it does not know how often it runs
  "duration": 12, "commands": [{"t": 0, "vx": 0.6, "vy": 0, "wz": 0}],
  "events": [{"t": 2, "type": "push", "dir": [-1, 0, 0], "force": 450, "duration": 0.15, "targetBody": "pelvis_link",
              "torqueAxis": null, "torqueMag": null, "label": "pelvis back — reasonable (450N)", "tier": "reasonable"}],
- "limits": null, "foot_friction": null, "metrics_opt_in": []}
+ "limits": null, "foot_friction": null, "terrain": null, "metrics_opt_in": []}
 ```
 
 `id` is `<config>/<name>` and is how results refer to the test. `tier` is `reasonable` (a policy should
 recover), `beyond` (at or past the observed limit) or `null`. `limits` overrides every policy's trained command
-range, so leave it `null` unless the test needs it. `metrics_opt_in: ["gait_symmetry"]` turns on the gait
-symmetry metric (straight, steady walking only). The full schema is in `src/benchmark/testRow.js`.
+range, so leave it `null` unless the test needs it. `foot_friction` overrides the feet's sliding friction (the
+scene's is 0.6). `terrain` names a course the test runs on (below). `metrics_opt_in: ["gait_symmetry"]` turns on
+the gait symmetry metric (straight, steady walking only). The full schema is in `src/benchmark/testRow.js`.
+
+### Terrain
+
+A course is an MJCF file of static geoms under `public/examples/scenes/terrain/`, listed in
+`public/examples/scenes/files.json`. A test with `"terrain": "terrain/<name>.xml"` runs on the default robot scene
+with that course spliced in (`src/simulation/terrainScene.js`); the scene is reloaded, keeping the policy, only
+when it differs from the previous test's. Courses ship with the viewer, not the dataset, so a benchmark can only use
+courses the viewer running it has; `npm run benchmark` refuses a test naming any other.
+
+`python3 scripts/make_terrain_benchmark.py [<benchmark dir>]` writes the six courses and seven tests (default
+`./benchmark/data/terrain/test.jsonl`). Every course starts 1.5 m in front of the spawn point, is 6 m wide and runs
+along +x; the robot walks forward at 0.4 m/s for 20 s, so a policy that keeps pace ends near x = 8 m.
+
+| test | course |
+|---|---|
+| `stairs_5cm`, `stairs_10cm` | 5 steps up (35 cm treads), 1.5 m top, 5 steps down |
+| `slope_10deg`, `slope_15deg` | ramp up to 0.3 / 0.4 m, 1.5 m top, ramp down |
+| `slope_push` | the 10 degree course with lateral shoulder pushes (150 N climbing, 225 N descending) |
+| `obstacles` | 14 scattered boxes, 3-7 cm high, 0.2-0.4 m footprint |
+| `rough` | 0.3 m tiles, 0.5-4 cm high |
 
 ## The suite (`suite.yaml`)
 

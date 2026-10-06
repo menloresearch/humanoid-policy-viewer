@@ -16,7 +16,7 @@ function row(id, extra = {}) {
   return {
     id, config, schema_version: 1, kind: 'velocity-sequence', name: id, description: '', tags: [],
     duration: 4, commands: [{ t: 0, vx: 0.5, vy: 0, wz: 0 }], events: [], limits: null,
-    foot_friction: null, metrics_opt_in: [], ...extra,
+    foot_friction: null, terrain: null, metrics_opt_in: [], ...extra,
   };
 }
 
@@ -60,6 +60,21 @@ test('a new category is just a new id prefix', () => {
   const created = sequenceToRow('stairs/up_10cm', { name: 'stairs', duration: 3, commands: [{ t: 0, vx: 0.3 }], footFriction: 0.5 });
   assert.equal(created.config, 'stairs');
   assert.deepEqual(validateTestRow(created), []);
+});
+
+test('a terrain test keeps its course through the editor and is checked against the shipped courses', async () => {
+  const { checkTests } = await import('../../scripts/suiteCheck.mjs');
+  const onStairs = row('loco/stairs', { terrain: 'terrain/stairs_5cm.xml' });
+  assert.deepEqual(validateTestRow(onStairs), []);
+  assert.equal(rowToSequence(onStairs).terrain, 'terrain/stairs_5cm.xml');
+  assert.equal('terrain' in rowToSequence(row('loco/a')), false);
+  assert.deepEqual(sequenceToRow(onStairs.id, rowToSequence(onStairs), onStairs), onStairs);
+  assert.ok(validateTestRow(row('loco/a', { terrain: '../scene.xml' })).some((e) => e.includes('terrain')));
+
+  const s = suite({ tests: [{ config: 'loco' }] });
+  const missing = row('loco/moon', { terrain: 'terrain/moon.xml' });
+  const { errors } = checkTests({ suite: s, rows: [onStairs, missing] });
+  assert.deepEqual(errors, ['loco/moon: terrain "terrain/moon.xml" is not a course this viewer ships (public/examples/scenes/ + files.json)']);
 });
 
 test('row validation catches bad rows', () => {
