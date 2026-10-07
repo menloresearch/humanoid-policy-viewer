@@ -101,7 +101,10 @@ test('row validation catches bad rows', () => {
   assert.ok(validateTestRow(row('loco/a', { events: [push(1, 100, 'hard')] })).some((e) => e.includes('tier')));
   assert.ok(validateTestRow(row('loco/a', { kind: 'motion-tracking' })).some((e) => e.includes('kind')));
   assert.ok(validateTestRow(row('all/a', { config: 'all' })).some((e) => e.includes('reserved')));
-  assert.ok(validateTestRow(row('loco/a', { events: [push(row('loco/a').duration + 1, 100, 'reasonable')] })).some((e) => e.includes('within 0..duration')));
+  // Pushes start ≥ 1 s in and end ≥ 2 s before the end (the rows here last 4 s, pushes 0.15 s).
+  assert.ok(validateTestRow(row('loco/a', { events: [push(0.5, 100, 'reasonable')] })).some((e) => e.includes('at least 1 s')));
+  assert.ok(validateTestRow(row('loco/a', { events: [push(1.9, 100, 'reasonable')] })).some((e) => e.includes('before the test does')));
+  assert.deepEqual(validateTestRow(row('loco/a', { events: [push(1.85, 100, 'reasonable')] })), []);
 });
 
 test('push categories, old and new naming', () => {

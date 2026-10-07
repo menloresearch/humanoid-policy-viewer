@@ -34,7 +34,9 @@ A test describes a scenario and nothing else; it does not know how often it runs
 `id` is `<config>/<name>` and is how results refer to the test. A benchmark without categories puts every test
 in the one config `default` (the editor does this when Category is left blank); the Hub treats a config named
 `default` as the unnamed one, so `load_dataset(repo)` works without naming it. `tier` is `reasonable` (a policy should
-recover), `beyond` (at or past the observed limit) or `null`. `limits` overrides every policy's trained command
+recover), `beyond` (at or past the observed limit) or `null`. A push starts at least 1 s into the test (the robot
+settles first) and ends at least 2 s before the test does (time to recover), so `t >= 1` and
+`t + duration <= <test duration> - 2`; the dataset check refuses rows that break this. `limits` overrides every policy's trained command
 range, so leave it `null` unless the test needs it. `foot_friction` overrides the feet's sliding friction (the
 scene's is 0.6). `terrain` describes the course the test walks on (below). `metrics_opt_in: ["gait_symmetry"]` turns on
 the gait symmetry metric (straight, steady walking only). The full schema is in `src/benchmark/testRow.js`.

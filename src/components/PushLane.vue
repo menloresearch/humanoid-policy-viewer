@@ -81,6 +81,7 @@
 import PushEventDialog from './PushEventDialog.vue';
 import { toSpherical } from './direction-math.js';
 import { clamp as clampShared } from './clamp.js';
+import { PUSH_START_MIN_S, latestPushStart } from '@/benchmark/testRow.js';
 
 const VW = 800;
 const VH = 90;
@@ -183,8 +184,13 @@ export default {
       const px = ((event.clientX - rect.left) / rect.width) * VW;
       return this.xToT(px);
     },
+    // Pointer time, kept inside the window a push of `pushDuration` may occupy.
+    pushT(event, pushDuration) {
+      const latest = Math.max(PUSH_START_MIN_S, latestPushStart(this.duration, pushDuration));
+      return this.round1(this.clamp(this.snapT(this.eventToT(event)), PUSH_START_MIN_S, latest));
+    },
     onBackgroundAdd(event) {
-      const t = this.round1(this.clamp(this.snapT(this.eventToT(event)), 0, this.duration));
+      const t = this.pushT(event, DEFAULT_DURATION);
       this.$emit('add-event', t, [1, 0, 0], DEFAULT_FORCE_N, DEFAULT_DURATION);
     },
     onMarkerDown(event, index) {
@@ -200,7 +206,7 @@ export default {
         if (d > CLICK_SLOP) this.dragMoved = true;
       }
       if (!this.dragMoved) return; // still within click slop — don't move time yet
-      const t = this.round1(this.clamp(this.snapT(this.eventToT(event)), 0, this.duration));
+      const t = this.pushT(event, this.events[this.dragIndex]?.duration ?? DEFAULT_DURATION);
       this.$emit('move-event', this.dragIndex, t);
     },
     onPointerUp() {

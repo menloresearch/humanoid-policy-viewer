@@ -40,21 +40,21 @@
       "pushes": []
     },
     "push_standing/chest_front_short#0": {
-      "frames": 250,
+      "frames": 300,
       "actionDelayLag": 4,
       "fell": {
         "fell": true,
         "time": 3.76
       },
       "tracking": {
-        "vx": 0.97398,
-        "vy": 0.15874,
-        "wz": 0.82433
+        "vx": 0.88911,
+        "vy": 0.14492,
+        "wz": 0.75338
       },
       "drift": {
-        "final_m": 2.54149,
+        "final_m": 2.54137,
         "max_m": 2.54192,
-        "rmse_m": 1.37473
+        "rmse_m": 1.62829
       },
       "pushes": [
         {
@@ -68,21 +68,21 @@
       ]
     },
     "push_standing/chest_front_short#1": {
-      "frames": 250,
+      "frames": 300,
       "actionDelayLag": 3,
       "fell": {
         "fell": true,
         "time": 3.76
       },
       "tracking": {
-        "vx": 0.88818,
-        "vy": 0.16316,
-        "wz": 0.71015
+        "vx": 0.81079,
+        "vy": 0.14894,
+        "wz": 0.64828
       },
       "drift": {
-        "final_m": 2.21486,
+        "final_m": 2.21482,
         "max_m": 2.21497,
-        "rmse_m": 1.22966
+        "rmse_m": 1.4414
       },
       "pushes": [
         {
@@ -114,10 +114,10 @@
       "taskId": "survival_time_v1",
       "metric": "survival_time@1",
       "higherIsBetter": true,
-      "value": 0.876,
-      "stderr": 0.2026,
+      "value": 0.8134,
+      "stderr": 0.1989,
       "ci95": [
-        0.4789,
+        0.4235,
         1
       ],
       "tests": 2,

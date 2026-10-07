@@ -35,6 +35,15 @@ export const TIERS = ['reasonable', 'beyond'];
 export const ALL_CONFIG = 'all';
 const ID_RE = /^[a-z0-9][a-z0-9_]*\/[a-z0-9][a-z0-9_.-]*$/;
 const OPT_IN_METRICS = ['gait_symmetry'];
+// A push starts once the robot has settled and ends with time left to recover before the test does.
+export const PUSH_START_MIN_S = 1;
+export const PUSH_END_MARGIN_S = 2;
+
+/** The latest start time of a push held for `pushDuration` in a test lasting `duration`. */
+export function latestPushStart(duration, pushDuration) {
+  return duration - PUSH_END_MARGIN_S - pushDuration;
+}
+
 const EVENT_KEYS = ['t', 'type', 'dir', 'force', 'duration', 'targetBody', 'torqueAxis', 'torqueMag', 'label', 'tier'];
 
 // The row schema in Hugging Face `datasets` terms, declared in the dataset card
@@ -110,7 +119,10 @@ export function validateTestRow(row) {
       const where = `events[${i}]`;
       if (!event || event.type !== 'push') return fail(`${where}.type must be "push"`);
       for (const key of Object.keys(event)) if (!EVENT_KEYS.includes(key)) fail(`${where} has unknown key "${key}"`);
-      if (!isNumber(event.t) || event.t < 0 || event.t > row.duration) fail(`${where}.t must be within 0..duration`);
+      if (!isNumber(event.t) || event.t < PUSH_START_MIN_S) fail(`${where}.t must be at least ${PUSH_START_MIN_S} s (the robot settles first)`);
+      else if (isNumber(event.duration) && event.t > latestPushStart(row.duration, event.duration)) {
+        fail(`${where} must end at least ${PUSH_END_MARGIN_S} s before the test does (t + duration <= ${row.duration - PUSH_END_MARGIN_S})`);
+      }
       if (!Array.isArray(event.dir) || ![2, 3].includes(event.dir.length) || !event.dir.every(isNumber)) fail(`${where}.dir must be 2 or 3 numbers`);
       if (!isNumber(event.force) || event.force <= 0) fail(`${where}.force must be > 0 (Newtons)`);
       if (!isNumber(event.duration) || event.duration <= 0) fail(`${where}.duration must be > 0`);

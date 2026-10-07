@@ -179,7 +179,7 @@ import { appState, closeEditor, newBlankSequence, defaultLimits, MAX_DURATION } 
 import { listSequences, loadSequenceFile, saveSequenceFile, deleteSequenceFile, slugify } from '@/state/sequenceStore.js';
 import { STATIC } from '@/state/viewerMode.js';
 import { commandSequencer } from '@/simulation/commandSequencer.js';
-import { ALL_CONFIG } from '@/benchmark/testRow.js';
+import { ALL_CONFIG, PUSH_END_MARGIN_S } from '@/benchmark/testRow.js';
 import { TERRAIN_TYPES, defaultTerrain } from '@/simulation/terrainGen.js';
 import { loadTestScene } from '@/simulation/terrainScene.js';
 import { demoRef } from '@/state/demoRef.js';
@@ -270,11 +270,11 @@ export default {
     bodyNames() {
       return appState.bodyNames;
     },
-    // The test must last past its last keypoint and its last push (the dataset check rejects a push after the end).
+    // The test must last past its last keypoint, and past its last push's end by PUSH_END_MARGIN_S.
     lastT() {
       const cmds = this.working?.commands ?? [];
       const events = Array.isArray(this.working?.events) ? this.working.events : [];
-      return Math.max(cmds.length ? cmds[cmds.length - 1].t : 0, ...events.map((ev) => ev.t));
+      return Math.max(cmds.length ? cmds[cmds.length - 1].t : 0, ...events.map((ev) => ev.t + (ev.duration ?? 0) + PUSH_END_MARGIN_S));
     },
     minDuration() {
       return Math.ceil(this.lastT);
@@ -283,7 +283,7 @@ export default {
       const d = Number(this.durationInput);
       if (!Number.isFinite(d) || d <= 0) return 'Duration must be a positive number';
       if (d > MAX_DURATION) return `Duration cannot exceed ${MAX_DURATION}s`;
-      if (d < this.lastT) return `Duration must be ≥ last keypoint or push (${this.lastT.toFixed(1)}s)`;
+      if (d < this.lastT) return `Duration must be ≥ ${this.lastT.toFixed(1)}s (the last keypoint, or ${PUSH_END_MARGIN_S}s after the last push ends)`;
       return '';
     },
     canSave() {

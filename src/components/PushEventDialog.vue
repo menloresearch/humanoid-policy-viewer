@@ -28,9 +28,9 @@
 
         <v-text-field
           :model-value="event.t"
-          label="Time (s)" type="number" min="0" :max="duration" step="0.1"
+          label="Time (s)" type="number" :min="PUSH_START_MIN_S" :max="latestStart" step="0.1"
           density="compact" variant="outlined" hide-details class="mb-4"
-          @update:modelValue="(v) => emitPatch({ t: clamp(Number(v), 0, duration) })"
+          @update:modelValue="(v) => emitPatch({ t: clamp(Number(v), PUSH_START_MIN_S, latestStart) })"
         ></v-text-field>
 
         <div class="text-caption text-medium-emphasis mb-1">
@@ -80,6 +80,7 @@ import DirectionDial from './DirectionDial.vue';
 import TorqueVectorEditor from './TorqueVectorEditor.vue';
 import { demoRef } from '@/state/demoRef.js';
 import { clamp as clampShared } from './clamp.js';
+import { PUSH_START_MIN_S, latestPushStart } from '@/benchmark/testRow.js';
 
 /**
  * MJCF body names are raw kinematic-chain identifiers (e.g. "left_hip_pitch_link",
@@ -111,6 +112,7 @@ export default {
   data() {
     return {
       hoveredBodyLabel: '',
+      PUSH_START_MIN_S,
       // reasonable: a policy should recover; beyond: at or past the observed limit
       TIER_ITEMS: [
         { title: 'none', value: null },
@@ -120,6 +122,9 @@ export default {
     };
   },
   computed: {
+    latestStart() {
+      return Math.max(PUSH_START_MIN_S, latestPushStart(this.duration, this.event?.duration ?? 0));
+    },
     bodySelectItems() {
       return [
         { label: 'default (pelvis)', value: null },
