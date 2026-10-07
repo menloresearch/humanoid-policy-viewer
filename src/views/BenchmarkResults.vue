@@ -235,8 +235,8 @@
             </div>
           </div>
 
-          <!-- Balance / smoothness KPI tiles -->
-          <div class="section-title">Balance &amp; smoothness</div>
+          <!-- Smoothness KPI tiles -->
+          <div class="section-title">Smoothness</div>
           <div class="tile-grid mb-6">
             <div v-for="row in perTestRows" :key="'bal-' + row.policyId" class="tile-card">
               <div class="kpi-head">
@@ -244,8 +244,6 @@
                 <span class="kpi-name text-caption">{{ labelFor(row.policyId) }}</span>
               </div>
               <div class="tile-stats">
-                <div><span class="t-val">{{ fmt(row.supMean, 3) }}</span><span class="t-lbl">support margin mean (m)</span></div>
-                <div><span class="t-val">{{ fmt(row.supMin, 3) }}</span><span class="t-lbl">support margin min (m)</span></div>
                 <div><span class="t-val">{{ fmt(row.meanDelta, 4) }}</span><span class="t-lbl">mean action Δ</span></div>
                 <div><span class="t-val">{{ fmt(row.rmsDelta, 4) }}</span><span class="t-lbl">RMS action Δ</span></div>
               </div>
@@ -931,7 +929,6 @@ export default {
       const ct = (m.commandTracking && m.commandTracking.overall) || {};
       const gs = m.gaitSymmetry || {};
       const as = m.actionSmoothness || {};
-      const bal = m.balance || {};
       const drift = m.drift || {};
       const fell = m.fell || {};
       const pert = m.perturbations || null;
@@ -948,8 +945,6 @@ export default {
         jerk: as.jerkLikeScore,
         perturbations: pert,
         pushesLabel: pert ? `${pert.survived}/${pert.total}` : 'n/a',
-        supMean: bal.meanSupportMargin_m,
-        supMin: bal.minSupportMargin_m,
         meanDelta: as.meanAbsDelta,
         rmsDelta: as.rmsDelta,
         fell: !!fell.fell,

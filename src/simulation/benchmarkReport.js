@@ -376,7 +376,6 @@ export function deriveRow(result) {
   const ct = m.commandTracking?.overall || {};
   const gs = m.gaitSymmetry || {};
   const as = m.actionSmoothness || {};
-  const bal = m.balance || {};
   const drift = m.drift || {};
   const pert = m.perturbations || null;
   return {
@@ -394,8 +393,6 @@ export function deriveRow(result) {
     jerk: as.jerkLikeScore,
     meanDelta: as.meanAbsDelta,
     rmsDelta: as.rmsDelta,
-    supMean: bal.meanSupportMargin_m,
-    supMin: bal.minSupportMargin_m,
     perturbations: pert,
     fell: !!m.fell?.fell,
     fellTime: m.fell?.time ?? null,
@@ -666,14 +663,13 @@ export function buildBenchmarkReportHtml(run) {
     const kpiTable = `<table><thead><tr>
         <th>Policy</th><th>RMSE vx</th><th>RMSE vy</th><th>RMSE wz</th><th>Symmetry %</th>
         <th>Final drift (m)</th><th>Max drift (m)</th><th>Jerk</th><th>RMS action Δ</th>
-        <th>Support margin mean / min (m)</th><th>Pushes</th><th>Fell</th>
+        <th>Pushes</th><th>Fell</th>
       </tr></thead><tbody>`
       + rows.map((r) => `<tr>
           <td><span class="swatch" style="background:${colorFor(r.policyId)}"></span> ${esc(labelFor(r.policyId))}</td>
           <td>${fmt(r.rmse.vx)}</td><td>${fmt(r.rmse.vy)}</td><td>${fmt(r.rmse.wz)}</td>
           <td>${fmt(r.symmetry, 1)}</td><td>${fmt(r.finalDrift, 2)}</td><td>${fmt(r.maxDrift, 2)}</td>
           <td>${fmt(r.jerk)}</td><td>${fmt(r.rmsDelta, 4)}</td>
-          <td>${fmt(r.supMean)} / ${fmt(r.supMin)}</td>
           <td>${r.perturbations ? `${r.perturbations.survived}/${r.perturbations.total}` : 'n/a'}</td>
           <td>${r.fell ? `<span class="err">yes @ ${fmt(r.fellTime, 1)}s</span>` : 'no'}</td>
         </tr>`).join('')

@@ -10,7 +10,6 @@ import { yawFromQuat } from './idealPath.js';
 import { loadTestScene } from './terrainScene.js';
 import { mulberry32 } from '../benchmark/rng.js';
 
-const CONTACT_FORCE_THRESHOLD_N = 1.0;
 
 // ---------------------------------------------------------------------------
 // small numeric helpers (ported from sim-metrics.js)
@@ -52,42 +51,6 @@ function now() {
 // ---------------------------------------------------------------------------
 // geometry / failure helpers (ported from sim-metrics.js)
 // ---------------------------------------------------------------------------
-
-function averageBodyPosition(simulation, ids) {
-  const valid = Array.from(ids || []).filter(
-    (id) => Number.isFinite(id) && simulation?.xpos?.length >= (id + 1) * 3
-  );
-  if (!valid.length) return null;
-  const total = [0, 0, 0];
-  for (const id of valid) {
-    total[0] += simulation.xpos[id * 3 + 0] || 0;
-    total[1] += simulation.xpos[id * 3 + 1] || 0;
-    total[2] += simulation.xpos[id * 3 + 2] || 0;
-  }
-  return total.map((value) => value / valid.length);
-}
-
-function estimateSupport(rootPosition, leftPosition, rightPosition, contacts, forces) {
-  const active = [];
-  if (contacts.left && leftPosition) active.push({ position: leftPosition, weight: Math.max(1, Math.abs(forces.leftFz || forces.leftMag || 0)) });
-  if (contacts.right && rightPosition) active.push({ position: rightPosition, weight: Math.max(1, Math.abs(forces.rightFz || forces.rightMag || 0)) });
-  if (!active.length || !rootPosition) return { zmp: null, supportMargin: null };
-
-  const totalWeight = active.reduce((sum, item) => sum + item.weight, 0);
-  const zmp = [
-    active.reduce((sum, item) => sum + item.position[0] * item.weight, 0) / totalWeight,
-    active.reduce((sum, item) => sum + item.position[1] * item.weight, 0) / totalWeight,
-  ];
-
-  let supportMargin = null;
-  if (active.length === 2) {
-    const center = [(leftPosition[0] + rightPosition[0]) / 2, (leftPosition[1] + rightPosition[1]) / 2];
-    supportMargin = distance2(leftPosition, rightPosition) / 2 - distance2(rootPosition, center);
-  } else {
-    supportMargin = 0.08 - distance2(rootPosition, active[0].position);
-  }
-  return { zmp: roundArray(zmp), supportMargin: round(supportMargin) };
-}
 
 function projectedGravityZ(qpos) {
   const qy = qpos?.[4] || 0;
@@ -168,15 +131,6 @@ function buildSample(demo, component, state) {
   state.expectedPosition[1] += ((command[0] || 0) * sinH + (command[1] || 0) * cosH) * dt;
   const drift = distance2(rootPosition, state.expectedPosition);
 
-  const forces = typeof demo.readFootGroundForces === 'function' ? demo.readFootGroundForces() : {};
-  const contacts = {
-    left: Math.abs(forces.leftFz || 0) > CONTACT_FORCE_THRESHOLD_N || (forces.leftMag || 0) > CONTACT_FORCE_THRESHOLD_N,
-    right: Math.abs(forces.rightFz || 0) > CONTACT_FORCE_THRESHOLD_N || (forces.rightMag || 0) > CONTACT_FORCE_THRESHOLD_N,
-  };
-  const leftFootPosition = averageBodyPosition(simulation, demo.leftFootBodyIds);
-  const rightFootPosition = averageBodyPosition(simulation, demo.rightFootBodyIds);
-  const balance = estimateSupport(rootPosition, leftFootPosition, rightFootPosition, contacts, forces);
-
   const time = round(state.index * dt, 5);
   state.index += 1;
 
@@ -191,18 +145,6 @@ function buildSample(demo, component, state) {
     jointVelocities: roundArray(policyState?.jointVel),
     policyActions: actions,
     actionDeltas,
-    footContacts: contacts,
-    contactForces: {
-      leftFz: round(forces.leftFz),
-      leftMag: round(forces.leftMag),
-      rightFz: round(forces.rightFz),
-      rightMag: round(forces.rightMag),
-    },
-    footPositions: {
-      left: leftFootPosition ? roundArray(leftFootPosition) : null,
-      right: rightFootPosition ? roundArray(rightFootPosition) : null,
-    },
-    supportMargin: balance.supportMargin,
     groundZ: round(groundHeight(demo, rootPosition[0] || 0, rootPosition[1] || 0)),
     expectedTrajectory: roundArray(state.expectedPosition),
     drift: round(drift),

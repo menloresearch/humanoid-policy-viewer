@@ -136,7 +136,7 @@ genuinely probabilistic, and every metric is combined the same way:
 More repeats narrow the interval roughly as 1/√repeats; 5 is a reasonable default. A metric's version fixes how
 it is computed and combined: adding a metric or a new version needs no `BENCHMARK_PROTOCOL` bump, but a published
 version is never changed. Using a metric in a suite (or switching versions) is a suite `version` bump. The other
-numbers `run.json` keeps per run (tracking error, drift, push recovery, balance, gait symmetry, smoothness) feed no
+numbers `run.json` keeps per run (tracking error, drift, push recovery, gait symmetry, smoothness) feed no
 leaderboard yet; each can become a metric when it is trustworthy.
 
 ## Workflow

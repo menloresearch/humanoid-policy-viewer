@@ -101,16 +101,11 @@ function computeGaitSymmetry(rows, jointNames) {
     return { joint: pair.label, mirrorRmse: round(rmse(errors)) };
   });
   const meanMirrorRmse = mean(jointMetrics.map((metric) => metric.mirrorRmse));
-  const contactDutyAsymmetry = Math.abs(
-    (mean(rows.map((sample) => (sample.footContacts?.left ? 1 : 0))) || 0) -
-    (mean(rows.map((sample) => (sample.footContacts?.right ? 1 : 0))) || 0)
-  );
-  const limpIndex = Math.max(0, Math.min(1, (meanMirrorRmse || 0) + contactDutyAsymmetry));
+  const limpIndex = Math.max(0, Math.min(1, meanMirrorRmse || 0));
   return {
     symmetryScorePercent: round(100 * (1 - limpIndex), 2),
     limpIndex: round(limpIndex),
     meanMirrorRmse: round(meanMirrorRmse),
-    contactDutyAsymmetry: round(contactDutyAsymmetry),
     pairs: jointMetrics,
   };
 }
@@ -400,15 +395,6 @@ export function computeMetrics(samples, { dt = 0.02, jointNames = [], sequence =
     rmse_m: round(rmse(driftValues)),
   };
 
-  // Balance.
-  const supportMargins = rows.map((sample) => sample.supportMargin).filter(Number.isFinite);
-  const balance = {
-    meanSupportMargin_m: round(mean(supportMargins)),
-    minSupportMargin_m: supportMargins.length ? round(Math.min(...supportMargins)) : null,
-    leftContactDuty: round(mean(rows.map((sample) => (sample.footContacts?.left ? 1 : 0)))),
-    rightContactDuty: round(mean(rows.map((sample) => (sample.footContacts?.right ? 1 : 0)))),
-  };
-
   // Gait symmetry over ALL samples — opt-in per test: the left/right mirror
   // assumption only holds during sustained, constant-velocity straight-line
   // walking, so a test must explicitly opt in (dataset row
@@ -440,7 +426,6 @@ export function computeMetrics(samples, { dt = 0.02, jointNames = [], sequence =
     series,
     topDown,
     drift,
-    balance,
     gaitSymmetry,
     actionSmoothness,
     perturbations,
