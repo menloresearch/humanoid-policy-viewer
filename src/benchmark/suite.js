@@ -16,7 +16,7 @@
 //   tests:                     # { all: true }, { config: <category> } or { id: <test id> }
 //     - { config: locomotion }
 //     - { id: distance/square_lap_100m, repeats: 2 }
-//   tasks:                     # metric = "<name>@<version>"; scope by config, id, tag and/or tier
+//   tasks:                     # metric = "<name>@<version>"; scope by config, id and/or tag
 //     - { id: survival_rate, metric: survival_rate@1 }
 //     - { id: push_walking_survival_rate, metric: survival_rate@1, scope: { config: push_walking } }
 //
@@ -26,7 +26,7 @@
 import { BENCHMARK_PROTOCOL, POLICY_INTERFACES, RANDOMIZERS, ROBOTS, TEST_KINDS } from './protocol.js';
 import { cellSeed } from './rng.js';
 import { METRICS, latestMetricVersion } from './summary.js';
-import { ALL_CONFIG, TIERS } from './testRow.js';
+import { ALL_CONFIG } from './testRow.js';
 
 const TASK_ID_RE = /^[a-z][a-z0-9_]*$/;
 const DEFAULTS = {
@@ -36,7 +36,7 @@ const DEFAULTS = {
   timeout_s: 600,
 };
 const SETTING_KEYS = Object.keys(DEFAULTS);
-const SCOPE_KEYS = ['config', 'id', 'tag', 'tier'];
+const SCOPE_KEYS = ['config', 'id', 'tag'];
 
 const isPlainObject = (value) => !!value && typeof value === 'object' && !Array.isArray(value);
 const asList = (value) => (value === undefined || value === null ? [] : Array.isArray(value) ? value : [value]);
@@ -121,7 +121,6 @@ export function parseSuite(raw) {
     if (!isPlainObject(scope)) errors.push(`tasks[${i}].scope must be a mapping`);
     else {
       for (const key of Object.keys(scope)) if (!SCOPE_KEYS.includes(key)) errors.push(`tasks[${i}].scope.${key} is unknown (${SCOPE_KEYS.join(', ')})`);
-      for (const tier of asList(scope.tier)) if (!TIERS.includes(tier)) errors.push(`tasks[${i}].scope.tier must be ${TIERS.join(' | ')}`);
     }
   });
 
@@ -237,7 +236,7 @@ export function buildEvalYaml(suite, { name, description }) {
     description,
     evaluation_framework: 'humanoid-policy-viewer',
     // A task scoped to one category scores that dataset config; any other task
-    // (several categories, or a tag/tier cutting across them) scores "all".
+    // (several categories, or a tag cutting across them) scores "all".
     tasks: suite.tasks.map((task) => ({
       id: versionedTaskId(suite, task),
       config: typeof task.scope.config === 'string' ? task.scope.config : ALL_CONFIG,

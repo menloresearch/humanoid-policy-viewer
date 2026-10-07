@@ -451,10 +451,6 @@ export default {
     updateEvent(index, patch) {
       const ev = this.working.events[index];
       if (!ev) return;
-      if ('tier' in patch) {
-        if (patch.tier == null) delete ev.tier;
-        else ev.tier = patch.tier;
-      }
       if (patch.dir) ev.dir = [...patch.dir];
       if (patch.force != null) ev.force = patch.force;
       if (patch.duration != null) ev.duration = patch.duration;
@@ -618,9 +614,8 @@ export default {
           }
           // Which body the force/torque applies to (default: pelvis).
           if (typeof ev.targetBody === 'string' && ev.targetBody) out.targetBody = ev.targetBody;
-          // Kept as loaded: the label shown in reports and the benchmark tier.
+          // Kept as loaded: the label shown in reports.
           if (typeof ev.label === 'string' && ev.label) out.label = ev.label;
-          if (ev.tier === 'reasonable' || ev.tier === 'beyond') out.tier = ev.tier;
           return out;
         });
       }

@@ -27,14 +27,13 @@ A test describes a scenario and nothing else; it does not know how often it runs
  "name": "push: pelvis back (rear handle push) (walking)", "description": "", "tags": [],
  "duration": 12, "commands": [{"t": 0, "vx": 0.6, "vy": 0, "wz": 0}],
  "events": [{"t": 2, "type": "push", "dir": [-1, 0, 0], "force": 450, "duration": 0.15, "targetBody": "pelvis_link",
-             "torqueAxis": null, "torqueMag": null, "label": "pelvis back — reasonable (450N)", "tier": "reasonable"}],
+             "torqueAxis": null, "torqueMag": null, "label": "pelvis back (450N)"}],
  "limits": null, "foot_friction": null, "terrain": null, "metrics_opt_in": []}
 ```
 
 `id` is `<config>/<name>` and is how results refer to the test. A benchmark without categories puts every test
 in the one config `default` (the editor does this when Category is left blank); the Hub treats a config named
-`default` as the unnamed one, so `load_dataset(repo)` works without naming it. `tier` is `reasonable` (a policy should
-recover), `beyond` (at or past the observed limit) or `null`. A push starts at least 1 s into the test (the robot
+`default` as the unnamed one, so `load_dataset(repo)` works without naming it. A push starts at least 1 s into the test (the robot
 settles first) and ends at least 2 s before the test does (time to recover), so `t >= 1` and
 `t + duration <= <test duration> - 2`; the dataset check refuses rows that break this. `limits` overrides every policy's trained command
 range, so leave it `null` unless the test needs it. `foot_friction` overrides the feet's sliding friction (the
@@ -100,13 +99,13 @@ tests:                             # { all: true }, { config: … } or { id: …
 tasks:                             # leaderboard numbers; ids get _v<version> appended
   - { id: survival_rate, metric: survival_rate@1 }
   - { id: survival_time, metric: survival_time@1 }
-  - { id: push_walking_reasonable_survival_rate, metric: survival_rate@1, scope: { config: push_walking, tier: reasonable } }
+  - { id: push_walking_survival_rate, metric: survival_rate@1, scope: { config: push_walking } }
 reference_models: [menloresearch/asimov1-loco]   # used by `npm run suite baseline`
 ```
 
 The simulation is deterministic, so `repeats > 1` only makes sense with something randomised; the runner refuses
-otherwise. A scope narrows a task to `config`, `id`, `tag` (a test's tags) and/or `tier` (a test's push tiers);
-each may be a list.
+otherwise. A scope narrows a task to `config`, `id` and/or `tag` (a test's tags);
+each may be a list. To score a difficulty level on its own, give it its own category.
 
 ### Metrics and repeats
 
@@ -192,8 +191,7 @@ starter's `{ all: true }` selects everything) and only gets a leaderboard if a t
 The editor's **Environment** panel sets a test's terrain (type and parameters), foot friction (scene default, wet,
 icy or custom) and the gait-symmetry opt-in. A terrain test shows a top view (course, spawn area, commanded path)
 and a side profile, with the same spawn error and path warnings `npm run benchmark` gives; Save is disabled while
-the course overlaps the spawn. **Apply to viewer** loads the course into the 3D view. A push's benchmark tier is set
-in its push dialog.
+the course overlaps the spawn. **Apply to viewer** loads the course into the 3D view.
 
 To appear as a Hub benchmark, `eval.yaml`'s `evaluation_framework: humanoid-policy-viewer` must be in the Hub's
 list of frameworks (a pull request to `huggingface/huggingface.js`, `packages/tasks/src/eval.ts`), and the

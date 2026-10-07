@@ -21,7 +21,7 @@ const dir = resolve(process.argv[2] ?? join(appDir, 'benchmark'));
 const SPEED = 0.4;
 
 const push = (t, dy, force, body, label) => ({
-  t, type: 'push', dir: [0, dy, 0], force, duration: 0.15, targetBody: body, torqueAxis: null, torqueMag: null, label, tier: null,
+  t, type: 'push', dir: [0, dy, 0], force, duration: 0.15, targetBody: body, torqueAxis: null, torqueMag: null, label,
 });
 
 const walk = (name, title, terrain, events = []) => ({

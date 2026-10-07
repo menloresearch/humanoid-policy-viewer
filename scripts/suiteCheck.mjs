@@ -37,10 +37,6 @@ export function checkTests({ suite, rows }) {
       errors.push(...terrain.errors.map((e) => `${row.id}: ${e}`));
       warnings.push(...terrain.warnings.map((w) => `${row.id}: ${w}`));
     }
-    const untiered = row.events.filter((event) => event.type === 'push' && !event.tier);
-    if (untiered.length && row.events.some((event) => event.tier)) {
-      warnings.push(`${row.id}: ${untiered.length} push(es) without a tier, next to tiered ones`);
-    }
   }
   return { errors, warnings };
 }

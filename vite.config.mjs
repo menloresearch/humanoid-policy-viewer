@@ -203,9 +203,8 @@ function humanoidDevPlugin() {
         }
         // Which body the force/torque applies to (default: pelvis).
         if (typeof ev.targetBody === 'string' && ev.targetBody) clean_ev.targetBody = ev.targetBody;
-        // The report label and the benchmark tier (reasonable / beyond).
+        // The label shown in reports.
         if (typeof ev.label === 'string' && ev.label) clean_ev.label = ev.label;
-        if (ev.tier === 'reasonable' || ev.tier === 'beyond') clean_ev.tier = ev.tier;
         events.push(clean_ev);
       }
       if (events.length) {

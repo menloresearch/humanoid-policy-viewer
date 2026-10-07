@@ -14,8 +14,7 @@
 //   duration        seconds
 //   commands        [{ t, vx, vy, wz }]
 //   events          [{ t, type: "push", dir, force, duration, targetBody,
-//                      torqueAxis, torqueMag, label, tier }]; tier is
-//                      "reasonable" | "beyond" | null
+//                      torqueAxis, torqueMag, label }]
 //   limits          { vx, vy, wz: [lo, hi] } | null
 //   foot_friction   number | null
 //   terrain         { type: "stairs" | "slope" | "boxes" | "rough", ...parameters }
@@ -30,7 +29,6 @@
 import { TEST_KINDS, TEST_SCHEMA_VERSION } from './protocol.js';
 import { TERRAIN_TYPES, validateTerrain } from '../simulation/terrainGen.js';
 
-export const TIERS = ['reasonable', 'beyond'];
 // The dataset config that holds every test (data/*/test.jsonl); not a category.
 export const ALL_CONFIG = 'all';
 const ID_RE = /^[a-z0-9][a-z0-9_]*\/[a-z0-9][a-z0-9_.-]*$/;
@@ -44,7 +42,7 @@ export function latestPushStart(duration, pushDuration) {
   return duration - PUSH_END_MARGIN_S - pushDuration;
 }
 
-const EVENT_KEYS = ['t', 'type', 'dir', 'force', 'duration', 'targetBody', 'torqueAxis', 'torqueMag', 'label', 'tier'];
+const EVENT_KEYS = ['t', 'type', 'dir', 'force', 'duration', 'targetBody', 'torqueAxis', 'torqueMag', 'label'];
 
 // The row schema in Hugging Face `datasets` terms, declared in the dataset card
 // (dataset_info.features) so the Hub never has to guess column types. Guessing
@@ -68,7 +66,7 @@ export const ROW_FEATURES = [
   ['events', {
     list: [
       ['t', float], ['type', string], ['dir', floats], ['force', float], ['duration', float], ['targetBody', string],
-      ['torqueAxis', floats], ['torqueMag', float], ['label', string], ['tier', string],
+      ['torqueAxis', floats], ['torqueMag', float], ['label', string],
     ],
   }],
   ['limits', { struct: [['vx', floats], ['vy', floats], ['wz', floats]] }],
@@ -126,7 +124,6 @@ export function validateTestRow(row) {
       if (!Array.isArray(event.dir) || ![2, 3].includes(event.dir.length) || !event.dir.every(isNumber)) fail(`${where}.dir must be 2 or 3 numbers`);
       if (!isNumber(event.force) || event.force <= 0) fail(`${where}.force must be > 0 (Newtons)`);
       if (!isNumber(event.duration) || event.duration <= 0) fail(`${where}.duration must be > 0`);
-      if (event.tier !== null && !TIERS.includes(event.tier)) fail(`${where}.tier must be ${TIERS.join(' | ')} or null`);
       if (event.targetBody !== null && typeof event.targetBody !== 'string') fail(`${where}.targetBody must be a string or null`);
       if (event.label !== null && typeof event.label !== 'string') fail(`${where}.label must be a string or null`);
     });
@@ -165,7 +162,6 @@ export function rowToSequence(row) {
         out.torqueMag = event.torqueMag;
       }
       if (event.label) out.label = event.label;
-      if (event.tier) out.tier = event.tier;
       return out;
     });
   }
@@ -199,7 +195,6 @@ export function sequenceToRow(id, sequence, previous = null) {
       torqueAxis: event.torqueAxis ?? null,
       torqueMag: event.torqueMag ?? null,
       label: event.label ?? null,
-      tier: event.tier ?? null,
     })),
     limits: sequence.limits ?? null,
     foot_friction: sequence.footFriction ?? null,

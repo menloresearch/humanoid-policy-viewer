@@ -99,7 +99,6 @@ export function summarizeTests(cells, selected) {
       testId: row.id,
       config: row.config,
       tags: row.tags,
-      tiers: [...new Set(row.events.filter((event) => event.type === 'push').map((event) => event.tier).filter(Boolean))],
       repeats: mine.length,
       errors: mine.filter(failed).length,
       fellAt: mine.map(fallTime),
@@ -111,12 +110,11 @@ export function summarizeTests(cells, selected) {
 const inList = (value, wanted) => wanted === undefined || (Array.isArray(wanted) ? wanted.includes(value) : value === wanted);
 const anyInList = (values, wanted) => wanted === undefined || values.some((value) => inList(value, wanted));
 
-/** Tests a task scope covers: config and id match the test; tag and tier match any of its tags / push tiers. */
+/** Tests a task scope covers: config and id match the test; tag matches any of its tags. */
 export function scopedTests(perTest, scope = {}) {
   return perTest.filter((test) => inList(test.config, scope.config)
     && inList(test.testId, scope.id)
-    && anyInList(test.tags ?? [], scope.tag)
-    && anyInList(test.tiers ?? [], scope.tier));
+    && anyInList(test.tags ?? [], scope.tag));
 }
 
 /**

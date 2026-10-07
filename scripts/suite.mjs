@@ -91,7 +91,7 @@ defaults:
 tests:                          # { all: true }, { config: <category> } or { id: <category>/<name> }
   - { all: true }
 tasks:                          # leaderboard numbers; _v<version> is appended to each id
-  - { id: survival_rate, metric: survival_rate@1 }    # scope: { config, id, tag, tier } narrows a task
+  - { id: survival_rate, metric: survival_rate@1 }    # scope: { config, id, tag } narrows a task
   - { id: survival_time, metric: survival_time@1 }
 reference_models: []            # models \`npm run suite baseline\` compares
 `;

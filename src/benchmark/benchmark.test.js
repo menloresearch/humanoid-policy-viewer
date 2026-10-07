@@ -21,8 +21,8 @@ function row(id, extra = {}) {
   };
 }
 
-const push = (t, force, tier) => ({
-  t, type: 'push', dir: [1, 0], force, duration: 0.15, targetBody: null, torqueAxis: null, torqueMag: null, label: null, tier,
+const push = (t, force) => ({
+  t, type: 'push', dir: [1, 0], force, duration: 0.15, targetBody: null, torqueAxis: null, torqueMag: null, label: null,
 });
 
 function suite(extra = {}) {
@@ -51,7 +51,6 @@ test('a row survives the editor round trip (row -> sequence -> row)', async () =
   assert.ok(rows.length >= 2);
   for (const original of rows) {
     const sequence = rowToSequence(original);
-    assert.equal(sequence.events?.[0]?.tier ?? null, original.events[0]?.tier ?? null);
     assert.equal(sequence.gaitSymmetry === true, original.metrics_opt_in.includes('gait_symmetry'));
     assert.deepEqual(sequenceToRow(original.id, sequence, original), original);
   }
@@ -88,7 +87,7 @@ test('the declared dataset schema covers exactly the row and event fields', asyn
   const names = (features) => features.map(([name]) => name).sort();
   assert.deepEqual(names(ROW_FEATURES), Object.keys(row('loco/a')).sort());
   const events = ROW_FEATURES.find(([name]) => name === 'events')[1].list;
-  assert.deepEqual(names(events), Object.keys(push(1, 100, 'reasonable')).sort());
+  assert.deepEqual(names(events), Object.keys(push(1, 100)).sort());
   const { TERRAIN_TYPES } = await import('../simulation/terrainGen.js');
   const terrain = ROW_FEATURES.find(([name]) => name === 'terrain')[1].struct;
   const params = new Set(Object.values(TERRAIN_TYPES).flatMap((def) => Object.keys(def.params)));
@@ -98,13 +97,13 @@ test('the declared dataset schema covers exactly the row and event fields', asyn
 test('row validation catches bad rows', () => {
   assert.deepEqual(validateTestRow(row('loco/a')), []);
   assert.ok(validateTestRow(row('loco/a', { config: 'other' })).length);
-  assert.ok(validateTestRow(row('loco/a', { events: [push(1, 100, 'hard')] })).some((e) => e.includes('tier')));
+  assert.ok(validateTestRow(row('loco/a', { events: [{ ...push(1, 100), tier: 'reasonable' }] })).some((e) => e.includes('unknown key "tier"')));
   assert.ok(validateTestRow(row('loco/a', { kind: 'motion-tracking' })).some((e) => e.includes('kind')));
   assert.ok(validateTestRow(row('all/a', { config: 'all' })).some((e) => e.includes('reserved')));
   // Pushes start ≥ 1 s in and end ≥ 2 s before the end (the rows here last 4 s, pushes 0.15 s).
-  assert.ok(validateTestRow(row('loco/a', { events: [push(0.5, 100, 'reasonable')] })).some((e) => e.includes('at least 1 s')));
-  assert.ok(validateTestRow(row('loco/a', { events: [push(1.9, 100, 'reasonable')] })).some((e) => e.includes('before the test does')));
-  assert.deepEqual(validateTestRow(row('loco/a', { events: [push(1.85, 100, 'reasonable')] })), []);
+  assert.ok(validateTestRow(row('loco/a', { events: [push(0.5, 100)] })).some((e) => e.includes('at least 1 s')));
+  assert.ok(validateTestRow(row('loco/a', { events: [push(1.9, 100)] })).some((e) => e.includes('before the test does')));
+  assert.deepEqual(validateTestRow(row('loco/a', { events: [push(1.85, 100)] })), []);
 });
 
 test('push categories, old and new naming', () => {
@@ -117,6 +116,7 @@ test('suite validation lists every problem at once', () => {
     () => parseSuite({ suite: 's', version: 0, harness: {}, requires: {}, tests: [], tasks: [{ id: 'x_v1', metric: 'nope' }] }),
     (error) => ['version', 'protocol', 'tests', '_v<n>', 'nope'].every((part) => error.message.includes(part)),
   );
+  assert.throws(() => suite({ tasks: [{ id: 'x_v2', metric: 'survival_rate@1', scope: { tier: 'reasonable' } }] }), /scope.tier is unknown/);
 });
 
 test('protocol and robot mismatches are reported', () => {
@@ -134,7 +134,7 @@ test('{ all: true } selects every test, including new categories', () => {
 });
 
 test('selection merges overrides and refuses identical repeats', () => {
-  const rows = [row('loco/a'), row('loco/b'), row('push/c', { events: [push(1, 100, 'reasonable')] })];
+  const rows = [row('loco/a'), row('loco/b'), row('push/c', { events: [push(1, 100)] })];
   const s = suite({
     defaults: { repeats: 3, randomize: { action_delay: 'env_range' } },
     tests: [{ config: 'loco' }, { id: 'loco/b', repeats: 1 }, { config: 'push' }],
@@ -159,15 +159,14 @@ test('selection merges overrides and refuses identical repeats', () => {
 const ran = (fellAt = null) => ({ fell: { fell: fellAt !== null, time: fellAt } });
 
 test('survival metrics: repeats are averaged, categories weigh equally, errors count as falls', () => {
-  // loco: 2 tests; push: 1 test with a tier and a tag. duration is 4 s.
-  const rows = [row('loco/a'), row('loco/b'), row('push/c', { tags: ['walking'], events: [push(1, 100, 'reasonable')] })];
+  // loco: 2 tests; push: 1 test with a tag. duration is 4 s.
+  const rows = [row('loco/a'), row('loco/b'), row('push/c', { tags: ['walking'], events: [push(1, 100)] })];
   const s = suite({
     defaults: { repeats: 4, randomize: { action_delay: 'env_range' } },
     tasks: [
       { id: 'survival_rate', metric: 'survival_rate@1' },
       { id: 'survival_time', metric: 'survival_time@1' },
       { id: 'loco_survival', metric: 'survival_rate@1', scope: { config: 'loco' } },
-      { id: 'reasonable', metric: 'survival_rate@1', scope: { tier: 'reasonable' } },
       { id: 'walking', metric: 'survival_rate@1', scope: { tag: 'walking' } },
       { id: 'friction', metric: 'survival_rate@1', scope: { config: 'friction' } },
     ],
@@ -193,7 +192,6 @@ test('survival metrics: repeats are averaged, categories weigh equally, errors c
   // loco = (1 + 0.75) / 2 = 0.875 (loco/b fell at 2 s of 4 in two repeats), push/c = (0.25 + 1 + 1 + 0) / 4
   assert.equal(tasks.survival_time_v2.value, 0.7188);
   assert.equal(tasks.loco_survival_v2.value, 0.75);
-  assert.equal(tasks.reasonable_v2.value, 0.5);
   assert.equal(tasks.walking_v2.value, 0.5);
   assert.equal(tasks.friction_v2.value, null);
   assert.equal(tasks.friction_v2.ci95, null);
@@ -243,7 +241,7 @@ test('suite init writes a valid starter benchmark', async () => {
 test('checkTests: player errors stop a run, unselected tests are flagged', async () => {
   const { checkTests } = await import('../../scripts/suiteCheck.mjs');
   const s = suite({ tests: [{ config: 'loco' }] });
-  const late = push(1, 100, 'reasonable');
+  const late = push(1, 100);
   late.dir = [0, 0];
   const result = checkTests({ suite: s, rows: [row('loco/a'), row('loco/b', { events: [late] }), row('other/c')] });
   assert.equal(result.errors.length, 1);

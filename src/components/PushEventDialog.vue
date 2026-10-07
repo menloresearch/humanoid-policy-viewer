@@ -58,13 +58,6 @@
           density="compact" variant="outlined" hide-details class="mb-4"
           @update:modelValue="(v) => emitPatch({ duration: Math.max(0.01, Number(v) || 0.15) })"
         ></v-text-field>
-
-        <v-select
-          :model-value="event.tier ?? null"
-          :items="TIER_ITEMS" item-title="title" item-value="value"
-          label="Benchmark tier" density="compact" variant="outlined" hide-details
-          @update:modelValue="(v) => emitPatch({ tier: v })"
-        ></v-select>
       </v-card-text>
 
       <v-card-actions>
@@ -113,12 +106,6 @@ export default {
     return {
       hoveredBodyLabel: '',
       PUSH_START_MIN_S,
-      // reasonable: a policy should recover; beyond: at or past the observed limit
-      TIER_ITEMS: [
-        { title: 'none', value: null },
-        { title: 'reasonable (should recover)', value: 'reasonable' },
-        { title: 'beyond (at or past the limit)', value: 'beyond' },
-      ],
     };
   },
   computed: {
