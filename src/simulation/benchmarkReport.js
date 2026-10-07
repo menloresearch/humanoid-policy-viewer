@@ -348,6 +348,11 @@ export function categoryOf(file) {
   return idx === -1 ? 'general' : file.slice(0, idx);
 }
 
+// push_standing, push_walking, ...; runs from before the dataset format used push/standing folders.
+export function isPushCategory(cat) {
+  return /^push([_/]|$)/.test(cat);
+}
+
 const CATEGORY_LABELS = {
   general: 'General',
   locomotion: 'Locomotion',
@@ -620,12 +625,12 @@ export function buildBenchmarkReportHtml(run) {
     + '</tbody></table>';
 
   // ---- push envelope by location ----
-  // The category rollup above groups by folder (push/standing, push/walking,
+  // The category rollup above groups by category (push_standing, push_walking,
   // ...), which still lumps e.g. groin/pelvis pushes in with shoulder pushes
   // — exactly the kind of single-number masking maxForceSurvived exists to
   // avoid. Each push test IS one location, so
   // one row per (test, policy) here is the actual per-location breakdown.
-  const pushTests = tests.filter((t) => categoryOf(t.file).startsWith('push/'));
+  const pushTests = tests.filter((t) => isPushCategory(categoryOf(t.file)));
   const pushEnvelopeTable = pushTests.length ? '<table><thead><tr><th>Location</th><th>Policy</th>'
     + '<th>Survived</th><th>Max force survived (N)</th></tr></thead><tbody>'
     + pushTests.flatMap((t) => policies.map((p, i) => {

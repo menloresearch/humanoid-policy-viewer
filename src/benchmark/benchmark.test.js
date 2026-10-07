@@ -8,6 +8,7 @@ import { ROW_FEATURES, rowToSequence, sequenceToRow, validateTestRow } from './t
 import { buildEvalYaml, compatibilityProblems, expandCells, parseSuite, selectTests } from './suite.js';
 import { computeTasks, summarizeTests } from './summary.js';
 import { BENCHMARK_PROTOCOL } from './protocol.js';
+import { isPushCategory } from '../simulation/benchmarkReport.js';
 
 const FIXTURE = new URL('../../test/fixtures/smoke-suite/', import.meta.url).pathname;
 
@@ -99,6 +100,13 @@ test('row validation catches bad rows', () => {
   assert.ok(validateTestRow(row('loco/a', { config: 'other' })).length);
   assert.ok(validateTestRow(row('loco/a', { events: [push(1, 100, 'hard')] })).some((e) => e.includes('tier')));
   assert.ok(validateTestRow(row('loco/a', { kind: 'motion-tracking' })).some((e) => e.includes('kind')));
+  assert.ok(validateTestRow(row('all/a', { config: 'all' })).some((e) => e.includes('reserved')));
+  assert.ok(validateTestRow(row('loco/a', { events: [push(row('loco/a').duration + 1, 100, 'reasonable')] })).some((e) => e.includes('within 0..duration')));
+});
+
+test('push categories, old and new naming', () => {
+  for (const cat of ['push_standing', 'push_walking', 'push/standing', 'push']) assert.ok(isPushCategory(cat), cat);
+  for (const cat of ['locomotion', 'pushover', 'general']) assert.ok(!isPushCategory(cat), cat);
 });
 
 test('suite validation lists every problem at once', () => {
@@ -139,6 +147,10 @@ test('selection merges overrides and refuses identical repeats', () => {
   const noRandom = suite({ defaults: { repeats: 2 } });
   assert.throws(() => selectTests(noRandom, rows), /identical/);
   assert.throws(() => selectTests(suite({ tests: [{ config: 'missing' }] }), rows), /matches no test/);
+  // A run's tests (tests=<id> narrows them) are a subset, so summarizing re-selects without requiring matches.
+  const ran = [rows[1]];
+  assert.throws(() => selectTests(s, ran), /matches no test/);
+  assert.deepEqual(selectTests(s, ran, { requireMatches: false }).map((s) => [s.row.id, s.settings.repeats]), [['loco/b', 1]]);
 });
 
 const ran = (fellAt = null) => ({ fell: { fell: fellAt !== null, time: fellAt } });

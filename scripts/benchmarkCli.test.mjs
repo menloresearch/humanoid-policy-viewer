@@ -11,6 +11,7 @@ import { buildEvalResultEntries, evalResultsPath, mergeEvalResults } from './hfE
 import { commitFiles, decideCommitMode } from './hfCommit.mjs';
 import { datasetFilesToFetch } from './hfDataset.mjs';
 import { mergeEvalTasks } from './suiteDir.mjs';
+import { scoredContentHash } from './suite.mjs';
 
 test('words, key=value options and flags', () => {
   const parsed = parseWords(['org/a', 'suite=../s', 'model=b/c', 'model=d/e', 'pr', '--jobs=3', '--dry-run'], {
@@ -183,4 +184,13 @@ test('only suite files are fetched from a dataset', () => {
     datasetFilesToFetch(['suite.yaml', 'eval.yaml', 'README.md', 'suites/smoke.yaml', 'data/push/test.jsonl', 'data/push/big.parquet', 'calibration/v1.json']),
     ['suite.yaml', 'eval.yaml', 'README.md', 'suites/smoke.yaml', 'data/push/test.jsonl'],
   );
+});
+
+test('the scored-content hash ignores prose, version and tested_commit', () => {
+  const suite = { suite: 's', title: 'T', version: 1, harness: { protocol: 1, tested_commit: 'abc' }, tests: [{ all: true }] };
+  const rows = [{ id: 'loco/a', duration: 10 }];
+  const hash = scoredContentHash(suite, rows);
+  assert.equal(scoredContentHash({ ...suite, title: 'U', version: 2, harness: { protocol: 1, tested_commit: 'def' } }, rows), hash);
+  assert.notEqual(scoredContentHash({ ...suite, harness: { protocol: 2 } }, rows), hash);
+  assert.notEqual(scoredContentHash(suite, [{ id: 'loco/a', duration: 11 }]), hash);
 });

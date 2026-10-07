@@ -11,7 +11,7 @@
 
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BENCHMARK_PROTOCOL } from '../src/benchmark/protocol.js';
@@ -52,10 +52,10 @@ function readBase(dir) {
 
 /**
  * Hash of everything that can change a score: the rows and suite.yaml without
- * its prose (title, description) and without harness.tested_commit.
+ * its prose (title, description), its version and harness.tested_commit.
  */
 export function scoredContentHash(rawSuite, rows) {
-  const { title, description, reference_models: referenceModels, ...rest } = rawSuite;
+  const { title, description, version, reference_models: referenceModels, ...rest } = rawSuite;
   const harness = { ...(rest.harness ?? {}) };
   delete harness.tested_commit;
   const canonical = (value) => (Array.isArray(value)
@@ -240,9 +240,12 @@ async function diff(dir) {
   return lines.join('\n');
 }
 
-function runBenchmarkProcess(args) {
-  const result = spawnSync(process.execPath, [join(appDir, 'scripts/run-benchmark.mjs'), ...args, 'no-upload'], { cwd: appDir, stdio: 'inherit' });
-  return result.status === 0;
+/** Runs the benchmark into a fresh `outDir` and returns its run.json; throws if any cell failed. */
+function runBenchmarkProcess(args, outDir) {
+  rmSync(outDir, { recursive: true, force: true });
+  const result = spawnSync(process.execPath, [join(appDir, 'scripts/run-benchmark.mjs'), ...args, `out=${outDir}`, 'no-upload'], { cwd: appDir, stdio: 'inherit' });
+  if (result.status !== 0) throw new Error(`The benchmark run into ${outDir} failed (see above); no baseline written`);
+  return JSON.parse(readFileSync(join(outDir, 'run.json'), 'utf8'));
 }
 
 async function baseline(dir, models) {
@@ -252,12 +255,8 @@ async function baseline(dir, models) {
   const out = join(dir, '.baseline');
   const previous = await baseRows(dir).catch(() => null);
   const runs = {};
-  runBenchmarkProcess([...reference, resolve(dir), `out=${join(out, 'candidate')}`]);
-  runs.candidate = JSON.parse(readFileSync(join(out, 'candidate', 'run.json'), 'utf8'));
-  if (previous) {
-    runBenchmarkProcess([...reference, previous.dataset.dir, `out=${join(out, 'base')}`]);
-    runs.base = JSON.parse(readFileSync(join(out, 'base', 'run.json'), 'utf8'));
-  }
+  runs.candidate = runBenchmarkProcess([...reference, resolve(dir)], join(out, 'candidate'));
+  if (previous) runs.base = runBenchmarkProcess([...reference, previous.dataset.dir], join(out, 'base'));
   const lines = ['| model | task | base | candidate |', '|---|---|---|---|'];
   for (const model of runs.candidate.models) {
     const baseModel = runs.base?.models.find((m) => m.id === model.id);
@@ -353,7 +352,7 @@ async function release(target, rev) {
 async function main() {
   const keys = ['model', 'repo', 'rev'];
   const flags = ['pr', 'create', 'dry-run', 'help'];
-  const swallowed = swallowedNpmFlags(process.env, ['model', 'repo', 'rev', 'pr', 'create']);
+  const swallowed = swallowedNpmFlags(process.env, [...keys, ...flags.filter((f) => f !== 'help')]);
   if (swallowed.length) throw new Error(`npm kept ${swallowed.map((f) => `--${f}`).join(', ')} for itself; write them without dashes.`);
   const { positionals, options, flags: set } = parseWords(process.argv.slice(2), { keys, flags, repeatable: ['model'] });
   const [command, a, b] = positionals;

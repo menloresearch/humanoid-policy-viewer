@@ -163,14 +163,15 @@ function describeSelector(selector) {
 /**
  * Resolves the suite's test selectors against the dataset rows, in suite order,
  * and merges settings: suite defaults, then every selector matching the row
- * (later ones win). Throws when a selector matches nothing.
+ * (later ones win). Throws when a selector matches nothing, unless `requireMatches` is false
+ * (re-selecting over a run's subset of the dataset).
  */
-export function selectTests(suite, rows) {
+export function selectTests(suite, rows, { requireMatches = true } = {}) {
   const byId = new Map();
   const problems = [];
   suite.tests.forEach((selector, i) => {
     const hits = rows.filter((row) => matches(selector, row));
-    if (!hits.length) problems.push(`tests[${i}] (${describeSelector(selector)}) matches no test in the dataset`);
+    if (!hits.length && requireMatches) problems.push(`tests[${i}] (${describeSelector(selector)}) matches no test in the dataset`);
     for (const row of hits) {
       const { id, config, all, ...overrides } = selector;
       const previous = byId.get(row.id);

@@ -179,6 +179,7 @@ import { appState, closeEditor, newBlankSequence, defaultLimits, MAX_DURATION } 
 import { listSequences, loadSequenceFile, saveSequenceFile, deleteSequenceFile, slugify } from '@/state/sequenceStore.js';
 import { STATIC } from '@/state/viewerMode.js';
 import { commandSequencer } from '@/simulation/commandSequencer.js';
+import { ALL_CONFIG } from '@/benchmark/testRow.js';
 import { TERRAIN_TYPES, defaultTerrain } from '@/simulation/terrainGen.js';
 import { loadTestScene } from '@/simulation/terrainScene.js';
 import { demoRef } from '@/state/demoRef.js';
@@ -258,6 +259,7 @@ export default {
       const testName = this.testName.trim();
       if (!category && !testName) return '';
       if (category && !SLUG_RE.test(category)) return 'Category: lower case letters, digits and _ (e.g. push_walking)';
+      if (category === ALL_CONFIG) return `Category "${ALL_CONFIG}" is reserved (the dataset config holding every test)`;
       if (!testName) return 'Type a Name to give the test a file name';
       if (!SLUG_RE.test(testName)) return 'Test name (from Name): lower case letters, digits and _ (e.g. chest_front)';
       return '';
@@ -268,9 +270,11 @@ export default {
     bodyNames() {
       return appState.bodyNames;
     },
+    // The test must last past its last keypoint and its last push (the dataset check rejects a push after the end).
     lastT() {
       const cmds = this.working?.commands ?? [];
-      return cmds.length ? cmds[cmds.length - 1].t : 0;
+      const events = Array.isArray(this.working?.events) ? this.working.events : [];
+      return Math.max(cmds.length ? cmds[cmds.length - 1].t : 0, ...events.map((ev) => ev.t));
     },
     minDuration() {
       return Math.ceil(this.lastT);
@@ -279,7 +283,7 @@ export default {
       const d = Number(this.durationInput);
       if (!Number.isFinite(d) || d <= 0) return 'Duration must be a positive number';
       if (d > MAX_DURATION) return `Duration cannot exceed ${MAX_DURATION}s`;
-      if (d < this.lastT) return `Duration must be ≥ last keypoint (${this.lastT.toFixed(1)}s)`;
+      if (d < this.lastT) return `Duration must be ≥ last keypoint or push (${this.lastT.toFixed(1)}s)`;
       return '';
     },
     canSave() {

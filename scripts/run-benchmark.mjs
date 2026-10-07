@@ -356,8 +356,8 @@ async function mergeCommand(args) {
 }
 
 async function main() {
-  // dry-run, force and help are npm's own settings too; npm acts on those itself.
-  const swallowed = swallowedNpmFlags(process.env, [...KEYS, ...FLAGS.filter((f) => !['dry-run', 'force', 'help'].includes(f))]);
+  // npm answers --help itself; every other flag, --dry-run and --force included, it strips and runs the script anyway.
+  const swallowed = swallowedNpmFlags(process.env, [...KEYS, ...FLAGS.filter((f) => f !== 'help')]);
   if (swallowed.length) {
     throw new Error(`npm kept ${swallowed.map((f) => `--${f}`).join(', ')} for itself. Write ${swallowed.map((f) => (KEYS.includes(f) ? `${f}=<value>` : f)).join(', ')} instead (no dashes).`);
   }

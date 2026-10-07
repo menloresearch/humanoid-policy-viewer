@@ -100,8 +100,10 @@ export function validateTerrain(spec) {
   if (errors.length) return errors;
   if ('min_height_m' in def.params && spec.min_height_m > spec.max_height_m) errors.push('min_height_m must not exceed max_height_m');
   if ('min_size_m' in def.params && spec.min_size_m > spec.max_size_m) errors.push('min_size_m must not exceed max_size_m');
-  if (spec.type === 'rough' && Math.round(spec.length_m / spec.tile_m) * Math.round(spec.width_m / spec.tile_m) > MAX_GEOMS) {
-    errors.push(`more than ${MAX_GEOMS} tiles; use bigger tiles or a smaller patch`);
+  if (spec.type === 'rough') {
+    const [nx, ny] = roughTileCounts(spec);
+    if (nx < 1 || ny < 1) errors.push('tile_m is bigger than the patch, so there are no tiles; use smaller tiles or a bigger patch');
+    else if (nx * ny > MAX_GEOMS) errors.push(`more than ${MAX_GEOMS} tiles; use bigger tiles or a smaller patch`);
   }
   return errors;
 }
@@ -154,10 +156,13 @@ function boxesBoxes(s) {
   return boxes;
 }
 
+function roughTileCounts(s) {
+  return [Math.round(s.length_m / s.tile_m), Math.round(s.width_m / s.tile_m)];
+}
+
 function roughBoxes(s) {
   const random = mulberry32(hashSeed('terrain', s.type, s.seed));
-  const nx = Math.round(s.length_m / s.tile_m);
-  const ny = Math.round(s.width_m / s.tile_m);
+  const [nx, ny] = roughTileCounts(s);
   const boxes = [];
   for (let i = 0; i < nx; i++) {
     for (let j = 0; j < ny; j++) {

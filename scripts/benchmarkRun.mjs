@@ -53,7 +53,8 @@ export function cellKey(modelKey, cellId) {
 /** Per-model summaries and task values; only meaningful for a complete run. */
 export function summarizeRun(run) {
   const suite = parseSuite(run.suite.raw);
-  const selected = selectTests(suite, run.tests);
+  // run.tests holds only the tests that ran (tests=<id> narrows it), so some selectors may match nothing.
+  const selected = selectTests(suite, run.tests, { requireMatches: false });
   const wanted = new Set(run.tests.map((row) => row.id));
   const perTest = {};
   const tasks = {};

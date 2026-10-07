@@ -12,7 +12,7 @@ import { dirname, extname, relative, resolve } from 'node:path'
 import { listModelRoots, listModels as discoverModels } from './scripts/modelDiscovery.mjs'
 import { getBenchmarkRunsDir, getModelLibrary } from './scripts/modelLibraryConfig.mjs'
 import { readRows, writeRows } from './scripts/suiteDir.mjs'
-import { rowToSequence, sequenceToRow } from './src/benchmark/testRow.js'
+import { rowToSequence, sequenceToRow, validateTestRow } from './src/benchmark/testRow.js'
 import { validateTerrain } from './src/simulation/terrainGen.js'
 
 // A submodule checked out under public/ carries a `.git` pointer file that
@@ -276,6 +276,12 @@ function humanoidDevPlugin() {
           return;
         }
         const row = sequenceToRow(id, parsed, index >= 0 ? rows[index] : null);
+        // The same check the CLI runs on load: a bad row written here would make the whole dataset refuse to load.
+        const problems = validateTestRow(row);
+        if (problems.length) {
+          sendJson(res, 400, { error: problems.join('\n') });
+          return;
+        }
         if (index >= 0) rows[index] = row; else rows.push(row);
         writeRows(SUITE_DIR, rows.filter((r) => r.config === row.config));
         sendJson(res, 200, { ok: true, file, entry: listSequences().find((f) => f.file === file) });

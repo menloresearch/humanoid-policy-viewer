@@ -378,7 +378,7 @@ import { listBenchmarks, loadBenchmark } from '@/state/benchmarkStore.js';
 import { loadSequenceFile } from '@/state/sequenceStore.js';
 import { resolveLimits } from '@/simulation/commandSequencer.js';
 import {
-  downloadBenchmarkReport, categoryOf, maxForceSurvived, computeCategoryRollup, isUpright
+  downloadBenchmarkReport, categoryOf, isPushCategory, maxForceSurvived, computeCategoryRollup, isUpright
 } from '@/simulation/benchmarkReport.js';
 import {
   Chart, LineElement, PointElement, LineController,
@@ -709,7 +709,7 @@ export default {
     // this is the actual per-location max-force breakdown.
     pushLocationRows() {
       return this.tests
-        .filter((t) => categoryOf(t.file).startsWith('push/'))
+        .filter((t) => isPushCategory(categoryOf(t.file)))
         .flatMap((t) => this.policies.map((p) => {
           const result = this.br.results.find((r) => r.testFile === t.file && r.policyId === p.id);
           if (!result) return null;

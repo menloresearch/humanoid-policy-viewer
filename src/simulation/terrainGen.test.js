@@ -40,6 +40,7 @@ test('validateTerrain lists every problem', () => {
   const errors = validateTerrain({ ...defaultTerrain('stairs'), steps: 2.5, tread_m: 9, colour: 'red' });
   assert.equal(errors.length, 3);
   assert.ok(validateTerrain({ ...defaultTerrain('rough'), min_height_m: 0.05, max_height_m: 0.01 }).some((e) => e.includes('min_height_m')));
+  assert.ok(validateTerrain({ ...defaultTerrain('rough'), length_m: 0.3, tile_m: 2 }).some((e) => e.includes('no tiles')));
   const { step_height_m, ...missing } = defaultTerrain('stairs');
   assert.deepEqual(validateTerrain(missing), ['step_height_m is required (a number)']);
 });
