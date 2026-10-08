@@ -127,10 +127,14 @@
             <template v-if="working.goal">
               <v-text-field
                 v-for="g in GOAL_FIELDS" :key="g.key"
-                :model-value="working.goal[g.key]" :label="g.label" type="number" step="0.1"
+                :model-value="working.goal[g.key]" :label="g.label" type="number" step="0.01"
                 density="compact" hide-details style="max-width: 140px"
                 @update:modelValue="(v) => setGoalParam(g.key, v)"
               ></v-text-field>
+              <v-btn
+                size="small" variant="tonal" prepend-icon="mdi-target" @click="snapGoalToPathEnd"
+                title="Centre the end zone where the velocity commands end the path (the ✕ in the preview)"
+              >Snap to path end</v-btn>
             </template>
           </div>
           <div v-for="e in goalErrors" :key="e" class="text-error text-caption mb-2">End zone: {{ e }}</div>
@@ -148,6 +152,7 @@
             <TerrainPreview
               :terrain="working.terrain" :goal="working.goal" :commands="working.commands" :duration="Number(working.duration) || 0"
               @problems="(p) => (terrainErrors = p.errors)"
+              @update:goal="(g) => (working.goal = g)"
             />
           </template>
         </div>
@@ -223,7 +228,8 @@ import { listSequences, loadSequenceFile, saveSequenceFile, deleteSequenceFile, 
 import { STATIC } from '@/state/viewerMode.js';
 import { commandSequencer } from '@/simulation/commandSequencer.js';
 import { ALL_CONFIG, GOAL_MIN_RADIUS_M, OPT_IN_METRICS, PUSH_END_MARGIN_S, validateGoal } from '@/benchmark/testRow.js';
-import { TERRAIN_TYPES, buildTerrain, defaultTerrain } from '@/simulation/terrainGen.js';
+import { TERRAIN_TYPES, defaultTerrain } from '@/simulation/terrainGen.js';
+import { commandedEnd, roundGoal } from '@/benchmark/terrainCheck.js';
 import { loadTestScene } from '@/simulation/terrainScene.js';
 import { demoRef } from '@/state/demoRef.js';
 
@@ -356,9 +362,8 @@ export default {
           this.working.goal = null;
           return;
         }
-        // Default: 0.5 m past the far end of the course (or 3 m ahead on flat floor), 1 m radius.
-        const end = this.working.terrain ? buildTerrain(this.working.terrain).bounds.xmax : 2.5;
-        this.working.goal = { x: Math.round((end + 0.5) * 10) / 10, y: 0, radius_m: 1 };
+        // Default: where the commands end the path, 1 m radius.
+        this.working.goal = { ...commandedEnd(this.working), radius_m: 1 };
       },
     },
     terrainTypeItems() {
@@ -515,6 +520,10 @@ export default {
       this.working.events.splice(index, 1);
       this.setStatus('');
     },
+    snapGoalToPathEnd() {
+      this.working.goal = { ...this.working.goal, ...commandedEnd(this.working) };
+      this.setStatus('');
+    },
     setMetricOptIn(metric, on) {
       const set = new Set(this.metricsOptIn);
       if (on) set.add(metric); else set.delete(metric);
@@ -526,7 +535,7 @@ export default {
     setGoalParam(key, value) {
       const number = Number(value);
       if (!Number.isFinite(number)) return;
-      this.working.goal = { ...this.working.goal, [key]: number };
+      this.working.goal = { ...this.working.goal, [key]: key === 'radius_m' ? number : roundGoal(number) };
       this.setStatus('');
     },
     setTerrainParam(key, value) {

@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { TERRAIN_TYPES, buildTerrain, defaultTerrain, terrainKey, validateTerrain } from './terrainGen.js';
-import { SPAWN_CLEAR_M, commandedPath, terrainProblems } from '../benchmark/terrainCheck.js';
+import { SPAWN_CLEAR_M, commandedEnd, commandedPath, goalProblems, roundGoal, terrainProblems } from '../benchmark/terrainCheck.js';
+import { validateGoal } from '../benchmark/testRow.js';
 
 test('every type builds from its defaults, without contact priority', () => {
   for (const type of Object.keys(TERRAIN_TYPES)) {
@@ -81,4 +82,20 @@ test('terrainProblems: a course on the spawn is an error, a path that misses or 
   assert.match(veer.warnings[0], /leaves the course sideways/);
 
   assert.match(terrainProblems(walk(forward, { type: 'stairs' })).errors[0], /invalid terrain/);
+});
+
+test('the end of the commanded path, to 2 decimals, and whether an end zone is reachable', () => {
+  // 0.5 m/s for 4 s, then a quarter turn left in place, then 0.5 m/s for 2 s: ends near (2, 1).
+  const sequence = {
+    duration: 8,
+    commands: [{ t: 0, vx: 0.5, vy: 0, wz: 0 }, { t: 4, vx: 0, vy: 0, wz: Math.PI / 4 }, { t: 6, vx: 0.5, vy: 0, wz: 0 }],
+  };
+  const end = commandedEnd(sequence);
+  assert.ok(Math.abs(end.x - 2) < 0.03 && Math.abs(end.y - 1) < 0.03, JSON.stringify(end));
+  assert.equal(end.x, roundGoal(end.x));
+  assert.equal(roundGoal(-0.001), 0);
+  assert.deepEqual(goalProblems({ ...sequence, goal: { ...end, radius_m: 0.5 } }), []);
+  assert.match(goalProblems({ ...sequence, goal: { x: -3, y: 0, radius_m: 0.5 } })[0], /never enters the end zone/);
+  assert.deepEqual(validateGoal({ x: 1.25, y: -0.5, radius_m: 1 }), []);
+  assert.ok(validateGoal({ x: 1.255, y: 0, radius_m: 1 }).some((e) => e.includes('2 decimals')));
 });

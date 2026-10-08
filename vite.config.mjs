@@ -226,7 +226,7 @@ function humanoidDevPlugin() {
     if (parsed.goal !== undefined && parsed.goal !== null) {
       const problems = validateGoal(parsed.goal);
       if (problems.length) throw new Error(`"goal": ${problems.join('; ')}`);
-      clean.goal = { x: round3(parsed.goal.x), y: round3(parsed.goal.y), radius_m: round3(parsed.goal.radius_m) };
+      clean.goal = { x: parsed.goal.x, y: parsed.goal.y, radius_m: round3(parsed.goal.radius_m) };
     }
     if (parsed.gaitSymmetry === true) clean.gaitSymmetry = true;
     if (parsed.metricsOptIn !== undefined) {

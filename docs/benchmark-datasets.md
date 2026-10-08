@@ -41,7 +41,12 @@ scene's is 0.6). `terrain` describes the course the test walks on (below). `goal
 `{"x": 7, "y": 0, "radius_m": 1}` in metres from the robot's start (+x ahead, +y to its left, radius at least
 0.25 m): a run counts as surviving only if the robot's base entered that circle and it never fell. Without one, a
 policy could "survive" a course by stopping in front of it. Missing the zone fails `survival_rate` but not
-`survival_time` (the robot stayed upright the whole time). `metrics_opt_in: ["gait_symmetry"]` turns on
+`survival_time` (the robot stayed upright the whole time). `x` and `y` have at most 2 decimals (1 cm). In the
+editor's Environment tab, drag the zone in the top view (hold Shift to move along one axis); it snaps to the end of
+the commanded path (the ✕), as does **Snap to path end**. From a script or an agent:
+`npm run suite path-end <dir> [<test id>...]` prints one JSON line per test with `path_end` (where the velocity
+commands, integrated exactly, leave the robot), its `goal`, and whether the path enters it; the checks before a run
+warn when the commanded path never enters a test's end zone. `metrics_opt_in: ["gait_symmetry"]` turns on
 the gait symmetry metric (straight, steady walking only). The full schema is in `src/benchmark/testRow.js`.
 
 ### Terrain

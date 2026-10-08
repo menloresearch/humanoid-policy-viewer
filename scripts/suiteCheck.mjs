@@ -7,7 +7,7 @@
 
 import { commandSequencer, setActiveCommandLimits } from '../src/simulation/commandSequencer.js';
 import { expandCells, selectTests } from '../src/benchmark/suite.js';
-import { terrainProblems } from '../src/benchmark/terrainCheck.js';
+import { goalProblems, terrainProblems } from '../src/benchmark/terrainCheck.js';
 import { rowToSequence } from '../src/benchmark/testRow.js';
 
 /** Returns { errors, warnings }; errors mean the benchmark cannot run as written. */
@@ -37,6 +37,7 @@ export function checkTests({ suite, rows }) {
       errors.push(...terrain.errors.map((e) => `${row.id}: ${e}`));
       warnings.push(...terrain.warnings.map((w) => `${row.id}: ${w}`));
     }
+    warnings.push(...goalProblems(rowToSequence(row)).map((w) => `${row.id}: ${w}`));
   }
   return { errors, warnings };
 }

@@ -37,6 +37,35 @@ export function commandedPath(sequence) {
 }
 
 /**
+ * Where the commands leave the robot: the last point of commandedPath, in metres
+ * to 2 decimals (the precision of an end zone). The natural centre for a goal;
+ * it is the commanded path, not what a policy will actually walk.
+ */
+export function commandedEnd(sequence) {
+  const path = commandedPath(sequence);
+  const { x, y } = path[path.length - 1];
+  return { x: roundGoal(x), y: roundGoal(y) };
+}
+
+/**
+ * Warnings about a test's end zone: one if even perfectly tracked commands never
+ * enter it, so no policy could reach it.
+ */
+export function goalProblems(sequence) {
+  const goal = sequence?.goal;
+  if (!goal) return [];
+  const path = commandedPath(sequence);
+  if (path.some((p) => (p.x - goal.x) ** 2 + (p.y - goal.y) ** 2 <= goal.radius_m ** 2)) return [];
+  const end = commandedEnd(sequence);
+  return [`the commanded path never enters the end zone (${goal.x}, ${goal.y}, radius ${goal.radius_m} m); the commands end at (${end.x}, ${end.y})`];
+}
+
+/** Goal positions are kept to 2 decimals (1 cm). */
+export function roundGoal(value) {
+  return Math.round(value * 100) / 100 + 0; // + 0 turns -0 into 0
+}
+
+/**
  * { errors, warnings, terrain, path } for a sequence ({ duration, commands,
  * terrain }); terrain is the built course (null when there is none or the spec
  * is invalid; validateTerrain reports that).

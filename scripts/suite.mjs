@@ -16,6 +16,8 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BENCHMARK_PROTOCOL } from '../src/benchmark/protocol.js';
 import { compatibilityProblems } from '../src/benchmark/suite.js';
+import { commandedEnd, goalProblems } from '../src/benchmark/terrainCheck.js';
+import { rowToSequence } from '../src/benchmark/testRow.js';
 import { collectProvenance } from './benchmarkProvenance.mjs';
 import { classifyTarget } from './benchmarkTargets.mjs';
 import { parseWords, swallowedNpmFlags } from './cliArgs.mjs';
@@ -38,6 +40,9 @@ const USAGE = `Usage: npm run suite <command> ...
                                            check, build eval.yaml + the dataset card, then commit (owner) or
                                            open a pull request; "create" makes a new PRIVATE dataset repo
   release <dataset> rev=<commit>           tag a merged revision v<version> and print the default-suite change
+  path-end <dir> [<test id>...]            where each test's commands end the path (x, y in m, 2 decimals)
+                                           and whether its end zone contains / is crossed by the path; JSON
+                                           lines, for picking a goal by hand or from a script
 
 Edit tests in the viewer with: npm run dev suite=<dir>   (or by hand: data/<config>/test.jsonl)`;
 
@@ -350,6 +355,25 @@ async function release(target, rev) {
   console.log(`Now point the viewer at it in src/benchmark/default-suite.json:\n  "dataset": "${dataset.id}", "revision": "${tag}"`);
 }
 
+/** One JSON line per test: where its commands end the path, and how its end zone relates to it. */
+function pathEnd(dir, ids) {
+  const { rows } = loadSuiteDir(dir);
+  const unknown = ids.filter((id) => !rows.some((row) => row.id === id));
+  if (unknown.length) throw new Error(`Unknown test id(s): ${unknown.join(', ')}`);
+  for (const row of rows.filter((r) => !ids.length || ids.includes(r.id))) {
+    const sequence = rowToSequence(row);
+    const end = commandedEnd(sequence);
+    const goal = row.goal;
+    console.log(JSON.stringify({
+      id: row.id,
+      path_end: end,
+      goal,
+      goal_contains_end: goal ? (end.x - goal.x) ** 2 + (end.y - goal.y) ** 2 <= goal.radius_m ** 2 : null,
+      path_enters_goal: goal ? goalProblems(sequence).length === 0 : null,
+    }));
+  }
+}
+
 async function main() {
   const keys = ['model', 'repo', 'rev'];
   const flags = ['pr', 'create', 'dry-run', 'help'];
@@ -367,6 +391,7 @@ async function main() {
     case 'baseline': return baseline(resolve(a ?? ''), options.model ?? []);
     case 'publish': return publish(resolve(a ?? ''), { repo: options.repo, pr: set.has('pr'), create: set.has('create'), dryRun: set.has('dry-run') });
     case 'release': return release(a, options.rev);
+    case 'path-end': return pathEnd(resolve(a ?? ''), positionals.slice(2));
     default:
       console.log(USAGE);
       if (command && command !== 'help') process.exitCode = 2;

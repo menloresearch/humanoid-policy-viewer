@@ -55,7 +55,10 @@ export function validateGoal(goal) {
   if (!goal || typeof goal !== 'object' || Array.isArray(goal)) return ['must be an object like { "x": 7, "y": 0, "radius_m": 1 }'];
   const errors = [];
   for (const key of Object.keys(goal)) if (!['x', 'y', 'radius_m'].includes(key)) errors.push(`unknown key "${key}"`);
-  for (const key of ['x', 'y']) if (!isNumber(goal[key])) errors.push(`${key} is required (a number, metres)`);
+  for (const key of ['x', 'y']) {
+    if (!isNumber(goal[key])) errors.push(`${key} is required (a number, metres)`);
+    else if (Math.abs(goal[key] * 100 - Math.round(goal[key] * 100)) > 1e-6) errors.push(`${key} has more than 2 decimals (1 cm is the finest step)`);
+  }
   if (!isNumber(goal.radius_m) || goal.radius_m < GOAL_MIN_RADIUS_M) errors.push(`radius_m must be a number >= ${GOAL_MIN_RADIUS_M}`);
   return errors;
 }
