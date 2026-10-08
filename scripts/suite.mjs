@@ -166,7 +166,7 @@ npm run suite publish ./bench pr
 `;
 }
 
-async function pull(target, dir) {
+export async function pull(target, dir) {
   if (!target || !dir) throw new Error('pull needs <dataset> <dir>');
   const parsed = classifyTarget(target.startsWith('datasets/') || target.includes('/datasets/') ? target : `datasets/${target}`);
   if (existsSync(dir) && readdirSync(dir).length) throw new Error(`${dir} is not empty`);
@@ -181,6 +181,12 @@ async function pull(target, dir) {
     scoredHash: scoredContentHash(loaded.rawSuite, loaded.rows),
   }, null, 2) + '\n');
   console.log(`Pulled datasets/${dataset.id}@${dataset.sha.slice(0, 7)} into ${dir}`);
+  return dataset;
+}
+
+/** The pulled-from record of a working copy ({ id, revision, sha, ... }), or null. */
+export function pulledFrom(dir) {
+  return readBase(dir);
 }
 
 /**

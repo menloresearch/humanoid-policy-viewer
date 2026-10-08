@@ -158,6 +158,10 @@ npm run suite baseline ./bench     # run reference models on the old and new sui
 npm run suite publish ./bench pr   # commit (owners) or pull request; description = diff + baseline
 ```
 
+`npm run dev suite=datasets/<org>/<name>[@rev]` does the pull for you: the first time it pulls the dataset into
+`./benchmark_datasets/<org>__<name>` (gitignored), an ordinary working copy like `./bench` above; later runs open
+that copy as it is, edits included (delete the folder to pull afresh).
+
 There is no separate check step. `npm run benchmark` checks the tests before it starts a browser: every row loads
 in the command player, the suite's selection works, and it warns about tests no selector picks. `publish` runs
 the same checks plus "a change that can move a score needs a new `version`".

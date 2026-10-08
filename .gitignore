@@ -54,6 +54,7 @@ dist
 # run). Benchmarks are published as Hugging Face datasets, not kept in this
 # repo: see docs/benchmark-datasets.md.
 /benchmark
+/benchmark_datasets
 
 # Local policies dropped into the default model library (see models/README.md).
 # Checkpoints are never committed; only the README that documents the folder is.
