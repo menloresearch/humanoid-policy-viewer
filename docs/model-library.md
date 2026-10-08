@@ -9,6 +9,12 @@ checkpoint folder in it and `npm run dev` lists it (see the layout below and
 it sits outside `public/`, so checkpoints there are never committed or copied into
 `dist/`.
 
+`npm run dev` also lists every Hugging Face model already downloaded (by `npm run hf` or `model=`), labelled
+by its repo id and served from the download cache (`~/.cache/humanoid-policy-viewer/hf/`, or `HPV_CACHE_DIR`).
+`npm run dev model=<org>/<name>[@rev]` downloads a model first if it is not cached; repeat it for several. For
+example `npm run dev model=Menlo/asimov1-locomotion-0818 suite=datasets/<org>/<name>` opens a Hub model and a
+Hub benchmark together. Setting either variable below turns this off: the library is then exactly what they say.
+
 A repo that embeds the viewer can point it elsewhere with environment variables
 (use absolute paths):
 

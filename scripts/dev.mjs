@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// npm run dev [suite=<benchmark dataset dir | datasets/<org>/<name>[@rev]>] [vite options...]
+// npm run dev [suite=<benchmark dataset dir | datasets/<org>/<name>[@rev]>] [model=<org>/<name>[@rev]...]
+//             [vite options...]
 //
 // Starts the Vite dev server. The trajectory editor and the in-app benchmark
 // read and write the tests of a benchmark dataset folder (see
@@ -8,12 +9,21 @@
 // first use. A Hugging Face dataset is pulled on first use into
 // ./benchmark_datasets/<org>__<name> (gitignored), an ordinary working copy
 // (edit it, `npm run suite diff` / `publish` it); later runs reuse it as is.
+//
+// Models: the policy list shows ./models and every Hugging Face model already
+// downloaded (by `npm run hf` or model=), labelled by repo id. model=<org>/<name>
+// downloads one first if it is not cached (repeatable). If HPV_MODEL_LIBRARY_DIR
+// or HPV_MODEL_ROOTS is set, that library is used as is instead.
 
 import { spawn } from 'node:child_process';
-import { existsSync, readdirSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, readdirSync, readlinkSync, rmSync, symlinkSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { classifyTarget } from './benchmarkTargets.mjs';
+import { checkCheckpointDir, readReferenceJointNames } from './checkpointChecks.mjs';
+import { HF_MODEL_ROOT, defaultCacheDir, ensureModel, normalizeRepoId } from './hfModel.mjs';
+import { DEFAULT_MODEL_ROOT } from './modelLibraryConfig.mjs';
 import { initSuite, pull, pulledFrom } from './suite.mjs';
 
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -22,9 +32,19 @@ const passThrough = [];
 let suiteDir = join(appDir, 'benchmark');
 let explicit = false;
 let hub = null;
+const hubModels = [];
 for (const word of process.argv.slice(2)) {
   const suite = /^(?:--)?suite=(.+)$/.exec(word);
-  if (suite) {
+  const model = /^(?:--)?model=(.+)$/.exec(word);
+  if (model) {
+    const [repo, revision] = model[1].split('@');
+    try {
+      hubModels.push({ repo: normalizeRepoId(repo), revision: revision || 'main' });
+    } catch (error) {
+      console.error(error.message);
+      process.exit(2);
+    }
+  } else if (suite) {
     const target = isHubDataset(suite[1]) ? classifyTarget(suite[1]) : null;
     if (target?.kind === 'suite' && target.source === 'hub') {
       hub = target;
@@ -37,9 +57,11 @@ for (const word of process.argv.slice(2)) {
     passThrough.push(word);
   }
 }
-if (process.env.npm_config_suite) {
-  console.error('npm kept --suite for itself; write suite=<dir> (no dashes).');
-  process.exit(2);
+for (const name of ['suite', 'model']) {
+  if (process.env[`npm_config_${name}`]) {
+    console.error(`npm kept --${name} for itself; write ${name}=<value> (no dashes).`);
+    process.exit(2);
+  }
 }
 
 if (hub) await hubWorkingCopy(hub, suiteDir);
@@ -56,6 +78,7 @@ if (!existsSync(join(suiteDir, 'suite.yaml'))) {
   initSuite(suiteDir);
 }
 env.HPV_SUITE_DIR = suiteDir;
+await setUpModelLibrary(env);
 console.log(`Tests: benchmark dataset ${suiteDir}`);
 
 const vite = join(appDir, 'node_modules', 'vite', 'bin', 'vite.js');
@@ -91,4 +114,42 @@ async function hubWorkingCopy(target, dir) {
     console.log(`  You asked for @${target.revision}; delete that folder to pull it instead (your edits there would be lost).`);
   }
   console.log(`  See what you changed: npm run suite diff ${dir}`);
+}
+
+/**
+ * Downloads the model= repos, then points the library at a folder of links to
+ * ./models and the Hugging Face model cache, so the viewer lists both.
+ */
+async function setUpModelLibrary(childEnv) {
+  const cacheDir = defaultCacheDir();
+  for (const { repo, revision } of hubModels) {
+    let model;
+    try {
+      model = await ensureModel(repo, { revision, cacheDir, log: console.log });
+    } catch (error) {
+      console.error(error.message);
+      process.exit(2);
+    }
+    console.log(`${model.cached ? 'Cached' : 'Downloaded'} model ${model.repo}@${model.sha.slice(0, 7)}`);
+    // Listed either way; the viewer refuses a policy it would run wrongly when it is picked.
+    const { errors, warnings } = checkCheckpointDir(model.modelDir, readReferenceJointNames(appDir));
+    for (const problem of [...errors, ...warnings]) console.warn(`  ${errors.includes(problem) ? 'Error' : 'Warning'}: ${problem}`);
+  }
+  if (process.env.HPV_MODEL_LIBRARY_DIR !== undefined || process.env.HPV_MODEL_ROOTS !== undefined) return;
+  // One links folder per checkout, so two checkouts' dev servers don't share ./models.
+  const key = createHash('sha256').update(appDir).digest('hex').slice(0, 10);
+  const library = join(cacheDir, 'dev-library', key);
+  mkdirSync(library, { recursive: true });
+  const link = (name, target) => {
+    const path = join(library, name);
+    try {
+      if (readlinkSync(path) === target) return;
+    } catch {}
+    rmSync(path, { force: true });
+    symlinkSync(target, path, 'dir');
+  };
+  link(DEFAULT_MODEL_ROOT, join(appDir, DEFAULT_MODEL_ROOT));
+  link(HF_MODEL_ROOT, join(cacheDir, HF_MODEL_ROOT));
+  childEnv.HPV_MODEL_LIBRARY_DIR = library;
+  childEnv.HPV_MODEL_ROOTS = `${DEFAULT_MODEL_ROOT},${HF_MODEL_ROOT}`;
 }
