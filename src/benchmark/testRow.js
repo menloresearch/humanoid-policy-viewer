@@ -34,7 +34,8 @@ import { TERRAIN_TYPES, validateTerrain } from '../simulation/terrainGen.js';
 // The dataset config that holds every test (data/*/test.jsonl); not a category.
 export const ALL_CONFIG = 'all';
 const ID_RE = /^[a-z0-9][a-z0-9_]*\/[a-z0-9][a-z0-9_.-]*$/;
-const OPT_IN_METRICS = ['gait_symmetry'];
+// Diagnostics a test opts into (survival is always measured). The editor's metrics checklist offers these.
+export const OPT_IN_METRICS = ['gait_symmetry', 'command_tracking', 'drift', 'action_smoothness'];
 // A push starts once the robot has settled and ends with time left to recover before the test does.
 export const PUSH_START_MIN_S = 1;
 export const PUSH_END_MARGIN_S = 2;
@@ -185,6 +186,7 @@ export function rowToSequence(row) {
       return out;
     });
   }
+  if (row.metrics_opt_in.length) sequence.metricsOptIn = [...row.metrics_opt_in];
   if (row.metrics_opt_in.includes('gait_symmetry')) sequence.gaitSymmetry = true;
   return sequence;
 }
@@ -220,6 +222,7 @@ export function sequenceToRow(id, sequence, previous = null) {
     foot_friction: sequence.footFriction ?? null,
     terrain: sequence.terrain ? { ...sequence.terrain } : null,
     goal: sequence.goal ? { ...sequence.goal } : null,
-    metrics_opt_in: sequence.gaitSymmetry === true ? ['gait_symmetry'] : [],
+    // In OPT_IN_METRICS order; older sequences only carry the gaitSymmetry flag.
+    metrics_opt_in: OPT_IN_METRICS.filter((m) => (sequence.metricsOptIn ?? (sequence.gaitSymmetry === true ? ['gait_symmetry'] : [])).includes(m)),
   };
 }

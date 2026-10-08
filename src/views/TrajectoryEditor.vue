@@ -35,6 +35,14 @@
 
       <!-- Editor main -->
       <div class="editor-main">
+        <v-tabs v-model="tab" density="compact" class="mb-3">
+          <v-tab value="settings">Settings<span v-if="settingsHasError" class="tab-error" title="has a problem"></span></v-tab>
+          <v-tab value="environment">Environment<span v-if="environmentHasError" class="tab-error" title="has a problem"></span></v-tab>
+          <v-tab value="commands">Commands &amp; pushes<span v-if="durationError" class="tab-error" title="has a problem"></span></v-tab>
+        </v-tabs>
+        <!-- eager: every tab stays mounted, so the course check runs while another tab is open -->
+        <v-window v-model="tab">
+          <v-window-item value="settings" eager>
         <div class="editor-fields">
           <v-text-field
             v-model="working.name" label="Name" density="compact" hide-details
@@ -74,9 +82,28 @@
           </div>
         </div>
 
-        <!-- Environment: the course, the floor grip and the gait-symmetry opt-in -->
+        <!-- Which metrics this test reports; survival is always on and is all leaderboards score -->
+        <div class="metrics-section mb-3">
+          <div class="text-subtitle-2 mb-1">Metrics</div>
+          <div class="d-flex flex-wrap ga-3">
+            <v-checkbox label="Survival" :model-value="true" disabled density="compact" hide-details></v-checkbox>
+            <v-checkbox label="Time survived" :model-value="true" disabled density="compact" hide-details></v-checkbox>
+            <v-checkbox
+              v-for="m in OPT_IN_METRIC_ITEMS" :key="m.value"
+              :model-value="metricsOptIn.includes(m.value)" :label="m.title" :title="m.hint"
+              density="compact" hide-details
+              @update:modelValue="(on) => setMetricOptIn(m.value, on)"
+            ></v-checkbox>
+          </div>
+          <div class="text-caption text-medium-emphasis">
+            Survival and time survived are always measured and are what leaderboards score; tick the others that mean
+            something for this test.
+          </div>
+        </div>
+          </v-window-item>
+          <v-window-item value="environment" eager>
+        <!-- Environment: the course, the floor grip and the end zone -->
         <div class="env-section mb-3">
-          <div class="text-subtitle-2 mb-1">Environment</div>
           <div class="d-flex flex-wrap align-center ga-3 mb-2">
             <v-select
               v-model="terrainType" :items="terrainTypeItems" item-title="title" item-value="value"
@@ -91,10 +118,6 @@
               v-model.number="customFriction" label="friction" type="number" min="0.01" step="0.05"
               density="compact" hide-details style="max-width: 110px"
             ></v-text-field>
-            <v-checkbox
-              v-model="gaitSymmetry" label="Gait symmetry metric" density="compact" hide-details
-              title="Turns on the gait symmetry metric for this test; it only means something on straight, steady walking"
-            ></v-checkbox>
           </div>
           <div class="d-flex flex-wrap align-center ga-3 mb-2">
             <v-checkbox
@@ -129,6 +152,8 @@
           </template>
         </div>
 
+          </v-window-item>
+          <v-window-item value="commands" eager>
         <div class="charts">
           <KeypointChart
             :commands="working.commands" axis="vx" :duration="working.duration"
@@ -170,6 +195,9 @@
           push events apply a real force (N) (and optional torque) through the target body's own CoM at time t, held for a duration · click lane: add · click a marker: edit direction/torque/magnitude/target · drag: move (snaps 0.1&nbsp;s) · right-click: delete
         </div>
 
+          </v-window-item>
+        </v-window>
+
         <v-divider class="mb-2"></v-divider>
         <div class="d-flex align-center ga-2 flex-wrap">
           <v-btn v-if="!STATIC" color="primary" prepend-icon="mdi-content-save" :disabled="!canSave" @click="save">Save</v-btn>
@@ -194,7 +222,7 @@ import { appState, closeEditor, newBlankSequence, defaultLimits, MAX_DURATION } 
 import { listSequences, loadSequenceFile, saveSequenceFile, deleteSequenceFile, slugify } from '@/state/sequenceStore.js';
 import { STATIC } from '@/state/viewerMode.js';
 import { commandSequencer } from '@/simulation/commandSequencer.js';
-import { ALL_CONFIG, GOAL_MIN_RADIUS_M, PUSH_END_MARGIN_S, validateGoal } from '@/benchmark/testRow.js';
+import { ALL_CONFIG, GOAL_MIN_RADIUS_M, OPT_IN_METRICS, PUSH_END_MARGIN_S, validateGoal } from '@/benchmark/testRow.js';
 import { TERRAIN_TYPES, buildTerrain, defaultTerrain } from '@/simulation/terrainGen.js';
 import { loadTestScene } from '@/simulation/terrainScene.js';
 import { demoRef } from '@/state/demoRef.js';
@@ -221,6 +249,13 @@ export default {
   components: { KeypointChart, PushLane, TerrainPreview },
   data() {
     return {
+      tab: 'settings',
+      OPT_IN_METRIC_ITEMS: [
+        { value: 'gait_symmetry', title: 'Gait symmetry', hint: 'Left/right mirror of the joints; only means something on straight, steady walking' },
+        { value: 'command_tracking', title: 'Command tracking', hint: 'How closely the robot follows the commanded velocities' },
+        { value: 'drift', title: 'Drift', hint: 'Distance from where the commands would have taken the robot' },
+        { value: 'action_smoothness', title: 'Smoothness', hint: 'How much the policy actions jump from step to step' },
+      ],
       GOAL_FIELDS: [
         { key: 'x', label: 'x (m ahead)' },
         { key: 'y', label: 'y (m left)' },
@@ -381,15 +416,16 @@ export default {
         if (Number.isFinite(f) && f > 0) this.working.footFriction = Math.round(f * 1000) / 1000;
       }
     },
-    gaitSymmetry: {
-      get() {
-        return this.working?.gaitSymmetry === true;
-      },
-      set(on) {
-        if (on) this.working.gaitSymmetry = true;
-        else delete this.working.gaitSymmetry;
-      }
-    }
+    // The test's opted-in metrics; older sequences only carry the gaitSymmetry flag.
+    metricsOptIn() {
+      return this.working?.metricsOptIn ?? (this.working?.gaitSymmetry === true ? ['gait_symmetry'] : []);
+    },
+    settingsHasError() {
+      return this.durationError !== '' || this.idError !== '';
+    },
+    environmentHasError() {
+      return this.terrainErrors.length > 0 || this.goalErrors.length > 0;
+    },
   },
   methods: {
     setStatus(msg, isError = false) {
@@ -477,6 +513,14 @@ export default {
     },
     deleteEvent(index) {
       this.working.events.splice(index, 1);
+      this.setStatus('');
+    },
+    setMetricOptIn(metric, on) {
+      const set = new Set(this.metricsOptIn);
+      if (on) set.add(metric); else set.delete(metric);
+      this.working.metricsOptIn = OPT_IN_METRICS.filter((m) => set.has(m));
+      if (set.has('gait_symmetry')) this.working.gaitSymmetry = true;
+      else delete this.working.gaitSymmetry;
       this.setStatus('');
     },
     setGoalParam(key, value) {
@@ -666,7 +710,8 @@ export default {
       if (Number.isFinite(Number(this.working.footFriction)) && this.working.footFriction !== null) {
         clean.footFriction = Number(this.working.footFriction);
       }
-      if (this.working.gaitSymmetry === true) clean.gaitSymmetry = true;
+      if (this.metricsOptIn.length) clean.metricsOptIn = [...this.metricsOptIn];
+      if (this.metricsOptIn.includes('gait_symmetry')) clean.gaitSymmetry = true;
       if (this.working.goal) clean.goal = { ...this.working.goal };
       return clean;
     },
@@ -779,4 +824,5 @@ export default {
   font: 600 12px monospace;
   width: 28px;
 }
+.tab-error { display: inline-block; width: 7px; height: 7px; margin-left: 6px; border-radius: 50%; background: rgb(var(--v-theme-error)); }
 </style>

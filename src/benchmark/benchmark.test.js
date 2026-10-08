@@ -275,3 +275,15 @@ test('an end zone: the run must enter it to count as surviving', () => {
   // Stopping short is a failure to finish, not a fall: it stayed upright for the whole test.
   assert.deepEqual(test.metrics['survival_time@1'].values, [1, 1, 0.5]);
 });
+
+test('a test opts into several metrics; the list survives the editor round trip', () => {
+  const original = row('loco/a', { metrics_opt_in: ['gait_symmetry', 'drift'] });
+  assert.deepEqual(validateTestRow(original), []);
+  const sequence = rowToSequence(original);
+  assert.deepEqual(sequence.metricsOptIn, ['gait_symmetry', 'drift']);
+  assert.equal(sequence.gaitSymmetry, true);
+  assert.deepEqual(sequenceToRow('loco/a', sequence, original), original);
+  // Older sequences carry only the gaitSymmetry flag.
+  assert.deepEqual(sequenceToRow('loco/a', { ...sequence, metricsOptIn: undefined }, original).metrics_opt_in, ['gait_symmetry']);
+  assert.ok(validateTestRow(row('loco/a', { metrics_opt_in: ['balance'] })).some((e) => e.includes('metrics_opt_in')));
+});

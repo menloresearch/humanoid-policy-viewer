@@ -12,7 +12,7 @@ import { dirname, extname, relative, resolve } from 'node:path'
 import { listModelRoots, listModels as discoverModels } from './scripts/modelDiscovery.mjs'
 import { getBenchmarkRunsDir, getModelLibrary } from './scripts/modelLibraryConfig.mjs'
 import { readRows, writeRows } from './scripts/suiteDir.mjs'
-import { rowToSequence, sequenceToRow, validateGoal, validateTestRow } from './src/benchmark/testRow.js'
+import { OPT_IN_METRICS, rowToSequence, sequenceToRow, validateGoal, validateTestRow } from './src/benchmark/testRow.js'
 import { validateTerrain } from './src/simulation/terrainGen.js'
 
 // A submodule checked out under public/ carries a `.git` pointer file that
@@ -229,6 +229,14 @@ function humanoidDevPlugin() {
       clean.goal = { x: round3(parsed.goal.x), y: round3(parsed.goal.y), radius_m: round3(parsed.goal.radius_m) };
     }
     if (parsed.gaitSymmetry === true) clean.gaitSymmetry = true;
+    if (parsed.metricsOptIn !== undefined) {
+      if (!Array.isArray(parsed.metricsOptIn) || parsed.metricsOptIn.some((m) => !OPT_IN_METRICS.includes(m))) {
+        throw new Error(`"metricsOptIn" must list only: ${OPT_IN_METRICS.join(', ')}`);
+      }
+      clean.metricsOptIn = [...parsed.metricsOptIn];
+      if (clean.metricsOptIn.includes('gait_symmetry')) clean.gaitSymmetry = true;
+      else delete clean.gaitSymmetry;
+    }
     return clean;
   }
 
