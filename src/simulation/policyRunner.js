@@ -8,6 +8,7 @@ import { toFloatArray } from './utils/math.js';
 export class PolicyRunner {
   constructor(config, options = {}) {
     this.config = config;
+    this.options = options;
     this.policyJointNames = (options.policyJointNames ?? config.policy_joint_names ?? []).slice();
     if (this.policyJointNames.length === 0) {
       throw new Error('PolicyRunner requires policy_joint_names in config');
@@ -105,6 +106,19 @@ export class PolicyRunner {
       throw new Error(policyIOErrorMessage(ioErrors));
     }
     this.reset();
+  }
+
+  /**
+   * Another runner for the same policy, with its own observation history,
+   * recurrent state and last actions but sharing this runner's (initialized)
+   * ONNX session — one per extra robot of a grouped benchmark run. Its calls
+   * are made one after another, so the shared session never runs two at once.
+   */
+  twin() {
+    const twin = new PolicyRunner(this.config, this.options);
+    twin.module.useSession(this.module.session);
+    twin.reset();
+    return twin;
   }
 
   _buildObsModules(obsConfig) {

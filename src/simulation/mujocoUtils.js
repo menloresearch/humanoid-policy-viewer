@@ -82,6 +82,8 @@ async function loadMotionIndex(indexPayload, motionsUrl) {
 }
 
 export async function reloadScene(mjcf_path) {
+  // Extra benchmark robots hold mjData of the model about to be freed.
+  this.removeExtraRobots?.();
   this.scene.remove(this.scene.getObjectByName('MuJoCo Root'));
   const mujoco = this.mujoco;
   console.log('Loading scene:', mjcf_path);
@@ -139,6 +141,8 @@ async function reloadPolicyUnguarded(policy_path, options = {}) {
   while (this.policyRunner?.isInferencing) {
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
+  // Their policy runners are twins of the one being replaced.
+  this.removeExtraRobots?.();
 
   const response = await fetch(policy_path);
   if (!response.ok) {
@@ -669,8 +673,9 @@ export function toMujocoPos(target) {
   return target.set(target.x, -target.z, target.y);
 }
 
-
-function createSimulationWrapper(mujoco, model, data) {
+// free() deletes the model too; an extra benchmark robot sharing the model
+// deletes only its own data (see MuJoCoDemo.removeExtraRobots).
+export function createSimulationWrapper(mujoco, model, data) {
   const force = new Float64Array(3);
   const torque = new Float64Array(3);
   const point = new Float64Array(3);

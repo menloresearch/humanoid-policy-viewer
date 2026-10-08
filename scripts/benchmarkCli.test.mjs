@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { parseWords, swallowedNpmFlags } from './cliArgs.mjs';
 import { classifyTarget } from './benchmarkTargets.mjs';
-import { buildJobs, mergeRuns, parseShard, shardJobs, takeNextJob, uploadBlockers, RUN_SCHEMA } from './benchmarkRun.mjs';
+import { MAX_ROBOTS, buildJobs, groupCells, mergeRuns, parseShard, shardJobs, takeNextJob, uploadBlockers, RUN_SCHEMA } from './benchmarkRun.mjs';
 import { buildEvalResultEntries, evalResultsPath, mergeEvalResults } from './hfEvalResults.mjs';
 import { commitFiles, decideCommitMode } from './hfCommit.mjs';
 import { datasetFilesToFetch } from './hfDataset.mjs';
@@ -45,9 +45,9 @@ test('targets: models, suites, revisions and local paths', () => {
 
 const cell = (id, duration, repeat = 0) => ({ cellId: `${id}#${repeat}`, testId: id, repeat, duration, seed: repeat, timeoutS: 60 });
 
-test('jobs run longest first, shards partition them, pages keep their model', () => {
+test('jobs run the most work first, shards partition them, pages keep their model', () => {
   const jobs = buildJobs([{ key: 'm0' }, { key: 'm1' }], [cell('a/x', 5), cell('a/long', 100), cell('a/y', 10)]);
-  assert.deepEqual(jobs.slice(0, 2).map((j) => j.cell.testId), ['a/long', 'a/long']);
+  assert.deepEqual(jobs.slice(0, 2).map((j) => j.cells[0].testId), ['a/long', 'a/long']);
   const shards = [1, 2, 3].map((index) => shardJobs(jobs, { index, count: 3 }));
   assert.equal(shards.flat().length, jobs.length);
   assert.equal(new Set(shards.flat()).size, jobs.length);
@@ -57,6 +57,30 @@ test('jobs run longest first, shards partition them, pages keep their model', ()
   const queue = jobs.slice();
   assert.equal(takeNextJob(queue, null).modelKey, 'm0');
   assert.equal(takeNextJob(queue, 'm1').modelKey, 'm1');
+});
+
+test('a test\'s repeats run in groups of at most MAX_ROBOTS robots', () => {
+  assert.equal(MAX_ROBOTS, 5);
+  const repeats = (id, duration, n) => Array.from({ length: n }, (_, r) => cell(id, duration, r));
+  const cells = [...repeats('a/x', 10, 12), ...repeats('a/long', 30, 2), cell('a/one', 100)];
+  const groups = groupCells(cells);
+  assert.deepEqual(groups.map((g) => [g[0].testId, g.length]), [['a/x', 5], ['a/x', 5], ['a/x', 2], ['a/long', 2], ['a/one', 1]]);
+  // Every cell keeps its own repeat and seed, in repeat order.
+  assert.deepEqual(groups.slice(0, 3).flat().map((c) => c.seed), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+  assert.ok(groups.every((g) => new Set(g.map((c) => c.testId)).size === 1));
+  assert.deepEqual(groupCells(cells, 1).map((g) => g.length), cells.map(() => 1));
+
+  const models = [{ key: 'm0' }, { key: 'm1' }];
+  const jobs = buildJobs(models, cells);
+  assert.equal(jobs.length, 2 * groups.length);
+  // Ordered by test length x robots: a/one (100), then a/long x2 (60), then a/x x5 (50).
+  assert.deepEqual(jobs.slice(0, 4).map((j) => [j.cells[0].testId, j.cells.length]), [['a/one', 1], ['a/one', 1], ['a/long', 2], ['a/long', 2]]);
+  for (const count of [1, 2, 3, 4]) {
+    const shards = Array.from({ length: count }, (_, i) => shardJobs(jobs, { index: i + 1, count }));
+    const seen = shards.flat().flatMap((job) => job.cells.map((c) => `${job.modelKey}|${c.cellId}`));
+    assert.equal(seen.length, models.length * cells.length, `shards of ${count}`);
+    assert.equal(new Set(seen).size, seen.length, `shards of ${count}: every cell exactly once`);
+  }
 });
 
 function fakeRun(overrides = {}) {

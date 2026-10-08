@@ -884,7 +884,7 @@
 import { MuJoCoDemo } from '@/simulation/main.js';
 import { asimovCommandState, asimovInterruptState, imuBiasState } from '@/simulation/observationHelpers.js';
 import { commandSequencer } from '@/simulation/commandSequencer.js';
-import { runBenchmark, runBenchmarkCell, waitForPolicyReady, estimateBenchmarkSeconds } from '@/simulation/benchmarkRunner.js';
+import { runBenchmark, runBenchmarkGroup, waitForPolicyReady, estimateBenchmarkSeconds } from '@/simulation/benchmarkRunner.js';
 import { loadTestScene } from '@/simulation/terrainScene.js';
 import { appState, openEditor, newBlankSequence, openResults, setBenchmarkResults } from '@/state/appState.js';
 import { demoRef } from '@/state/demoRef.js';
@@ -1990,13 +1990,29 @@ export default {
     /**
      * Headless entry point for `npm run benchmark` (scripts/run-benchmark.mjs):
      * runs one benchmark cell (one test, one repeat) for a policy given by its
-     * ONNX URL, so it needs no model catalog. Each browser page keeps the last
-     * policy loaded, which lets the driver send a model's cells to the same page.
-     * `cell` = { sequence, seed, randomize, realtime, timeoutMs }.
+     * ONNX URL, so it needs no model catalog. A group of one; see
+     * runBenchmarkGroupHeadless. `cell` = { sequence, seed, randomize, realtime, timeoutMs }.
      */
     async runBenchmarkCellHeadless(policy, cell) {
+      const { sequence, seed, randomize, realtime, timeoutMs } = cell;
+      const outcome = await this.runBenchmarkGroupHeadless(policy, {
+        sequence, realtime, timeoutMs, cells: [{ seed, randomize }],
+      });
+      return outcome.policyLoadError ? outcome : outcome.results[0];
+    },
+    /**
+     * Headless entry point for `npm run benchmark`: runs several repeats of one
+     * test at once, as that many robots in one scene (runBenchmarkGroup), for a
+     * policy given by its ONNX URL. Each browser page keeps the last policy
+     * loaded, which lets the driver send a model's jobs to the same page.
+     * `group` = { sequence, cells: [{ seed, randomize }], realtime, timeoutMs };
+     * returns { results: [one per cell, in order] }, or { policyLoadError, error }.
+     * A real-time (watched) run keeps drawing; a headless one stops the draw loop.
+     */
+    async runBenchmarkGroupHeadless(policy, group) {
       if (!this.demo) throw new Error('Demo not ready yet');
-      this.demo.stopRenderLoop?.();
+      if (group.realtime) this.demo.startRenderLoop?.();
+      else this.demo.stopRenderLoop?.();
       const key = `${policy.configPath ?? REFERENCE_POLICY_CONFIG}|${policy.onnxPath}`;
       if (this._benchmarkPolicyKey !== key) {
         this._benchmarkPolicyKey = null;
@@ -2015,16 +2031,17 @@ export default {
         get cmdVy() { return asimovCommandState.vy; },
         get cmdWz() { return asimovCommandState.wz; }
       };
-      return runBenchmarkCell({
+      const results = await runBenchmarkGroup({
         demo: this.demo,
         component: commandView,
-        sequence: cell.sequence,
-        randomization: cell.seed === undefined || cell.seed === null
+        sequence: group.sequence,
+        randomizations: group.cells.map((cell) => (cell.seed === undefined || cell.seed === null
           ? null
-          : { seed: cell.seed, randomize: cell.randomize ?? {} },
-        realtime: !!cell.realtime,
-        timeoutMs: cell.timeoutMs ?? undefined,
+          : { seed: cell.seed, randomize: cell.randomize ?? {} })),
+        realtime: !!group.realtime,
+        timeoutMs: group.timeoutMs ?? undefined,
       });
+      return { results };
     },
     async refreshBenchmarkRuns() {
       try {
@@ -2540,6 +2557,7 @@ export default {
     window.__humanoidViewerDemoComponent = this;
     window.__runHeadlessBenchmark = (policyValues, testFiles) => this.runHeadlessBenchmark(policyValues, testFiles);
     window.__runBenchmarkCell = (policy, cell) => this.runBenchmarkCellHeadless(policy, cell);
+    window.__runBenchmarkGroup = (policy, group) => this.runBenchmarkGroupHeadless(policy, group);
     this.customMotions = {};
     this.isSafari = this.detectSafari();
     this.restorePanelWidth();
@@ -2599,6 +2617,9 @@ export default {
     }
     if (window.__runBenchmarkCell) {
       window.__runBenchmarkCell = null;
+    }
+    if (window.__runBenchmarkGroup) {
+      window.__runBenchmarkGroup = null;
     }
     if (window.__runHeadlessBenchmark) {
       window.__runHeadlessBenchmark = null;

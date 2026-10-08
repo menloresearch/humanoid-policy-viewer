@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { DragStateManager } from './utils/DragStateManager.js';
-import { downloadExampleScenesFolder, getPosition, getQuaternion, toMujocoPos, reloadScene, reloadPolicy } from './mujocoUtils.js';
+import { createSimulationWrapper, downloadExampleScenesFolder, getPosition, getQuaternion, toMujocoPos, reloadScene, reloadPolicy } from './mujocoUtils.js';
 import { commandSequencer } from './commandSequencer.js';
 import { asimovCommandState } from './observationHelpers.js';
 import { IdealPathTracker, yawFromQuat } from './idealPath.js';
@@ -12,6 +12,14 @@ const defaultPolicy = "./examples/checkpoints/asimov/reference_policy_config.jso
 // scenePath in Demo.vue's policy list — keep the two in sync so the scene
 // shown on load matches what re-selecting that same policy would load.
 const defaultScene = "asimov-1/sim-model/xmls/asimov_1.xml";
+
+// Extra robots of a grouped benchmark run (addExtraRobots) are drawn see-through
+// and tinted, on a layer of their own: the main camera renders it, the floor
+// Reflector's camera (layer 0 only) does not, so they stay out of the reflection.
+const EXTRA_ROBOT_LAYER = 1;
+const EXTRA_ROBOT_OPACITY = 0.35;
+const FALLEN_ROBOT_OPACITY = 0.15;
+const EXTRA_ROBOT_TINTS = [0x4fc3f7, 0xffb74d, 0xba68c8, 0x81c784];
 
 export class MuJoCoDemo {
   constructor(mujoco) {
@@ -51,6 +59,8 @@ export class MuJoCoDemo {
     // of leaving them findable only in the browser console — see
     // drainBodyResolutionWarnings().
     this._bodyResolutionWarnings = new Set();
+    // Robots 1..n-1 of a grouped benchmark run; robot 0 is the demo itself.
+    this.extraRobots = [];
 
     this.bodies = {};
     this.lights = {};
@@ -63,6 +73,7 @@ export class MuJoCoDemo {
     this.camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.001, 100);
     this.camera.name = 'PerspectiveCamera';
     this.camera.position.set(3.0, 2.2, 3.0);
+    this.camera.layers.enable(EXTRA_ROBOT_LAYER);
     this.scene.add(this.camera);
 
     this.scene.background = new THREE.Color(0.15, 0.25, 0.35);
@@ -172,6 +183,11 @@ export class MuJoCoDemo {
     this.renderer.setAnimationLoop(null);
   }
 
+  /** Undoes stopRenderLoop(), e.g. for a benchmark run someone is watching. */
+  startRenderLoop() {
+    this.renderer.setAnimationLoop(this.render.bind(this));
+  }
+
   _buildIdealMarker() {
     // Isosceles pyramid pointing along the heading direction (+X at heading 0),
     // laid horizontal and flattened so it reads as a flat directional arrow.
@@ -190,13 +206,13 @@ export class MuJoCoDemo {
     this.scene.add(this.idealMarker);
   }
 
-  reanchorIdealPath() {
-    if (!this.simulation) {
+  reanchorIdealPath(robot = this) {
+    if (!robot.simulation) {
       return;
     }
-    const q = this.simulation.qpos;
-    const comZ = this.data?.subtree_com?.[2] ?? 0.6;
-    this.idealPath.reanchor(q[0], q[1], yawFromQuat(q[3], q[4], q[5], q[6]), comZ);
+    const q = robot.simulation.qpos;
+    const comZ = robot.data?.subtree_com?.[2] ?? 0.6;
+    robot.idealPath.reanchor(q[0], q[1], yawFromQuat(q[3], q[4], q[5], q[6]), comZ);
   }
 
   async init() {
@@ -483,7 +499,7 @@ export class MuJoCoDemo {
    * relative to that body, so the effective push point is consistent
    * regardless of arm/leg pose, unlike the whole-body subtree_com. Queues
    * onto _activePushes, drained by the same per-substep consumer as
-   * click-to-push.
+   * click-to-push. Every robot gets the push, at its own body's CoM.
    *
    * ev: { dir:[x,y,z], force, duration, torqueAxis?:[x,y,z], torqueMag?, targetBody? }
    * force is authored directly in Newtons — no mass lookup needed to apply
@@ -501,7 +517,6 @@ export class MuJoCoDemo {
     // so a stray negative here must not flip the push's physical direction.
     const mag = Math.abs(Number(ev.force) || 0); // Newtons, authored directly
     const stepsLeft = Math.max(1, Math.round(ev.duration / this.timestep));
-    const xipos = this.simulation.xipos;
 
     let torque = { x: 0, y: 0, z: 0 };
     if (Array.isArray(ev.torqueAxis) && ev.torqueMag) {
@@ -514,13 +529,16 @@ export class MuJoCoDemo {
       };
     }
 
-    this._activePushes.push({
-      bodyID,
-      force: { x: (dx / dirLen) * mag, y: (dy / dirLen) * mag, z: ((dz || 0) / dirLen) * mag },
-      torque,
-      point: { x: xipos[bodyID * 3 + 0], y: xipos[bodyID * 3 + 1], z: xipos[bodyID * 3 + 2] },
-      stepsLeft,
-    });
+    for (const robot of this.robots) {
+      const xipos = robot.simulation.xipos;
+      robot._activePushes.push({
+        bodyID,
+        force: { x: (dx / dirLen) * mag, y: (dy / dirLen) * mag, z: ((dz || 0) / dirLen) * mag },
+        torque: { ...torque },
+        point: { x: xipos[bodyID * 3 + 0], y: xipos[bodyID * 3 + 1], z: xipos[bodyID * 3 + 2] },
+        stepsLeft,
+      });
+    }
   }
 
   setFollowEnabled(enabled) {
@@ -549,43 +567,147 @@ export class MuJoCoDemo {
    * Seeded randomisation for benchmark repeats, or null for none (the default).
    * `{ random, actionDelay: 'midpoint' | 'env_range', initialJointNoiseRad }`,
    * where `random()` is a seeded generator returning [0, 1). It is read by
-   * resetSimulation(), so set it before the reset that starts a test.
+   * resetSimulation(), so set it before the reset that starts a test. Each
+   * robot of a grouped run has its own (its repeat's seed).
    */
-  setBenchmarkRandomization(randomization) {
-    this.benchmarkRandomization = randomization ?? null;
+  setBenchmarkRandomization(randomization, robot = this) {
+    robot.benchmarkRandomization = randomization ?? null;
   }
 
-  resetActionDelay(seedTarget = null) {
+  resetActionDelay(seedTarget = null, robot = this) {
     const span = this.actionDelayMaxLag - this.actionDelayMinLag + 1;
-    const randomization = this.benchmarkRandomization;
+    const randomization = robot.benchmarkRandomization;
     if (randomization?.actionDelay === 'env_range') {
       // A benchmark repeat draws the lag from the env.yaml range with its own
       // seeded generator, so every repeat is reproducible from its seed.
-      this.actionDelayLag = this.actionDelayMinLag + Math.floor(randomization.random() * span);
+      robot.actionDelayLag = this.actionDelayMinLag + Math.floor(randomization.random() * span);
     } else {
       // Pin a fixed, reproducible "typical" lag (the midpoint of the policy's
       // configured delay range) instead of drawing one — an unseeded draw here
       // was the sole source of run-to-run flakiness in push-threshold results
       // near a policy's actual capability boundary.
-      this.actionDelayLag = this.actionDelayMinLag + Math.floor((span - 1) / 2);
+      robot.actionDelayLag = this.actionDelayMinLag + Math.floor((span - 1) / 2);
     }
-    this.actionDelayBuffer = [];
-    if (seedTarget && this.actionDelayLag > 0) {
-      for (let i = 0; i < this.actionDelayLag; i++) {
-        this.actionDelayBuffer.push(new Float32Array(seedTarget));
+    robot.actionDelayBuffer = [];
+    if (seedTarget && robot.actionDelayLag > 0) {
+      for (let i = 0; i < robot.actionDelayLag; i++) {
+        robot.actionDelayBuffer.push(new Float32Array(seedTarget));
       }
     }
   }
 
-  getDelayedActionTarget(sourceTarget) {
-    if (!sourceTarget || this.actionDelayLag <= 0) {
+  getDelayedActionTarget(sourceTarget, robot = this) {
+    if (!sourceTarget || robot.actionDelayLag <= 0) {
       return sourceTarget;
     }
-    this.actionDelayBuffer.push(new Float32Array(sourceTarget));
-    while (this.actionDelayBuffer.length > this.actionDelayLag + 1) {
-      this.actionDelayBuffer.shift();
+    robot.actionDelayBuffer.push(new Float32Array(sourceTarget));
+    while (robot.actionDelayBuffer.length > robot.actionDelayLag + 1) {
+      robot.actionDelayBuffer.shift();
     }
-    return this.actionDelayBuffer[0] ?? sourceTarget;
+    return robot.actionDelayBuffer[0] ?? sourceTarget;
+  }
+
+  /** Every robot in the scene: the demo itself (robot 0), then any extra robots. */
+  get robots() {
+    return [this, ...this.extraRobots];
+  }
+
+  /**
+   * Adds `count` robots to the scene for a grouped benchmark run (several
+   * repeats of one test at once). They share the loaded mjModel (so a test's
+   * friction/terrain/torque-limit changes reach all of them) but each has its
+   * own mjData, and a policy runner of its own that shares robot 0's ONNX
+   * session. An extra robot is a plain object with the same per-robot fields
+   * the demo uses for robot 0, which is what stepPolicyTick() and the
+   * robot-taking methods (resetSimulation, readPolicyState, ...) read. Replaces
+   * any extra robots already present; removeExtraRobots() takes them away.
+   */
+  addExtraRobots(count) {
+    this.removeExtraRobots();
+    if (count <= 0) {
+      return this.robots;
+    }
+    if (!this.model || !this.policyRunner) {
+      throw new Error('addExtraRobots: no model or policy loaded');
+    }
+    for (let i = 0; i < count; i++) {
+      const data = new this.mujoco.MjData(this.model);
+      const robot = {
+        index: this.extraRobots.length + 1,
+        data,
+        simulation: createSimulationWrapper(this.mujoco, this.model, data),
+        policyRunner: this.policyRunner.twin(),
+        actionTarget: null,
+        filteredActionTarget: null,
+        rawActions: null,
+        maxRawAction: 0,
+        actionDelayLag: 0,
+        actionDelayBuffer: [],
+        benchmarkRandomization: null,
+        _tumbling: false,
+        _activePushes: [],
+        idealPath: new IdealPathTracker(),
+        lastSimState: { bodies: new Map() },
+        bodies: {},
+        visual: null,
+        materials: [],
+      };
+      this._buildExtraRobotVisual(robot);
+      this.extraRobots.push(robot);
+    }
+    return this.robots;
+  }
+
+  /** Removes the extra robots: their meshes, materials and mjData. */
+  removeExtraRobots() {
+    for (const robot of this.extraRobots) {
+      robot.visual?.removeFromParent();
+      for (const material of robot.materials) material.dispose();
+      robot.data.delete();
+    }
+    this.extraRobots = [];
+  }
+
+  /**
+   * A copy of robot 0's bodies for an extra robot: geometry (and textures)
+   * shared, materials cloned and tinted, see-through, casting no shadow and on
+   * EXTRA_ROBOT_LAYER so the floor reflection leaves them out.
+   */
+  _buildExtraRobotVisual(robot) {
+    const world = this.bodies?.[0];
+    if (!world) {
+      return;
+    }
+    const tint = new THREE.Color(EXTRA_ROBOT_TINTS[(robot.index - 1) % EXTRA_ROBOT_TINTS.length]);
+    const materials = new Map(); // robot 0's material -> this robot's copy
+    const group = new THREE.Group();
+    group.name = `Extra robot ${robot.index}`;
+    for (let b = 1; b < this.model.nbody; b++) {
+      if (!this.bodies[b]) continue;
+      const body = this.bodies[b].clone();
+      body.bodyID = b;
+      body.traverse((obj) => {
+        obj.layers.set(EXTRA_ROBOT_LAYER);
+        if (!obj.isMesh) return;
+        obj.castShadow = false;
+        obj.receiveShadow = false;
+        let material = materials.get(obj.material);
+        if (!material) {
+          material = obj.material.clone();
+          material.color.lerp(tint, 0.6);
+          material.transparent = true;
+          material.opacity = EXTRA_ROBOT_OPACITY;
+          material.depthWrite = false;
+          materials.set(obj.material, material);
+        }
+        obj.material = material;
+      });
+      robot.bodies[b] = body;
+      group.add(body);
+    }
+    world.add(group);
+    robot.visual = group;
+    robot.materials = [...materials.values()];
   }
 
   updateFollowBodyId() {
@@ -684,17 +806,45 @@ export class MuJoCoDemo {
    * once per iteration; a benchmark run stops that loop and calls it itself, so
    * a test is always the same number of ticks however fast the machine is.
    * Returns false if inference failed (and sets `alive = false`).
+   *
+   * In a grouped benchmark run (see addExtraRobots) every robot takes this
+   * tick in turn, against the one command the sequencer set for it. The robots
+   * share the mjModel but each has its own mjData and policy state, so each
+   * one's run is bit-for-bit what it would be alone.
    */
   async stepPolicyTick() {
     // Advance command playback/recording clock by one policy tick,
     // before observations are read so the command applies this tick
     commandSequencer.tick(this.timestep * this.decimation);
 
+    for (const robot of this.robots) {
+      if (!(await this._stepRobot(robot))) {
+        return false;
+      }
+    }
+
+    for (const runner of this.__simMetricsRecorders) {
+      runner.captureFrame();
+    }
+
+    this._cacheRenderState();
+    return true;
+  }
+
+  /**
+   * One policy tick of one robot: fall detection, inference and the physics
+   * substeps. `robot` is the demo itself (robot 0) or an extra robot; it holds
+   * the per-robot state (mjData, policy runner, action buffers, pushes), while
+   * the joint mapping, gains and model are shared from the demo.
+   */
+  async _stepRobot(robot) {
+    const sim = robot.simulation;
+
     // Integrate the idealized command path and sample both traces. Uses the
     // same command the policy sees this tick; CoM is read from raw MjData.
     {
-      const com = this.data?.subtree_com;
-      this.idealPath.update(
+      const com = robot.data?.subtree_com;
+      robot.idealPath.update(
         asimovCommandState,
         this.timestep * this.decimation,
         com ? { x: com[0], y: com[1] } : null
@@ -702,39 +852,39 @@ export class MuJoCoDemo {
     }
 
     // Tumble/fall detection BEFORE policy inference
-    const gyroMag = Math.abs(this.simulation.qvel[3] || 0)
-                  + Math.abs(this.simulation.qvel[4] || 0)
-                  + Math.abs(this.simulation.qvel[5] || 0);
+    const gyroMag = Math.abs(sim.qvel[3] || 0)
+                  + Math.abs(sim.qvel[4] || 0)
+                  + Math.abs(sim.qvel[5] || 0);
 
     // Compute projected gravity z in body frame from quaternion
     // quat = [w, x, y, z] at qpos[3:7]
-    const qw = this.simulation.qpos[3], qx = this.simulation.qpos[4];
-    const qy = this.simulation.qpos[5], qz = this.simulation.qpos[6];
+    const qw = sim.qpos[3], qx = sim.qpos[4];
+    const qy = sim.qpos[5], qz = sim.qpos[6];
     // gravity_z_body = R^T * [0,0,-1] dot [0,0,1] = -(1 - 2(qx²+qy²))
     const gravZ = -(1.0 - 2.0 * (qx * qx + qy * qy));
 
     // Fall detection: gravity_z > -0.866 means >30° tilt → DAMP mode
-    if (gravZ > -0.166) this._tumbling = true;
+    if (gravZ > -0.166) robot._tumbling = true;
 
-    if (this._tumbling) {
+    if (robot._tumbling) {
       // DAMP mode: skip policy, hold current positions with KP=10 KD=3
-      if (!this.actionTarget) {
-        this.actionTarget = new Float32Array(this.numActions);
+      if (!robot.actionTarget) {
+        robot.actionTarget = new Float32Array(this.numActions);
       }
       for (let i = 0; i < this.numActions; i++) {
         const qpos_adr = this.qpos_adr_policy[i];
-        this.actionTarget[i] = this.simulation.qpos[qpos_adr];
+        robot.actionTarget[i] = sim.qpos[qpos_adr];
       }
-      if (this.filteredActionTarget) {
-        this.filteredActionTarget.set(this.actionTarget);
+      if (robot.filteredActionTarget) {
+        robot.filteredActionTarget.set(robot.actionTarget);
       } else {
-        this.filteredActionTarget = new Float32Array(this.actionTarget);
+        robot.filteredActionTarget = new Float32Array(robot.actionTarget);
       }
     } else {
       // Normal mode: run policy
-      const state = this.readPolicyState();
+      const state = this.readPolicyState(robot);
       try {
-        this.actionTarget = await this.policyRunner.step(state);
+        robot.actionTarget = await robot.policyRunner.step(state);
       } catch (e) {
         console.error('Inference error in main loop:', e);
         this.alive = false;
@@ -742,15 +892,15 @@ export class MuJoCoDemo {
       }
 
       // Track raw action magnitudes — DAMP if any action saturates
-      if (this.actionTarget) {
-        this.rawActions = this.actionTarget;
+      if (robot.actionTarget) {
+        robot.rawActions = robot.actionTarget;
         let maxAbs = 0;
-        for (let i = 0; i < this.actionTarget.length; i++) {
-          const abs = Math.abs(this.actionTarget[i]);
+        for (let i = 0; i < robot.actionTarget.length; i++) {
+          const abs = Math.abs(robot.actionTarget[i]);
           if (abs > maxAbs) maxAbs = abs;
         }
-        this.maxRawAction = maxAbs;
-        if (maxAbs > 100.0) this._tumbling = true;
+        robot.maxRawAction = maxAbs;
+        if (maxAbs > 100.0) robot._tumbling = true;
       }
 
       // Jitter computation at policy rate (50Hz) — 3rd finite difference (jerk)
@@ -760,31 +910,31 @@ export class MuJoCoDemo {
         const dt3 = policyDt * policyDt * policyDt;
 
         // Initialize jitter buffers
-        if (!this._jitterActionHist) {
-          this._jitterActionHist = [];
-          this._jitterVelHist = [];
-          this._jitterTorqueHist = [];
-          this._jitterAccum = { action: 0, vel: 0, torque: 0, count: 0 };
+        if (!robot._jitterActionHist) {
+          robot._jitterActionHist = [];
+          robot._jitterVelHist = [];
+          robot._jitterTorqueHist = [];
+          robot._jitterAccum = { action: 0, vel: 0, torque: 0, count: 0 };
         }
 
         // Capture current values
         const nAct = this.numActions || 0;
-        const curAction = this.actionTarget ? Array.from(this.actionTarget) : null;
+        const curAction = robot.actionTarget ? Array.from(robot.actionTarget) : null;
         const nv = this.model?.nv || 0;
-        const curVel = nv > 6 ? Array.from(this.simulation.qvel).slice(6, 6 + nAct) : null;
-        const curTorque = this.simulation.ctrl ? Array.from(this.simulation.ctrl).slice(0, nAct) : null;
+        const curVel = nv > 6 ? Array.from(sim.qvel).slice(6, 6 + nAct) : null;
+        const curTorque = sim.ctrl ? Array.from(sim.ctrl).slice(0, nAct) : null;
 
-        this._jitterActionHist.push(curAction);
-        this._jitterVelHist.push(curVel);
-        this._jitterTorqueHist.push(curTorque);
+        robot._jitterActionHist.push(curAction);
+        robot._jitterVelHist.push(curVel);
+        robot._jitterTorqueHist.push(curTorque);
 
         // Keep only last 4
-        if (this._jitterActionHist.length > 4) this._jitterActionHist.shift();
-        if (this._jitterVelHist.length > 4) this._jitterVelHist.shift();
-        if (this._jitterTorqueHist.length > 4) this._jitterTorqueHist.shift();
+        if (robot._jitterActionHist.length > 4) robot._jitterActionHist.shift();
+        if (robot._jitterVelHist.length > 4) robot._jitterVelHist.shift();
+        if (robot._jitterTorqueHist.length > 4) robot._jitterTorqueHist.shift();
 
         // Compute jerk if 4 frames available
-        if (this._jitterActionHist.length === 4 && this._jitterActionHist[0]) {
+        if (robot._jitterActionHist.length === 4 && robot._jitterActionHist[0]) {
           const jerk = (hist) => {
             if (!hist[0] || !hist[1] || !hist[2] || !hist[3]) return 0;
             let sum = 0;
@@ -793,42 +943,42 @@ export class MuJoCoDemo {
             }
             return sum / hist[0].length;
           };
-          this._jitterAccum.action += jerk(this._jitterActionHist);
-          this._jitterAccum.vel += jerk(this._jitterVelHist);
-          this._jitterAccum.torque += jerk(this._jitterTorqueHist);
-          this._jitterAccum.count++;
+          robot._jitterAccum.action += jerk(robot._jitterActionHist);
+          robot._jitterAccum.vel += jerk(robot._jitterVelHist);
+          robot._jitterAccum.torque += jerk(robot._jitterTorqueHist);
+          robot._jitterAccum.count++;
         }
 
         // Expose averaged jitter (reset every 50 steps = 1 second)
-        if (this._jitterAccum.count >= 50) {
-          const c = this._jitterAccum.count;
-          this.jitterMetrics = {
-            action: this._jitterAccum.action / c,
-            vel: this._jitterAccum.vel / c,
-            torque: this._jitterAccum.torque / c,
+        if (robot._jitterAccum.count >= 50) {
+          const c = robot._jitterAccum.count;
+          robot.jitterMetrics = {
+            action: robot._jitterAccum.action / c,
+            vel: robot._jitterAccum.vel / c,
+            torque: robot._jitterAccum.torque / c,
           };
-          this._jitterAccum = { action: 0, vel: 0, torque: 0, count: 0 };
+          robot._jitterAccum = { action: 0, vel: 0, torque: 0, count: 0 };
         }
       }
 
       // Apply one-pole LPF on action targets if configured
-      if (this.actionTarget) {
-        if (!this.filteredActionTarget) {
-          this.filteredActionTarget = new Float32Array(this.actionTarget);
+      if (robot.actionTarget) {
+        if (!robot.filteredActionTarget) {
+          robot.filteredActionTarget = new Float32Array(robot.actionTarget);
         } else {
           const alpha = this.actionLpfAlpha;
           for (let i = 0; i < this.numActions; i++) {
-            this.filteredActionTarget[i] = alpha * this.actionTarget[i] + (1 - alpha) * this.filteredActionTarget[i];
+            robot.filteredActionTarget[i] = alpha * robot.actionTarget[i] + (1 - alpha) * robot.filteredActionTarget[i];
           }
         }
       }
     }
 
     for (let substep = 0; substep < this.decimation; substep++) {
-      const sourceTarget = this.filteredActionTarget ?? this.actionTarget;
-      const delayedActionTarget = this._tumbling
+      const sourceTarget = robot.filteredActionTarget ?? robot.actionTarget;
+      const delayedActionTarget = robot._tumbling
         ? sourceTarget
-        : this.getDelayedActionTarget(sourceTarget);
+        : this.getDelayedActionTarget(sourceTarget, robot);
 
       if (this.control_type === 'joint_position') {
         for (let i = 0; i < this.numActions; i++) {
@@ -837,17 +987,17 @@ export class MuJoCoDemo {
           const ctrl_adr = this.ctrl_adr_policy[i];
 
           const targetJpos = delayedActionTarget ? delayedActionTarget[i] : 0.0;
-          const kp = this._tumbling ? 10.0 : (this.kpPolicy ? this.kpPolicy[i] : 0.0);
-          const vel = this.simulation.qvel[qvel_adr];
+          const kp = robot._tumbling ? 10.0 : (this.kpPolicy ? this.kpPolicy[i] : 0.0);
+          const vel = sim.qvel[qvel_adr];
 
           // When feedforward damping is configured, split kd into kd_hw and kd_ff
           const hasFf = this.kdFfPolicy !== null && this.kdFfPolicy !== undefined;
-          const kd = this._tumbling ? 3.0 : (this.kdPolicy ? this.kdPolicy[i] : 0.0);
-          const kd_hw = this._tumbling ? 3.0 : (hasFf ? Math.min(kd, 5.0) : kd);
-          let torque = kp * (targetJpos - this.simulation.qpos[qpos_adr]) + kd_hw * (0 - vel);
+          const kd = robot._tumbling ? 3.0 : (this.kdPolicy ? this.kdPolicy[i] : 0.0);
+          const kd_hw = robot._tumbling ? 3.0 : (hasFf ? Math.min(kd, 5.0) : kd);
+          let torque = kp * (targetJpos - sim.qpos[qpos_adr]) + kd_hw * (0 - vel);
 
           // Feedforward damping (only when kd_ff array is provided, skip in DAMP mode)
-          if (hasFf && !this._tumbling) {
+          if (hasFf && !robot._tumbling) {
             const kd_ff = this.kdFfPolicy[i] ?? 0.0;
             if (kd_ff > 0) {
               const tau_ff = Math.max(-30, Math.min(30, -kd_ff * vel));
@@ -864,25 +1014,26 @@ export class MuJoCoDemo {
               ctrlValue = Math.min(Math.max(ctrlValue, min), max);
             }
           }
-          this.simulation.ctrl[ctrl_adr] = ctrlValue;
+          sim.ctrl[ctrl_adr] = ctrlValue;
         }
       } else if (this.control_type === 'torque') {
         console.error('Torque control not implemented yet.');
       }
 
-      const applied = this.simulation.qfrc_applied;
+      const applied = sim.qfrc_applied;
       for (let i = 0; i < applied.length; i++) {
         applied[i] = 0.0;
       }
-      const dragged = this.dragStateManager.physicsObject;
-      if (!dragged || !dragged.bodyID) {
+      // Mouse drag acts on robot 0 only, like click-to-push and the telemetry.
+      const dragged = robot === this ? this.dragStateManager.physicsObject : null;
+      if (robot === this && (!dragged || !dragged.bodyID)) {
         this.lastDragForce = 0;
       }
       if (dragged && dragged.bodyID) {
         for (let b = 0; b < this.model.nbody; b++) {
           if (this.bodies[b]) {
-            getPosition(this.simulation.xpos, b, this.bodies[b].position);
-            getQuaternion(this.simulation.xquat, b, this.bodies[b].quaternion);
+            getPosition(sim.xpos, b, this.bodies[b].position);
+            getQuaternion(sim.xquat, b, this.bodies[b].quaternion);
             this.bodies[b].updateWorldMatrix();
           }
         }
@@ -904,28 +1055,29 @@ export class MuJoCoDemo {
         }
         this.lastDragForce = Math.min(forceMagnitude, maxForce);
         const point = toMujocoPos(this.dragStateManager.worldHit.clone());
-        this.simulation.applyForce(force.x, force.y, force.z, 0, 0, 0, point.x, point.y, point.z, bodyID);
+        sim.applyForce(force.x, force.y, force.z, 0, 0, 0, point.x, point.y, point.z, bodyID);
       }
 
       // Click-to-push and scripted (JSON) pushes: apply each active push's
       // force (and torque, if any — click-to-push/drag entries never set
       // one, so this falls back to zero for them) for its remaining
       // substeps, then drop it once exhausted.
-      for (let i = this._activePushes.length - 1; i >= 0; i--) {
-        const p = this._activePushes[i];
+      for (let i = robot._activePushes.length - 1; i >= 0; i--) {
+        const p = robot._activePushes[i];
         const tq = p.torque || { x: 0, y: 0, z: 0 };
-        this.simulation.applyForce(p.force.x, p.force.y, p.force.z, tq.x, tq.y, tq.z, p.point.x, p.point.y, p.point.z, p.bodyID);
+        sim.applyForce(p.force.x, p.force.y, p.force.z, tq.x, tq.y, tq.z, p.point.x, p.point.y, p.point.z, p.bodyID);
         p.stepsLeft--;
-        if (p.stepsLeft <= 0) this._activePushes.splice(i, 1);
+        if (p.stepsLeft <= 0) robot._activePushes.splice(i, 1);
       }
 
-      this.simulation.step();
+      sim.step();
     }
 
-    for (const runner of this.__simMetricsRecorders) {
-      runner.captureFrame();
-    }
+    return true;
+  }
 
+  /** Copies body, light and tendon poses for render(); see lastSimState. */
+  _cacheRenderState() {
     for (let b = 0; b < this.model.nbody; b++) {
       if (!this.bodies[b]) {
         continue;
@@ -961,7 +1113,19 @@ export class MuJoCoDemo {
       count: this.model.nwrap,
       matrix: this.lastSimState.tendons.matrix
     };
-    return true;
+    for (const robot of this.extraRobots) {
+      for (const b of Object.keys(robot.bodies)) {
+        if (!robot.lastSimState.bodies.has(b)) {
+          robot.lastSimState.bodies.set(b, {
+            position: new THREE.Vector3(),
+            quaternion: new THREE.Quaternion()
+          });
+        }
+        const cached = robot.lastSimState.bodies.get(b);
+        getPosition(robot.simulation.xpos, Number(b), cached.position);
+        getQuaternion(robot.simulation.xquat, Number(b), cached.quaternion);
+      }
+    }
   }
 
   onWindowResize() {
@@ -1001,9 +1165,9 @@ export class MuJoCoDemo {
     return this.simStepHz;
   }
 
-  readPolicyState() {
-    const qpos = this.simulation.qpos;
-    const qvel = this.simulation.qvel;
+  readPolicyState(robot = this) {
+    const qpos = robot.simulation.qpos;
+    const qvel = robot.simulation.qvel;
     const jointPos = new Float32Array(this.numActions);
     const jointVel = new Float32Array(this.numActions);
     for (let i = 0; i < this.numActions; i++) {
@@ -1029,45 +1193,45 @@ export class MuJoCoDemo {
     };
   }
 
-  resetSimulation() {
-    if (!this.simulation) {
+  resetSimulation(robot = this) {
+    if (!robot.simulation) {
       return;
     }
     this.params.paused = true;
-    this.simulation.resetData();
-    this._tumbling = false;
+    robot.simulation.resetData();
+    robot._tumbling = false;
 
     // Apply keyframe: set root height and joint positions
     // Freejoint qpos: [x, y, z, qw, qx, qy, qz] at indices 0-6
-    this.simulation.qpos[2] = 0.614;  // standing height (shallow crouch)
-    this.simulation.qpos[3] = 1.0;    // quat w (upright)
-    this.simulation.qpos[4] = 0.0;
-    this.simulation.qpos[5] = 0.0;
-    this.simulation.qpos[6] = 0.0;
+    robot.simulation.qpos[2] = 0.614;  // standing height (shallow crouch)
+    robot.simulation.qpos[3] = 1.0;    // quat w (upright)
+    robot.simulation.qpos[4] = 0.0;
+    robot.simulation.qpos[5] = 0.0;
+    robot.simulation.qpos[6] = 0.0;
     if (this.defaultJposPolicy && this.qpos_adr_policy) {
-      const noise = this.benchmarkRandomization?.initialJointNoiseRad || 0;
-      const random = this.benchmarkRandomization?.random;
+      const noise = robot.benchmarkRandomization?.initialJointNoiseRad || 0;
+      const random = robot.benchmarkRandomization?.random;
       for (let i = 0; i < this.numActions; i++) {
         const qpos_adr = this.qpos_adr_policy[i];
         const offset = noise > 0 && random ? (random() * 2 - 1) * noise : 0;
-        this.simulation.qpos[qpos_adr] = this.defaultJposPolicy[i] + offset;
+        robot.simulation.qpos[qpos_adr] = this.defaultJposPolicy[i] + offset;
       }
     }
 
-    this.simulation.forward();
-    this.actionTarget = null;
-    this.filteredActionTarget = null;
-    this.rawActions = null;
+    robot.simulation.forward();
+    robot.actionTarget = null;
+    robot.filteredActionTarget = null;
+    robot.rawActions = null;
     // A push still being applied when the previous test ended must not carry
     // over into this one.
-    this._activePushes = [];
-    this.resetActionDelay();
-    if (this.policyRunner) {
-      const state = this.readPolicyState();
-      this.policyRunner.reset(state);
+    robot._activePushes = [];
+    this.resetActionDelay(null, robot);
+    if (robot.policyRunner) {
+      const state = this.readPolicyState(robot);
+      robot.policyRunner.reset(state);
       this.params.current_motion = 'default';
     }
-    this.reanchorIdealPath();
+    this.reanchorIdealPath(robot);
     this.params.paused = false;
   }
 
@@ -1089,6 +1253,23 @@ export class MuJoCoDemo {
         this.bodies[b].position.copy(cached.position);
         this.bodies[b].quaternion.copy(cached.quaternion);
         this.bodies[b].updateWorldMatrix();
+      }
+    }
+
+    for (const robot of this.extraRobots) {
+      for (const [b, cached] of robot.lastSimState.bodies) {
+        const body = robot.bodies[b];
+        if (body) {
+          body.position.copy(cached.position);
+          body.quaternion.copy(cached.quaternion);
+          body.updateWorldMatrix();
+        }
+      }
+      // A fallen robot fades further, so the ones still walking stand out.
+      const opacity = robot._tumbling ? FALLEN_ROBOT_OPACITY : EXTRA_ROBOT_OPACITY;
+      if (robot._shownOpacity !== opacity) {
+        for (const material of robot.materials) material.opacity = opacity;
+        robot._shownOpacity = opacity;
       }
     }
 

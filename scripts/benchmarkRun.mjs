@@ -10,17 +10,44 @@
 import { parseSuite, selectTests, versionedTaskId } from '../src/benchmark/suite.js';
 import { computeTasks, summarizeTests } from '../src/benchmark/summary.js';
 import { rowToSequence } from '../src/benchmark/testRow.js';
+import { MAX_ROBOTS } from '../src/simulation/benchmarkRunner.js';
+
+export { MAX_ROBOTS };
 
 export const RUN_SCHEMA = 'hpv-benchmark-run/1';
 
-/** Every (model, cell) job, in the order a shard partition and the queue use. */
-export function buildJobs(models, cells) {
+/**
+ * The repeats of each test in groups of at most `maxRobots`, in repeat order
+ * (12 repeats with 5 robots: 5, 5, 2). A page runs a group as that many robots
+ * at once (runBenchmarkGroup); each cell keeps its own seed and result.
+ */
+export function groupCells(cells, maxRobots = MAX_ROBOTS) {
+  const byTest = new Map();
+  for (const cell of cells) {
+    if (!byTest.has(cell.testId)) byTest.set(cell.testId, []);
+    byTest.get(cell.testId).push(cell);
+  }
+  const groups = [];
+  for (const testCells of byTest.values()) {
+    testCells.sort((a, b) => a.repeat - b.repeat);
+    for (let i = 0; i < testCells.length; i += maxRobots) groups.push(testCells.slice(i, i + maxRobots));
+  }
+  return groups;
+}
+
+/**
+ * Every (model, group of cells) job, in the order a shard partition and the
+ * queue use. A job runs one test's repeats (up to `maxRobots`) on one page.
+ */
+export function buildJobs(models, cells, { maxRobots = MAX_ROBOTS } = {}) {
   const jobs = [];
-  for (const model of models) for (const cell of cells) jobs.push({ modelKey: model.key, cell });
-  // Longest first, so a long test never starts last and holds up the whole run.
-  return jobs.sort((a, b) => b.cell.duration - a.cell.duration
+  for (const model of models) for (const group of groupCells(cells, maxRobots)) jobs.push({ modelKey: model.key, cells: group });
+  // Most work first (test length x robots), so a long job never starts last
+  // and holds up the whole run.
+  const work = (job) => job.cells[0].duration * job.cells.length;
+  return jobs.sort((a, b) => work(b) - work(a)
     || a.modelKey.localeCompare(b.modelKey)
-    || a.cell.cellId.localeCompare(b.cell.cellId));
+    || a.cells[0].cellId.localeCompare(b.cells[0].cellId));
 }
 
 /** "2/3" -> { index: 2, count: 3 } (1-based index). */
@@ -32,7 +59,7 @@ export function parseShard(text) {
   return { index, count };
 }
 
-/** A deterministic, duration-balanced slice of the jobs: every count-th one. */
+/** A deterministic, work-balanced slice of the jobs: every count-th one (whole groups, so every cell once). */
 export function shardJobs(jobs, shard) {
   if (!shard) return jobs;
   return jobs.filter((_, i) => i % shard.count === shard.index - 1);

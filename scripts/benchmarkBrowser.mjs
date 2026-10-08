@@ -1,7 +1,8 @@
 // Runs benchmark jobs in headless Chromium: one Vite dev server, one browser,
 // `concurrency` pages. Each page is its own renderer process (its own core) and
 // hosts one MuJoCo demo; a page keeps its loaded policy, so the queue hands it
-// jobs for the same model when it can (see takeNextJob).
+// jobs for the same model when it can (see takeNextJob). A job is one test's
+// repeats (up to MAX_ROBOTS), run at once as that many robots in the scene.
 //
 // The first page is loaded alone so Vite compiles the app once; the others then
 // load from its cache. Before, every shard started its own dev server, and four
@@ -42,10 +43,10 @@ function withTimeout(promise, ms, message) {
 }
 
 /**
- * @param jobs        [{ modelKey, cell }] in queue order
+ * @param jobs        [{ modelKey, cells }] in queue order (buildJobs)
  * @param policies    modelKey -> { onnxPath } as the page should load it
  * @param sequences   testId -> sequence object (rowToSequence)
- * @param onResult    called with (job, result) as each job finishes
+ * @param onResult    called with (job, cell, result) for each cell as its job finishes
  */
 export async function runJobs({
   url,
@@ -76,7 +77,7 @@ export async function runJobs({
       // waitForFunction(pageFunction, arg, options): arg is positional and
       // required, or the options are taken as the arg and the default 30 s applies.
       await page.waitForFunction(
-        () => window.__humanoidViewerDemoComponent?.state === 1 && typeof window.__runBenchmarkCell === 'function',
+        () => window.__humanoidViewerDemoComponent?.state === 1 && typeof window.__runBenchmarkGroup === 'function',
         undefined,
         { timeout: PAGE_READY_TIMEOUT_MS, polling: 250 },
       );
@@ -92,42 +93,46 @@ export async function runJobs({
       let lastModelKey = null;
       for (let job = takeNextJob(queue, lastModelKey); job; job = takeNextJob(queue, lastModelKey)) {
         const started = Date.now();
-        const { cell } = job;
-        let result;
+        const { cells } = job;
+        const finish = (perCell) => cells.forEach((cell, i) => onResult(job, cell, perCell(i)));
         if (unloadable.has(job.modelKey)) {
-          onResult(job, { error: unloadable.get(job.modelKey), metrics: null, wallMs: 0 });
+          finish(() => ({ error: unloadable.get(job.modelKey), metrics: null, wallMs: 0 }));
           continue;
         }
+        // The robots of a group step one after another, so its budget grows with them.
+        const timeoutS = Math.max(...cells.map((cell) => cell.timeoutS)) * cells.length;
+        let outcome;
         try {
-          result = await withTimeout(
-            page.evaluate(([policy, payload]) => window.__runBenchmarkCell(policy, payload), [
+          outcome = await withTimeout(
+            page.evaluate(([policy, payload]) => window.__runBenchmarkGroup(policy, payload), [
               policies[job.modelKey],
               {
-                sequence: sequences[cell.testId],
-                seed: cell.seed,
-                randomize: cell.randomize,
+                sequence: sequences[cells[0].testId],
+                cells: cells.map((cell) => ({ seed: cell.seed, randomize: cell.randomize })),
                 realtime,
-                timeoutMs: cell.timeoutS * 1000,
+                timeoutMs: timeoutS * 1000,
               },
             ]),
-            cell.timeoutS * 1000 + 120_000,
-            `no answer from the page within ${cell.timeoutS + 120}s`,
+            timeoutS * 1000 + 120_000,
+            `no answer from the page within ${timeoutS + 120}s`,
           );
           lastModelKey = job.modelKey;
-          if (result.policyLoadError) {
-            unloadable.set(job.modelKey, result.error);
+          if (outcome.policyLoadError) {
+            unloadable.set(job.modelKey, outcome.error);
             lastModelKey = null;
           }
         } catch (error) {
           // Playwright prefixes "page.evaluate: " and appends the browser stack.
           const message = (error?.message || String(error)).split('\n')[0].replace(/^page\.evaluate: (Error: )?/, '');
-          result = { error: message, metrics: null };
+          outcome = { error: message, metrics: null };
           // The page may be wedged or have lost its policy; start a fresh one.
           await page.close().catch(() => {});
           page = await openPage();
           lastModelKey = null;
         }
-        onResult(job, { ...result, wallMs: Date.now() - started });
+        // A group shares its wall time; each cell is charged its share.
+        const wallMs = Math.round((Date.now() - started) / cells.length);
+        finish((i) => ({ ...(outcome.results ? outcome.results[i] : outcome), wallMs }));
       }
       await page.close().catch(() => {});
     };

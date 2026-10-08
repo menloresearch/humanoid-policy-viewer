@@ -18,7 +18,7 @@ import { buildBenchmarkReportHtml } from '../src/simulation/benchmarkReport.js';
 import { runJobs, startViewerServer } from './benchmarkBrowser.mjs';
 import { collectProvenance, policyFileHashes } from './benchmarkProvenance.mjs';
 import {
-  RUN_SCHEMA, buildJobs, formatTasks, isComplete, mergeRuns, parseShard, runForModel, shardJobs, summarizeRun, toReportRun, uploadBlockers,
+  MAX_ROBOTS, RUN_SCHEMA, buildJobs, formatTasks, isComplete, mergeRuns, parseShard, runForModel, shardJobs, summarizeRun, toReportRun, uploadBlockers,
 } from './benchmarkRun.mjs';
 import { classifyTarget, describeTarget } from './benchmarkTargets.mjs';
 import { checkCheckpointDir, readReferenceJointNames } from './checkpointChecks.mjs';
@@ -33,7 +33,7 @@ import { loadSuiteDir } from './suiteDir.mjs';
 
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-const KEYS = ['suite', 'suite-file', 'model', 'tests', 'repeats', 'jobs', 'shard', 'out'];
+const KEYS = ['suite', 'suite-file', 'model', 'tests', 'repeats', 'jobs', 'robots', 'shard', 'out'];
 const FLAGS = ['pr', 'dry-run', 'no-upload', 'upload', 'force', 'watch', 'verbose', 'help'];
 
 const USAGE = `Usage:
@@ -52,6 +52,8 @@ Options (no "--" needed):
   tests=<id,id>        run only these test ids (results are then local-only)
   repeats=<n>          override every test's repeat count (local-only)
   jobs=<n>             browser pages in parallel (default: half the CPU cores)
+  robots=<n>           most repeats of a test a page runs at once, as robots in
+                       one scene (1-${MAX_ROBOTS}, default ${MAX_ROBOTS}); results do not depend on it
   shard=<i>/<n>        run slice i of n; combine with \`npm run benchmark merge\`
   out=<dir>            where to write results (default: benchmark_runs/<timestamp>)
 
@@ -60,7 +62,8 @@ Flags:
   no-upload            never upload
   pr                   upload as a pull request even if you could commit directly
   force                run even if this viewer does not match the suite (local-only)
-  watch                show the browser and run in real time, one page
+  watch                show the browser and run in real time, one page (a test's
+                       repeats walk side by side as see-through robots)
   verbose              print all browser console output
 
 Results are uploaded only when they can be reproduced: Hub model + Hub suite,
@@ -226,6 +229,8 @@ async function runBenchmarkCommand(args) {
   const watch = flags.has('watch');
   const jobsCount = watch ? 1 : parseCount(options.jobs, 'jobs') ?? defaultJobs();
   const repeats = parseCount(options.repeats, 'repeats');
+  const robots = parseCount(options.robots, 'robots') ?? MAX_ROBOTS;
+  if (robots > MAX_ROBOTS) throw new Error(`robots= must be at most ${MAX_ROBOTS}`);
   const shard = options.shard ? parseShard(options.shard) : null;
   const only = options.tests ? options.tests.split(',').map((s) => s.trim()).filter(Boolean) : null;
   const outDir = resolve(options.out ?? join(appDir, 'benchmark_runs', timestamp()));
@@ -246,15 +251,17 @@ async function runBenchmarkCommand(args) {
   checkModels(models);
   for (const model of models) model.files = policyFileHashes(model.modelDir, model.primary);
 
-  const allJobs = buildJobs(models, cells);
+  const allJobs = buildJobs(models, cells, { maxRobots: robots });
   const jobs = shardJobs(allJobs, shard);
+  const cellCount = (list) => list.reduce((sum, job) => sum + job.cells.length, 0);
+  const runCells = cellCount(jobs);
   const tests = selected.map(({ row }) => row).filter((row) => cells.some((cell) => cell.testId === row.id));
   const provenance = collectProvenance(appDir);
   if (provenance.hpv.dirty) console.warn('Warning: this viewer checkout has uncommitted changes; the results will be local-only.');
 
   console.log(`Suite ${loaded.suite.suite} v${loaded.suite.version} (${loaded.info.source === 'hub' ? `datasets/${loaded.info.id}@${loaded.info.sha.slice(0, 7)}` : loaded.info.path}): ${tests.length} tests, ${cells.length} cells`);
   console.log(`Models: ${models.map((m) => m.label).join(', ')}`);
-  console.log(`Running ${jobs.length} job(s)${shard ? ` (shard ${shard.index}/${shard.count} of ${allJobs.length})` : ''} on ${jobsCount} page(s)${watch ? ', real time' : ''}`);
+  console.log(`Running ${runCells} cell(s) as ${jobs.length} job(s) of up to ${robots} robot(s)${shard ? ` (shard ${shard.index}/${shard.count} of ${cellCount(allJobs)} cells)` : ''} on ${jobsCount} page(s)${watch ? ', real time' : ''}`);
 
   const { libraryDir, libraryRoots, cleanup } = linkLibrary(models);
   process.on('exit', cleanup);
@@ -275,8 +282,7 @@ async function runBenchmarkCommand(args) {
       realtime: watch,
       verbose: flags.has('verbose'),
       log,
-      onResult: (job, result) => {
-        const { cell } = job;
+      onResult: (job, cell, result) => {
         results.push({
           modelKey: job.modelKey,
           cellId: cell.cellId,
@@ -294,7 +300,7 @@ async function runBenchmarkCommand(args) {
           metrics: result.metrics ?? null,
         });
         const status = result.error ? `ERROR ${result.error}` : result.metrics?.fell?.fell ? `fell at ${result.metrics.fell.time}s` : 'ok';
-        console.log(`[${results.length}/${jobs.length}] ${models.find((m) => m.key === job.modelKey).label} ${cell.cellId}: ${status} (${(result.wallMs / 1000).toFixed(1)}s)`);
+        console.log(`[${results.length}/${runCells}] ${models.find((m) => m.key === job.modelKey).label} ${cell.cellId}: ${status} (${(result.wallMs / 1000).toFixed(1)}s)`);
       },
     }));
   } finally {
@@ -312,9 +318,10 @@ async function runBenchmarkCommand(args) {
     overrides: { tests: only, repeats, force: flags.has('force') && problems.length > 0 },
     shard,
     jobs: jobsCount,
+    robots,
     models: models.map(({ modelDir, ...rest }) => rest),
     tests,
-    expectedCells: allJobs.length,
+    expectedCells: cellCount(allJobs),
     cells: results.sort((a, b) => a.modelKey.localeCompare(b.modelKey) || a.cellId.localeCompare(b.cellId)),
   };
   Object.assign(run, isComplete(run) ? summarizeRun(run) : {});
