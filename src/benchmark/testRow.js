@@ -20,6 +20,8 @@
 //   terrain         { type: "stairs" | "slope" | "boxes" | "rough", ...parameters }
 //                   | null: the course this test walks on, built from its
 //                   parameters (src/simulation/terrainGen.js)
+//   goal            { x, y, radius_m } | null: an end zone the robot's base must
+//                   enter for the run to count as survived
 //   metrics_opt_in  string[], e.g. ["gait_symmetry"]
 //
 // rowToSequence() turns a row into the sequence object commandSequencer and
@@ -40,6 +42,21 @@ export const PUSH_END_MARGIN_S = 2;
 /** The latest start time of a push held for `pushDuration` in a test lasting `duration`. */
 export function latestPushStart(duration, pushDuration) {
   return duration - PUSH_END_MARGIN_S - pushDuration;
+}
+
+// An end zone: a circle on the floor the robot's base must enter, so a policy
+// cannot survive a course by stopping in front of it. Positions are sampled at
+// least every ~0.25 s, so a smaller circle could be crossed between samples.
+export const GOAL_MIN_RADIUS_M = 0.25;
+
+/** Problems with a goal spec { x, y, radius_m } (metres from the robot's start; +x ahead, +y left). */
+export function validateGoal(goal) {
+  if (!goal || typeof goal !== 'object' || Array.isArray(goal)) return ['must be an object like { "x": 7, "y": 0, "radius_m": 1 }'];
+  const errors = [];
+  for (const key of Object.keys(goal)) if (!['x', 'y', 'radius_m'].includes(key)) errors.push(`unknown key "${key}"`);
+  for (const key of ['x', 'y']) if (!isNumber(goal[key])) errors.push(`${key} is required (a number, metres)`);
+  if (!isNumber(goal.radius_m) || goal.radius_m < GOAL_MIN_RADIUS_M) errors.push(`radius_m must be a number >= ${GOAL_MIN_RADIUS_M}`);
+  return errors;
 }
 
 const EVENT_KEYS = ['t', 'type', 'dir', 'force', 'duration', 'targetBody', 'torqueAxis', 'torqueMag', 'label'];
@@ -70,7 +87,8 @@ export const ROW_FEATURES = [
     ],
   }],
   ['limits', { struct: [['vx', floats], ['vy', floats], ['wz', floats]] }],
-  ['foot_friction', float], ['terrain', { struct: terrainFeatures }], ['metrics_opt_in', { sequence: 'string' }],
+  ['foot_friction', float], ['terrain', { struct: terrainFeatures }],
+  ['goal', { struct: [['x', float], ['y', float], ['radius_m', float]] }], ['metrics_opt_in', { sequence: 'string' }],
 ];
 
 /** ROW_FEATURES as the YAML structure `datasets` reads from a card. */
@@ -137,6 +155,7 @@ export function validateTestRow(row) {
   }
   if (row.foot_friction !== null && (!isNumber(row.foot_friction) || row.foot_friction <= 0)) fail('foot_friction must be null or a number > 0');
   if (row.terrain !== null) for (const problem of validateTerrain(row.terrain)) fail(`terrain: ${problem}`);
+  if (row.goal !== null) for (const problem of validateGoal(row.goal)) fail(`goal: ${problem}`);
   if (!Array.isArray(row.metrics_opt_in) || row.metrics_opt_in.some((m) => !OPT_IN_METRICS.includes(m))) {
     fail(`metrics_opt_in must list only: ${OPT_IN_METRICS.join(', ')}`);
   }
@@ -153,6 +172,7 @@ export function rowToSequence(row) {
   if (row.limits) sequence.limits = row.limits;
   if (row.foot_friction !== null && row.foot_friction !== undefined) sequence.footFriction = row.foot_friction;
   if (row.terrain) sequence.terrain = { ...row.terrain };
+  if (row.goal) sequence.goal = { ...row.goal };
   if (row.events.length) {
     sequence.events = row.events.map((event) => {
       const out = { t: event.t, type: 'push', dir: event.dir, force: event.force, duration: event.duration };
@@ -199,6 +219,7 @@ export function sequenceToRow(id, sequence, previous = null) {
     limits: sequence.limits ?? null,
     foot_friction: sequence.footFriction ?? null,
     terrain: sequence.terrain ? { ...sequence.terrain } : null,
+    goal: sequence.goal ? { ...sequence.goal } : null,
     metrics_opt_in: sequence.gaitSymmetry === true ? ['gait_symmetry'] : [],
   };
 }

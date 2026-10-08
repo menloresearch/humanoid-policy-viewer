@@ -111,6 +111,7 @@ const STARTER_ROW = {
   limits: null,
   foot_friction: null,
   terrain: null,
+  goal: null,
   metrics_opt_in: ['gait_symmetry'],
 };
 

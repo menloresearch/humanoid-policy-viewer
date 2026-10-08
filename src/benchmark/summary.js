@@ -22,7 +22,10 @@
 //     smoothed (see variance()), so the interval is never falsely zero-width.
 //
 // A cell that errored counts as a failure (fell at t = 0), never as missing
-// data, so a crashing policy cannot score well by crashing.
+// data, so a crashing policy cannot score well by crashing. On a test with a
+// goal (an end zone), a run whose base never entered the zone did not finish
+// the test: it counts as falling at the end, so it fails survival_rate but keeps
+// survival_time 1 (it stayed upright the whole time).
 
 const round = (value, digits = 4) => (Number.isFinite(value) ? Math.round(value * 10 ** digits) / 10 ** digits : null);
 const mean = (values) => (values.length ? values.reduce((sum, v) => sum + v, 0) / values.length : null);
@@ -55,6 +58,14 @@ function fallTime(cell) {
   return cell.metrics.fell?.fell ? (cell.metrics.fell.time ?? 0) : null;
 }
 
+/** Whether the robot's base entered the test's end zone (true when the test has none). */
+export function reachedGoal(cell, row) {
+  if (!row.goal) return true;
+  const path = cell.metrics?.topDown?.actual ?? [];
+  const { x, y, radius_m: r } = row.goal;
+  return path.some(([px, py]) => Number.isFinite(px) && Number.isFinite(py) && (px - x) ** 2 + (py - y) ** 2 <= r * r);
+}
+
 // Every metric a suite task may name, by "<name>@<version>".
 //   perCell(cell, row) -> number   the value of one (test, repeat)
 //   range                          bounds of the value: smooths the spread, clips the interval
@@ -62,8 +73,8 @@ export const METRICS = {
   'survival_rate@1': {
     higherIsBetter: true,
     range: [0, 1],
-    description: 'Probability of finishing a test without falling (1 = never fell in any repeat)',
-    perCell: (cell) => (fallTime(cell) === null ? 1 : 0),
+    description: 'Probability of finishing a test without falling, and reaching its end zone if it has one (1 = always)',
+    perCell: (cell, row) => (fallTime(cell) === null && reachedGoal(cell, row) ? 1 : 0),
   },
   'survival_time@1': {
     higherIsBetter: true,

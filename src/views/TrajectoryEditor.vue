@@ -96,9 +96,24 @@
               title="Turns on the gait symmetry metric for this test; it only means something on straight, steady walking"
             ></v-checkbox>
           </div>
-          <template v-if="working.terrain">
-            <div class="text-caption text-medium-emphasis mb-1">{{ terrainDescription }}</div>
-            <div class="d-flex flex-wrap ga-2 mb-2">
+          <div class="d-flex flex-wrap align-center ga-3 mb-2">
+            <v-checkbox
+              v-model="hasGoal" label="End zone" density="compact" hide-details
+              title="A circle the robot's base must enter for a run to count as surviving, so stopping in front of a course does not"
+            ></v-checkbox>
+            <template v-if="working.goal">
+              <v-text-field
+                v-for="g in GOAL_FIELDS" :key="g.key"
+                :model-value="working.goal[g.key]" :label="g.label" type="number" step="0.1"
+                density="compact" hide-details style="max-width: 140px"
+                @update:modelValue="(v) => setGoalParam(g.key, v)"
+              ></v-text-field>
+            </template>
+          </div>
+          <div v-for="e in goalErrors" :key="e" class="text-error text-caption mb-2">End zone: {{ e }}</div>
+          <template v-if="working.terrain || working.goal">
+            <div v-if="working.terrain" class="text-caption text-medium-emphasis mb-1">{{ terrainDescription }}</div>
+            <div v-if="working.terrain" class="d-flex flex-wrap ga-2 mb-2">
               <v-text-field
                 v-for="p in terrainParams" :key="p.key"
                 :model-value="working.terrain[p.key]"
@@ -108,7 +123,7 @@
               ></v-text-field>
             </div>
             <TerrainPreview
-              :terrain="working.terrain" :commands="working.commands" :duration="Number(working.duration) || 0"
+              :terrain="working.terrain" :goal="working.goal" :commands="working.commands" :duration="Number(working.duration) || 0"
               @problems="(p) => (terrainErrors = p.errors)"
             />
           </template>
@@ -179,8 +194,8 @@ import { appState, closeEditor, newBlankSequence, defaultLimits, MAX_DURATION } 
 import { listSequences, loadSequenceFile, saveSequenceFile, deleteSequenceFile, slugify } from '@/state/sequenceStore.js';
 import { STATIC } from '@/state/viewerMode.js';
 import { commandSequencer } from '@/simulation/commandSequencer.js';
-import { ALL_CONFIG, PUSH_END_MARGIN_S } from '@/benchmark/testRow.js';
-import { TERRAIN_TYPES, defaultTerrain } from '@/simulation/terrainGen.js';
+import { ALL_CONFIG, GOAL_MIN_RADIUS_M, PUSH_END_MARGIN_S, validateGoal } from '@/benchmark/testRow.js';
+import { TERRAIN_TYPES, buildTerrain, defaultTerrain } from '@/simulation/terrainGen.js';
 import { loadTestScene } from '@/simulation/terrainScene.js';
 import { demoRef } from '@/state/demoRef.js';
 
@@ -206,6 +221,11 @@ export default {
   components: { KeypointChart, PushLane, TerrainPreview },
   data() {
     return {
+      GOAL_FIELDS: [
+        { key: 'x', label: 'x (m ahead)' },
+        { key: 'y', label: 'y (m left)' },
+        { key: 'radius_m', label: `radius (m, ≥ ${GOAL_MIN_RADIUS_M})` },
+      ],
       STATIC,
       MAX_DURATION,
       FRICTION_PRESETS,
@@ -287,7 +307,24 @@ export default {
       return '';
     },
     canSave() {
-      return this.durationError === '' && this.idError === '' && this.file.length > 0 && !this.terrainErrors.length;
+      return this.durationError === '' && this.idError === '' && this.file.length > 0 && !this.terrainErrors.length && !this.goalErrors.length;
+    },
+    goalErrors() {
+      return this.working?.goal ? validateGoal(this.working.goal) : [];
+    },
+    hasGoal: {
+      get() {
+        return !!this.working?.goal;
+      },
+      set(on) {
+        if (!on) {
+          this.working.goal = null;
+          return;
+        }
+        // Default: 0.5 m past the far end of the course (or 3 m ahead on flat floor), 1 m radius.
+        const end = this.working.terrain ? buildTerrain(this.working.terrain).bounds.xmax : 2.5;
+        this.working.goal = { x: Math.round((end + 0.5) * 10) / 10, y: 0, radius_m: 1 };
+      },
     },
     terrainTypeItems() {
       return [
@@ -440,6 +477,12 @@ export default {
     },
     deleteEvent(index) {
       this.working.events.splice(index, 1);
+      this.setStatus('');
+    },
+    setGoalParam(key, value) {
+      const number = Number(value);
+      if (!Number.isFinite(number)) return;
+      this.working.goal = { ...this.working.goal, [key]: number };
       this.setStatus('');
     },
     setTerrainParam(key, value) {
@@ -624,6 +667,7 @@ export default {
         clean.footFriction = Number(this.working.footFriction);
       }
       if (this.working.gaitSymmetry === true) clean.gaitSymmetry = true;
+      if (this.working.goal) clean.goal = { ...this.working.goal };
       return clean;
     },
     async save() {

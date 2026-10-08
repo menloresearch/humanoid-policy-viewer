@@ -17,7 +17,7 @@ function row(id, extra = {}) {
   return {
     id, config, schema_version: 1, kind: 'velocity-sequence', name: id, description: '', tags: [],
     duration: 4, commands: [{ t: 0, vx: 0.5, vy: 0, wz: 0 }], events: [], limits: null,
-    foot_friction: null, terrain: null, metrics_opt_in: [], ...extra,
+    foot_friction: null, terrain: null, goal: null, metrics_opt_in: [], ...extra,
   };
 }
 
@@ -255,4 +255,23 @@ test('the smoke-suite fixture is valid', async () => {
   assert.ok(loaded.rows.length >= 2);
   assert.deepEqual(compatibilityProblems(loaded.suite), []);
   assert.ok(expandCells(selectTests(loaded.suite, loaded.rows)).length >= 2);
+});
+
+test('an end zone: the run must enter it to count as surviving', () => {
+  assert.deepEqual(validateTestRow(row('terrain/a', { goal: { x: 7, y: 0, radius_m: 1 } })), []);
+  assert.ok(validateTestRow(row('terrain/a', { goal: { x: 7, y: 0, radius_m: 0.1 } })).some((e) => e.includes('radius_m')));
+  assert.ok(validateTestRow(row('terrain/a', { goal: { x: 7, radius_m: 1, z: 0 } })).some((e) => e.includes('"z"')));
+
+  const rows = [row('terrain/a', { goal: { x: 5, y: 0, radius_m: 1 } })];
+  const s = suite({ defaults: { repeats: 3, randomize: { action_delay: 'env_range' } }, tests: [{ config: 'terrain' }] });
+  const walked = (path, fellAt = null) => ({ ...ran(fellAt), topDown: { actual: path } });
+  const cells = [
+    { testId: 'terrain/a', repeat: 0, metrics: walked([[0, 0], [2, 0], [4.2, 0.3]]) }, // inside the zone
+    { testId: 'terrain/a', repeat: 1, metrics: walked([[0, 0], [2, 0], [3.5, 0]]) }, // stopped short
+    { testId: 'terrain/a', repeat: 2, metrics: walked([[0, 0], [4.5, 0]], 2) }, // reached it, but fell
+  ];
+  const [test] = summarizeTests(cells, selectTests(s, rows));
+  assert.deepEqual(test.metrics['survival_rate@1'].values, [1, 0, 0]);
+  // Stopping short is a failure to finish, not a fall: it stayed upright for the whole test.
+  assert.deepEqual(test.metrics['survival_time@1'].values, [1, 1, 0.5]);
 });

@@ -7,6 +7,11 @@
         :x="sx(-SPAWN)" :y="sy(SPAWN)" :width="sx(SPAWN) - sx(-SPAWN)" :height="sy(-SPAWN) - sy(SPAWN)"
         class="tp-spawn" :class="{ 'tp-bad': errors.length }"
       />
+      <circle
+        v-if="goal" :cx="sx(goal.x)" :cy="sy(goal.y)" :r="Math.abs(sx(goal.x + goal.radius_m) - sx(goal.x))"
+        class="tp-goal"
+      />
+      <text v-if="goal" :x="sx(goal.x)" :y="sy(goal.y) + 4" class="tp-label" text-anchor="middle">end</text>
       <polyline :points="pathPoints" class="tp-path" />
       <circle :cx="sx(0)" :cy="sy(0)" r="4" class="tp-robot" />
       <line :x1="sx(0)" :y1="sy(0)" :x2="sx(0.6)" :y2="sy(0)" class="tp-heading" />
@@ -39,6 +44,8 @@ export default {
   name: 'TerrainPreview',
   props: {
     terrain: { type: Object, default: null },
+    // End zone { x, y, radius_m } | null, drawn as a circle.
+    goal: { type: Object, default: null },
     commands: { type: Array, default: () => [] },
     duration: { type: Number, default: 0 },
   },
@@ -61,6 +68,10 @@ export default {
       if (this.built) {
         xs.push(this.built.bounds.xmin, this.built.bounds.xmax);
         ys.push(this.built.bounds.ymin, this.built.bounds.ymax);
+      }
+      if (this.goal) {
+        xs.push(this.goal.x - this.goal.radius_m, this.goal.x + this.goal.radius_m);
+        ys.push(this.goal.y - this.goal.radius_m, this.goal.y + this.goal.radius_m);
       }
       let x0 = Math.min(...xs) - PAD;
       let x1 = Math.max(...xs) + PAD;
@@ -128,6 +139,7 @@ export default {
 .tp-top, .tp-side { width: 100%; height: auto; border: 1px solid #e0e0e0; border-radius: 4px; background: #fafafa; }
 .tp-floor { fill: #f4f4f2; }
 .tp-box { stroke: rgba(0, 0, 0, 0.25); stroke-width: 0.5; }
+.tp-goal { fill: rgba(46, 125, 50, 0.15); stroke: #2e7d32; stroke-dasharray: 4 3; }
 .tp-spawn { fill: rgba(25, 118, 210, 0.08); stroke: #1976d2; stroke-dasharray: 4 3; }
 .tp-spawn.tp-bad { fill: rgba(211, 47, 47, 0.15); stroke: #d32f2f; }
 .tp-path { fill: none; stroke: #1976d2; stroke-width: 2; }

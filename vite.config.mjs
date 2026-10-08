@@ -12,7 +12,7 @@ import { dirname, extname, relative, resolve } from 'node:path'
 import { listModelRoots, listModels as discoverModels } from './scripts/modelDiscovery.mjs'
 import { getBenchmarkRunsDir, getModelLibrary } from './scripts/modelLibraryConfig.mjs'
 import { readRows, writeRows } from './scripts/suiteDir.mjs'
-import { rowToSequence, sequenceToRow, validateTestRow } from './src/benchmark/testRow.js'
+import { rowToSequence, sequenceToRow, validateGoal, validateTestRow } from './src/benchmark/testRow.js'
 import { validateTerrain } from './src/simulation/terrainGen.js'
 
 // A submodule checked out under public/ carries a `.git` pointer file that
@@ -212,7 +212,7 @@ function humanoidDevPlugin() {
         clean.events = events;
       }
     }
-    // Per-test floor grip, terrain course and the gait-symmetry opt-in; saving must keep them.
+    // Per-test floor grip, terrain course, end zone and the gait-symmetry opt-in; saving must keep them.
     const footFriction = Number(parsed.footFriction);
     if (parsed.footFriction !== undefined && parsed.footFriction !== null) {
       if (!Number.isFinite(footFriction) || footFriction <= 0) throw new Error('"footFriction" must be a number > 0');
@@ -222,6 +222,11 @@ function humanoidDevPlugin() {
       const problems = validateTerrain(parsed.terrain);
       if (problems.length) throw new Error(`"terrain": ${problems.join('; ')}`);
       clean.terrain = { ...parsed.terrain };
+    }
+    if (parsed.goal !== undefined && parsed.goal !== null) {
+      const problems = validateGoal(parsed.goal);
+      if (problems.length) throw new Error(`"goal": ${problems.join('; ')}`);
+      clean.goal = { x: round3(parsed.goal.x), y: round3(parsed.goal.y), radius_m: round3(parsed.goal.radius_m) };
     }
     if (parsed.gaitSymmetry === true) clean.gaitSymmetry = true;
     return clean;

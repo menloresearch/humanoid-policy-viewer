@@ -28,7 +28,7 @@ A test describes a scenario and nothing else; it does not know how often it runs
  "duration": 12, "commands": [{"t": 0, "vx": 0.6, "vy": 0, "wz": 0}],
  "events": [{"t": 2, "type": "push", "dir": [-1, 0, 0], "force": 450, "duration": 0.15, "targetBody": "pelvis_link",
              "torqueAxis": null, "torqueMag": null, "label": "pelvis back (450N)"}],
- "limits": null, "foot_friction": null, "terrain": null, "metrics_opt_in": []}
+ "limits": null, "foot_friction": null, "terrain": null, "goal": null, "metrics_opt_in": []}
 ```
 
 `id` is `<config>/<name>` and is how results refer to the test. A benchmark without categories puts every test
@@ -37,7 +37,11 @@ in the one config `default` (the editor does this when Category is left blank); 
 settles first) and ends at least 2 s before the test does (time to recover), so `t >= 1` and
 `t + duration <= <test duration> - 2`; the dataset check refuses rows that break this. `limits` overrides every policy's trained command
 range, so leave it `null` unless the test needs it. `foot_friction` overrides the feet's sliding friction (the
-scene's is 0.6). `terrain` describes the course the test walks on (below). `metrics_opt_in: ["gait_symmetry"]` turns on
+scene's is 0.6). `terrain` describes the course the test walks on (below). `goal` is an optional end zone,
+`{"x": 7, "y": 0, "radius_m": 1}` in metres from the robot's start (+x ahead, +y to its left, radius at least
+0.25 m): a run counts as surviving only if the robot's base entered that circle and it never fell. Without one, a
+policy could "survive" a course by stopping in front of it. Missing the zone fails `survival_rate` but not
+`survival_time` (the robot stayed upright the whole time). `metrics_opt_in: ["gait_symmetry"]` turns on
 the gait symmetry metric (straight, steady walking only). The full schema is in `src/benchmark/testRow.js`.
 
 ### Terrain
