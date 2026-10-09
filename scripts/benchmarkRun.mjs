@@ -222,3 +222,16 @@ export function formatTasks(run, modelKey) {
     return `${task.taskId.padEnd(40)} ${value}${direction}${counts}${definition?.description ? `  ${definition.description}` : ''}`;
   });
 }
+
+/** How one model's runs ended, keeping a fall apart from staying upright but missing the end zone. */
+export function formatOutcomes(run, modelKey) {
+  const tests = run.perTest?.[modelKey] ?? [];
+  const runs = tests.reduce((sum, test) => sum + test.repeats, 0);
+  if (!runs) return null;
+  const errors = tests.reduce((sum, test) => sum + test.errors, 0);
+  const fell = tests.reduce((sum, test) => sum + test.fellAt.filter((t) => t !== null).length, 0) - errors;
+  const missed = tests.flatMap((test) => (test.missedGoal ?? []).some(Boolean) ? [`${test.testId} ${test.missedGoal.filter(Boolean).length}/${test.repeats}`] : []);
+  const missedRuns = tests.reduce((sum, test) => sum + (test.missedGoal ?? []).filter(Boolean).length, 0);
+  const passed = runs - errors - fell - missedRuns;
+  return `Outcomes: ${passed}/${runs} passed, ${fell} fell, ${missedRuns} upright but missed the end zone${missed.length ? ` (${missed.join(', ')})` : ''}${errors ? `, ${errors} errored` : ''}`;
+}

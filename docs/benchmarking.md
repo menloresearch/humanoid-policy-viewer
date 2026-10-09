@@ -8,8 +8,8 @@ into the model repo's `.eval_results/` and appear on the model page and on the b
 ```bash
 npm run benchmark menloresearch/asimov1-loco                         # Hub model, default suite -> uploads
 npm run benchmark ./models/model_Aug_18_1                            # local model -> local results only
-npm run benchmark menloresearch/asimov1-loco ../asimov-locomotion-bench          # local suite -> local only
-npm run benchmark menloresearch/asimov1-loco datasets/menloresearch/asimov-locomotion-bench@v1 pr
+npm run benchmark menloresearch/asimov1-loco ./benchmark          # local suite -> local only
+npm run benchmark menloresearch/asimov1-loco datasets/<org>/<name>@v1 pr
 npm run benchmark menloresearch/asimov1-loco test/fixtures/smoke-suite jobs=1   # 20-second smoke run
 ```
 

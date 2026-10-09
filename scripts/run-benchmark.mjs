@@ -18,7 +18,7 @@ import { buildBenchmarkReportHtml } from '../src/simulation/benchmarkReport.js';
 import { runJobs, startViewerServer } from './benchmarkBrowser.mjs';
 import { collectProvenance, policyFileHashes } from './benchmarkProvenance.mjs';
 import {
-  MAX_ROBOTS, RUN_SCHEMA, buildJobs, formatTasks, isComplete, mergeRuns, parseShard, runForModel, shardJobs, summarizeRun, toReportRun, uploadBlockers,
+  MAX_ROBOTS, RUN_SCHEMA, buildJobs, formatOutcomes, formatTasks, isComplete, mergeRuns, parseShard, runForModel, shardJobs, summarizeRun, toReportRun, uploadBlockers,
 } from './benchmarkRun.mjs';
 import { classifyTarget, describeTarget } from './benchmarkTargets.mjs';
 import { checkCheckpointDir, readReferenceJointNames } from './checkpointChecks.mjs';
@@ -72,8 +72,8 @@ no failed cells. Uploading needs HF_TOKEN (or \`hf auth login\`).
 
 Examples:
   npm run benchmark menloresearch/asimov1-loco
-  npm run benchmark ./models/model_Aug_18_1 suite=../asimov-locomotion-bench
-  npm run benchmark menloresearch/asimov1-loco datasets/menloresearch/asimov-locomotion-bench@v1 pr
+  npm run benchmark ./models/model_Aug_18_1 suite=./benchmark
+  npm run benchmark menloresearch/asimov1-loco datasets/<org>/<name>@v1 pr
   npm run benchmark menloresearch/asimov1-loco test/fixtures/smoke-suite jobs=2`;
 
 function timestamp() {
@@ -94,7 +94,7 @@ function defaultJobs() {
 async function resolveSuite(target, suiteFile, log) {
   if (!target) {
     const fallback = JSON.parse(readFileSync(join(appDir, 'src/benchmark/default-suite.json'), 'utf8'));
-    if (!fallback.revision) {
+    if (!fallback.dataset || !fallback.revision) {
       throw new Error(`No default benchmark suite has been released yet (src/benchmark/default-suite.json). Give one: a local folder (e.g. test/fixtures/smoke-suite) or datasets/<org>/<name>.`);
     }
     target = { kind: 'suite', source: 'hub', id: fallback.dataset, revision: fallback.revision };
@@ -164,6 +164,8 @@ async function publishResults(run, outDir, { upload, dryRun, forcePr }) {
   for (const model of run.models) {
     console.log(`\n${model.label}`);
     for (const line of formatTasks(run, model.key)) console.log(`  ${line}`);
+    const outcomes = formatOutcomes(run, model.key);
+    if (outcomes) console.log(`  ${outcomes}`);
     const blockers = uploadBlockers(run, model.key);
     const logsDir = run.suite.id ? evalLogsDir(run.suite.id, run.suite.raw.version) : null;
     const sourceUrl = model.repo && logsDir ? `https://huggingface.co/${model.repo}/blob/main/${logsDir}/report.html` : null;
@@ -299,7 +301,10 @@ async function runBenchmarkCommand(args) {
           wallMs: result.wallMs,
           metrics: result.metrics ?? null,
         });
-        const status = result.error ? `ERROR ${result.error}` : result.metrics?.fell?.fell ? `fell at ${result.metrics.fell.time}s` : 'ok';
+        const status = result.error ? `ERROR ${result.error}`
+          : result.metrics?.fell?.fell ? `fell at ${result.metrics.fell.time}s`
+          : result.metrics?.goal && !result.metrics.goal.reached ? `upright, missed end zone by ${result.metrics.goal.miss_m ?? '?'} m`
+          : 'ok';
         console.log(`[${results.length}/${runCells}] ${models.find((m) => m.key === job.modelKey).label} ${cell.cellId}: ${status} (${(result.wallMs / 1000).toFixed(1)}s)`);
       },
     }));

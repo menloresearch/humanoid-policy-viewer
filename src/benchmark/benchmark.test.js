@@ -9,6 +9,7 @@ import { buildEvalYaml, compatibilityProblems, expandCells, parseSuite, selectTe
 import { computeTasks, summarizeTests } from './summary.js';
 import { BENCHMARK_PROTOCOL } from './protocol.js';
 import { isPushCategory } from '../simulation/benchmarkReport.js';
+import { goalOutcome } from '../simulation/metrics.js';
 
 const FIXTURE = new URL('../../test/fixtures/smoke-suite/', import.meta.url).pathname;
 
@@ -234,7 +235,11 @@ test('suite init writes a valid starter benchmark', async () => {
   const loaded = loadSuiteDir(dir);
   assert.equal(loaded.suite.suite, 'my-bench');
   assert.deepEqual(compatibilityProblems(loaded.suite), []);
-  assert.equal(expandCells(selectTests(loaded.suite, loaded.rows)).length, 5);
+  assert.deepEqual(loaded.rows.map((r) => r.id).sort(), ['locomotion/circle_walk', 'locomotion/forward_walk', 'push_standing/four_directions_100n']);
+  assert.equal(expandCells(selectTests(loaded.suite, loaded.rows)).length, 15);
+  const pushes = loaded.rows.find((r) => r.id === 'push_standing/four_directions_100n').events;
+  assert.deepEqual(pushes.map((e) => e.dir), [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0]]);
+  assert.ok(pushes.every((e) => e.force === 100));
   assert.throws(() => initSuite(dir, { log: () => {} }), /not empty/);
 
   const empty = join(dirname(dir), 'empty-bench');
@@ -280,6 +285,12 @@ test('an end zone: the run must enter it to count as surviving', () => {
   assert.deepEqual(test.metrics['survival_rate@1'].values, [1, 0, 0]);
   // Stopping short is a failure to finish, not a fall: it stayed upright for the whole test.
   assert.deepEqual(test.metrics['survival_time@1'].values, [1, 1, 0.5]);
+  assert.deepEqual(test.missedGoal, [false, true, false]);
+  assert.deepEqual(test.fellAt, [null, null, 2]);
+  // Each cell records how far outside the zone it stayed.
+  assert.deepEqual(goalOutcome([[0, 0], [3.5, 0]], { x: 5, y: 0, radius_m: 1 }), { reached: false, miss_m: 0.5 });
+  assert.deepEqual(goalOutcome([[4.2, 0.3]], { x: 5, y: 0, radius_m: 1 }), { reached: true, miss_m: 0 });
+  assert.deepEqual(goalOutcome([], { x: 5, y: 0, radius_m: 1 }), { reached: false, miss_m: null });
 });
 
 test('a test opts into several metrics; the list survives the editor round trip', () => {

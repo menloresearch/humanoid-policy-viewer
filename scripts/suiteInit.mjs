@@ -41,27 +41,75 @@ reference_models: []            # models \`npm run suite baseline\` compares
 `;
 }
 
-const STARTER_ROW = {
-  id: 'locomotion/forward_walk',
-  config: 'locomotion',
+const starterRow = (fields) => ({
   schema_version: 1,
   kind: 'velocity-sequence',
-  name: 'forward walk',
-  description: 'Stand, walk forward at 0.6 m/s for 11 s, stop.',
+  description: '',
   tags: [],
-  duration: 12,
-  commands: [{ t: 0, vx: 0, vy: 0, wz: 0 }, { t: 0.3, vx: 0.6, vy: 0, wz: 0 }, { t: 11.5, vx: 0, vy: 0, wz: 0 }],
   events: [],
   limits: null,
   foot_friction: null,
   terrain: null,
   goal: null,
-  metrics_opt_in: ['gait_symmetry'],
-};
+  metrics_opt_in: [],
+  ...fields,
+});
+
+// A 100 N, 0.15 s shove to the chest from one side.
+const chestPush = (t, dir, side) => ({
+  t,
+  type: 'push',
+  dir,
+  force: 100,
+  duration: 0.15,
+  targetBody: 'waist_yaw_link',
+  torqueAxis: null,
+  torqueMag: null,
+  label: `chest ${side} (100 N)`,
+});
+
+// The example benchmark: three small tests that run in under a minute and
+// cover walking straight, turning and being pushed.
+const STARTER_ROWS = [
+  starterRow({
+    id: 'locomotion/forward_walk',
+    config: 'locomotion',
+    name: 'forward walk',
+    description: 'Stand, walk forward at 0.6 m/s for 11 s, stop.',
+    duration: 12,
+    commands: [{ t: 0, vx: 0, vy: 0, wz: 0 }, { t: 0.3, vx: 0.6, vy: 0, wz: 0 }, { t: 11.5, vx: 0, vy: 0, wz: 0 }],
+    goal: { x: 6, y: 0, radius_m: 1 },
+    metrics_opt_in: ['gait_symmetry'],
+  }),
+  starterRow({
+    id: 'locomotion/circle_walk',
+    config: 'locomotion',
+    name: 'circle walk',
+    description: 'Walk a 1 m radius circle to the left at 0.5 m/s (turning at 0.5 rad/s), one lap in about 12.6 s, stop.',
+    duration: 14,
+    commands: [{ t: 0, vx: 0, vy: 0, wz: 0 }, { t: 0.3, vx: 0.5, vy: 0, wz: 0.5 }, { t: 12.9, vx: 0, vy: 0, wz: 0 }],
+    goal: { x: 0, y: 2, radius_m: 0.75 },
+  }),
+  starterRow({
+    id: 'push_standing/four_directions_100n',
+    config: 'push_standing',
+    name: 'standing: four pushes, 100 N',
+    description: 'Stand still and take a 100 N chest push from the front, back, left and right, 3 s apart.',
+    tags: ['push', 'standing'],
+    duration: 15,
+    commands: [{ t: 0, vx: 0, vy: 0, wz: 0 }],
+    events: [
+      chestPush(2, [1, 0, 0], 'front'),
+      chestPush(5, [-1, 0, 0], 'back'),
+      chestPush(8, [0, 1, 0], 'left'),
+      chestPush(11, [0, -1, 0], 'right'),
+    ],
+  }),
+];
 
 /**
- * Creates a new benchmark dataset folder with a starter suite.yaml and one
- * example test, or no tests at all with `exampleTest: false` (the viewer's
+ * Creates a new benchmark dataset folder with a starter suite.yaml and three
+ * example tests, or no tests at all with `exampleTest: false` (the viewer's
  * "New benchmark", where tests are added next).
  */
 export function initSuite(dir, { log = console.log, title = null, exampleTest = true } = {}) {
@@ -69,10 +117,10 @@ export function initSuite(dir, { log = console.log, title = null, exampleTest = 
   mkdirSync(join(dir, 'data'), { recursive: true });
   const name = basename(dir).toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || 'my-benchmark';
   writeFileSync(join(dir, 'suite.yaml'), starterSuiteYaml({ name, title, commit: collectProvenance(appDir).hpv.commit }));
-  if (exampleTest) writeRows(dir, [STARTER_ROW]);
+  if (exampleTest) writeRows(dir, STARTER_ROWS);
   const loaded = loadSuiteDir(dir);
   writeFileSync(join(dir, 'README.md'), readmeBody(loaded.rawSuite));
-  log(`Created benchmark ${name} in ${dir}${exampleTest ? ` with one example test (${STARTER_ROW.id})` : ''}.`);
+  log(`Created benchmark ${name} in ${dir}${exampleTest ? ` with ${STARTER_ROWS.length} example tests` : ''}.`);
   log(`Edit it with: npm run dev suite=${dir}`);
 }
 

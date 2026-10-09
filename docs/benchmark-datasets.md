@@ -41,7 +41,9 @@ scene's is 0.6). `terrain` describes the course the test walks on (below). `goal
 `{"x": 7, "y": 0, "radius_m": 1}` in metres from the robot's start (+x ahead, +y to its left, radius at least
 0.25 m): a run counts as surviving only if the robot's base entered that circle and it never fell. Without one, a
 policy could "survive" a course by stopping in front of it. Missing the zone fails `survival_rate` but not
-`survival_time` (the robot stayed upright the whole time). `x` and `y` have at most 2 decimals (1 cm). In the
+`survival_time` (the robot stayed upright the whole time). Results keep the two failures apart: a run that fell
+shows "fell at T s", one that stayed upright but never got there shows "missed end zone by D m" (amber in the
+report), and each run records `metrics.goal` (`reached`, `miss_m`). `x` and `y` have at most 2 decimals (1 cm). In the
 editor's Environment tab, drag the zone in the top view (hold Shift to move along one axis); it snaps to the end of
 the commanded path (the ✕), as does **Snap to path end**. From a script or an agent:
 `npm run suite path-end <dir> [<test id>...]` prints one JSON line per test with `path_end` (where the velocity
@@ -122,7 +124,7 @@ Metrics live in `src/benchmark/summary.js` and are named with a version, `<name>
 
 | metric | one run (test × repeat) | |
 |---|---|---|
-| `survival_rate@1` | 1 if it never fell, else 0 | probability of finishing a test upright |
+| `survival_rate@1` | 1 if it never fell (and reached the end zone, if the test has one), else 0 | probability of finishing a test upright |
 | `survival_time@1` | fraction of the test completed before the first fall (1 = never fell) | separates "fell at 1 s" from "fell at 9 s" |
 
 A fall is the base below 0.35 m, the torso tilted past 78.5°, or a tumble (`src/simulation/benchmarkRunner.js`);
@@ -151,7 +153,7 @@ leaderboard yet; each can become a metric when it is trustworthy.
 ## Workflow
 
 ```bash
-npm run suite pull datasets/menloresearch/asimov-locomotion-bench ./bench   # working copy (+ .hpv-suite.json)
+npm run suite pull datasets/<org>/<name> ./bench   # working copy (+ .hpv-suite.json)
 npm run dev suite=./bench          # edit tests in the trajectory editor (or edit data/*/test.jsonl)
 npm run suite diff ./bench         # what changed since the pulled revision, and whether scores can move
 npm run suite baseline ./bench     # run reference models on the old and new suite -> ./bench/baseline.md
@@ -171,7 +173,7 @@ Hub dataset pull requests have no CI, so the reviewer reproduces the checks:
 maintainer tags the release and points the viewer at it:
 
 ```bash
-npm run suite release datasets/menloresearch/asimov-locomotion-bench rev=<merged commit>   # tags v<version>
+npm run suite release datasets/<org>/<name> rev=<merged commit>   # tags v<version>
 # then, in this repo: src/benchmark/default-suite.json -> "revision": "v<version>"
 ```
 
@@ -188,14 +190,16 @@ with the old protocol are then refused for upload until they are re-validated: s
 Everything happens locally until `publish`:
 
 ```bash
-npm run suite init ./new-bench          # starter suite.yaml (tests: [{ all: true }]) + one example test
+npm run suite init ./new-bench          # starter suite.yaml (tests: [{ all: true }]) + three example tests
 npm run dev suite=./new-bench           # add tests; type a new Category in the editor to start a category
 npm run benchmark <model> ./new-bench   # real runs, results stay local
 npm run suite publish ./new-bench repo=<org>/<name> dry-run    # what would be uploaded
 npm run suite publish ./new-bench repo=<org>/<name> create     # creates a PRIVATE dataset repo first
 ```
 
-Plain `npm run dev` uses `./benchmark` (gitignored) and creates a starter benchmark there on first run.
+Plain `npm run dev` uses `./benchmark` (gitignored) and creates a starter benchmark there on first run. The starter is the
+example benchmark for trying things out: a forward walk, a 1 m radius circle walk, and one test with four 100 N chest
+pushes (front, back, left, right).
 
 Or start in the viewer: the **Tests & Benchmark** panel lists every benchmark the dev server knows (the one
 `npm run dev` opened, `./benchmark`, and each folder under `./benchmark_datasets/`). **New benchmark** asks for a

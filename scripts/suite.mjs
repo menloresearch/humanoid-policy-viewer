@@ -33,7 +33,7 @@ const BASE_FILE = '.hpv-suite.json';
 
 const USAGE = `Usage: npm run suite <command> ...
 
-  init <dir>                               new benchmark: starter suite.yaml + one example test
+  init <dir>                               new benchmark: starter suite.yaml + three example tests
   pull <dataset>[@rev|@refs/pr/<n>] <dir>  working copy of a Hub dataset (e.g. datasets/org/bench@refs/pr/3)
   diff <dir>                               what changed since the pulled revision
   baseline <dir> [model=<model>...]        run reference models on the working copy and on the pulled

@@ -353,6 +353,20 @@ function computePerturbations(samples, sequence, massByBody, fallbackMassKg) {
   };
 }
 
+/**
+ * Whether a top-down path ([[x, y], ...]) entered a test's end zone
+ * ({ x, y, radius_m }), and how far outside it the closest point stayed
+ * (miss_m, 0 when it got in; null with no usable points).
+ */
+export function goalOutcome(path, goal) {
+  let closest = Infinity;
+  for (const [px, py] of path ?? []) {
+    if (Number.isFinite(px) && Number.isFinite(py)) closest = Math.min(closest, Math.hypot(px - goal.x, py - goal.y));
+  }
+  const reached = closest <= goal.radius_m;
+  return { reached, miss_m: Number.isFinite(closest) ? (reached ? 0 : round(closest - goal.radius_m, 3)) : null };
+}
+
 export function computeMetrics(samples, { dt = 0.02, jointNames = [], sequence = null, massByBody = null, fallbackMassKg = null } = {}) {
   const rows = Array.isArray(samples) ? samples : [];
 
@@ -419,6 +433,9 @@ export function computeMetrics(samples, { dt = 0.02, jointNames = [], sequence =
     time: firstFallen ? round(firstFallen.time) : null,
   };
 
+  // End zone: did the base get there (whether or not it fell afterwards)?
+  const goal = sequence?.goal ? goalOutcome(topDown.actual, sequence.goal) : null;
+
   return {
     duration_s: rows.length ? round(rows[rows.length - 1].time - rows[0].time, 4) : 0,
     frames: rows.length,
@@ -430,5 +447,6 @@ export function computeMetrics(samples, { dt = 0.02, jointNames = [], sequence =
     actionSmoothness,
     perturbations,
     fell,
+    goal,
   };
 }

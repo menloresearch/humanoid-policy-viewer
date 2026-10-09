@@ -25,7 +25,11 @@
 // data, so a crashing policy cannot score well by crashing. On a test with a
 // goal (an end zone), a run whose base never entered the zone did not finish
 // the test: it counts as falling at the end, so it fails survival_rate but keeps
-// survival_time 1 (it stayed upright the whole time).
+// survival_time 1 (it stayed upright the whole time). Per-test summaries keep
+// the two apart: fellAt says when a repeat fell, missedGoal which repeats stayed
+// upright but never got to the end zone.
+
+import { goalOutcome } from '../simulation/metrics.js';
 
 const round = (value, digits = 4) => (Number.isFinite(value) ? Math.round(value * 10 ** digits) / 10 ** digits : null);
 const mean = (values) => (values.length ? values.reduce((sum, v) => sum + v, 0) / values.length : null);
@@ -61,10 +65,11 @@ function fallTime(cell) {
 /** Whether the robot's base entered the test's end zone (true when the test has none). */
 export function reachedGoal(cell, row) {
   if (!row.goal) return true;
-  const path = cell.metrics?.topDown?.actual ?? [];
-  const { x, y, radius_m: r } = row.goal;
-  return path.some(([px, py]) => Number.isFinite(px) && Number.isFinite(py) && (px - x) ** 2 + (py - y) ** 2 <= r * r);
+  return goalOutcome(cell.metrics?.topDown?.actual, row.goal).reached;
 }
+
+/** Stayed upright for the whole test but never entered its end zone. */
+const missedGoal = (cell, row) => fallTime(cell) === null && !reachedGoal(cell, row);
 
 // Every metric a suite task may name, by "<name>@<version>".
 //   perCell(cell, row) -> number   the value of one (test, repeat)
@@ -113,6 +118,7 @@ export function summarizeTests(cells, selected) {
       repeats: mine.length,
       errors: mine.filter(failed).length,
       fellAt: mine.map(fallTime),
+      missedGoal: mine.map((cell) => missedGoal(cell, row)),
       metrics,
     };
   });
