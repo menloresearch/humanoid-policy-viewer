@@ -173,8 +173,8 @@
           <details open>
             <summary style="cursor:pointer; font-size: 12px;"><b>Tests &amp; Benchmark</b></summary>
 
-            <!-- Folder manager over ./sequences: check tests to benchmark,
-                 double-click to play one live, pencil to edit it. -->
+            <!-- Benchmarks and their tests: double-click a benchmark to run it,
+                 double-click a test to play it live, pencil to edit it. -->
             <SequenceBrowser
               ref="sequenceBrowser"
               class="mt-1"
@@ -182,6 +182,7 @@
               @play="playSequenceFile"
               @edit="editSequenceFile"
               @new="newSequenceInEditor"
+              @run="requestBenchmark"
             />
 
             <div class="d-flex align-center mt-2">
@@ -345,7 +346,7 @@
                 <div class="mono-path">{{ pendingDeleteRun?.file }}</div>
                 <div class="mt-1">{{ pendingDeleteRun ? runLabel(pendingDeleteRun) : '' }}</div>
                 <div class="text-caption text-medium-emphasis mt-2">
-                  The file is removed from benchmarks/ and can't be recovered from the app.
+                  The file is removed from benchmark_runs/ and can't be recovered from the app.
                   Download its HTML report first if you want to keep it.
                 </div>
               </v-card-text>
@@ -360,7 +361,9 @@
           <!-- Estimate + confirm before a (potentially long) benchmark run -->
           <v-dialog v-model="showBenchmarkConfirm" max-width="460">
             <v-card>
-              <v-card-title class="text-subtitle-1">Run benchmark?</v-card-title>
+              <v-card-title class="text-subtitle-1">
+                Run {{ pendingSuiteTitle || 'benchmark' }}?
+              </v-card-title>
               <v-card-text class="text-body-2">
                 <div>
                   {{ pendingTests.length }} test(s) × {{ pendingPolicies.length }} policy(ies)
@@ -370,8 +373,16 @@
                   Estimated time: <b>{{ benchmarkEstimateLabel }}</b> (sim time; wall-clock varies with
                   render speed).
                 </div>
-                <div class="text-caption text-medium-emphasis mt-2">
-                  The viewer will cycle policies and replay each test; leave this tab in the foreground.
+                <v-checkbox
+                  v-model="benchmarkRealtime"
+                  label="Watch at real-time speed"
+                  density="compact"
+                  hide-details
+                  class="mt-1"
+                ></v-checkbox>
+                <div class="text-caption text-medium-emphasis">
+                  The viewer will cycle policies and replay each test{{ benchmarkRealtime ? ' at real-time speed' : ', fast-forwarded' }};
+                  leave this tab in the foreground.
                 </div>
               </v-card-text>
               <v-card-actions>
@@ -947,6 +958,8 @@ export default {
     showBenchmarkConfirm: false,
     pendingTests: [],
     pendingPolicies: [],
+    pendingSuiteTitle: '',
+    benchmarkRealtime: false, // play each test at wall-clock speed to watch the run
     benchmarkEstimateSeconds: 0,
     resultsLoading: false,
     panelWidth: 320,
@@ -1851,6 +1864,7 @@ export default {
 
       this.pendingTests = tests;
       this.pendingPolicies = policies;
+      this.pendingSuiteTitle = this.$refs.sequenceBrowser?.currentSuiteTitle() || '';
       this.benchmarkEstimateSeconds = estimateBenchmarkSeconds(policies.length, tests);
       this.showBenchmarkConfirm = true;
     },
@@ -1881,6 +1895,7 @@ export default {
           component: commandView,
           policies,
           tests,
+          realtime: this.benchmarkRealtime,
           onProgress: (progress) => {
             this.benchmark.done = progress.done;
             this.benchmark.total = progress.total;

@@ -8,10 +8,11 @@ import Fonts from 'unplugin-fonts/vite'
 import { defineConfig } from 'vite'
 import { fileURLToPath, URL } from 'node:url'
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
-import { dirname, extname, relative, resolve } from 'node:path'
+import { basename, dirname, extname, relative, resolve } from 'node:path'
 import { listModelRoots, listModels as discoverModels } from './scripts/modelDiscovery.mjs'
 import { getBenchmarkRunsDir, getModelLibrary } from './scripts/modelLibraryConfig.mjs'
-import { readRows, writeRows } from './scripts/suiteDir.mjs'
+import { initSuite } from './scripts/suiteInit.mjs'
+import { SUITE_FILE, readRows, readYamlFile, writeRows } from './scripts/suiteDir.mjs'
 import { OPT_IN_METRICS, rowToSequence, sequenceToRow, validateGoal, validateTestRow } from './src/benchmark/testRow.js'
 import { validateTerrain } from './src/simulation/terrainGen.js'
 
@@ -71,9 +72,10 @@ function humanoidDevPlugin() {
   // ---- Trajectory sequence persistence (/api/sequences) ----
   // The trajectory editor and the in-app benchmark read and write the tests of
   // a benchmark dataset working copy (see scripts/suiteDir.mjs): HPV_SUITE_DIR
-  // (`npm run dev suite=<dir>`), by default ./benchmark (gitignored). Run
-  // outputs live under ./benchmark_runs. Both are outside public/, so writing
-  // them never triggers a page reload.
+  // (`npm run dev suite=<dir>`), by default ./benchmark (gitignored), or another
+  // benchmark the request names (see /api/suites below). Run outputs live under
+  // ./benchmark_runs. All are outside public/, so writing them never triggers a
+  // page reload.
   const BENCH_DIR = getBenchmarkRunsDir(appDir);
   const MAX_DURATION = 600;
   // Saved benchmark run names; nested subfolders allowed.
@@ -246,8 +248,85 @@ function humanoidDevPlugin() {
   const TEST_ID_RE = /^[a-z0-9][a-z0-9_]*\/[a-z0-9][a-z0-9_.-]*$/;
   const rowFile = (row) => `${row.id}.json`;
 
-  function listSequences() {
-    return readRows(SUITE_DIR).rows.map((row) => ({
+  // ---- Benchmarks (/api/suites) ----
+  // The viewer lists every benchmark dataset folder it can find: the session's
+  // (SUITE_DIR, what a request without ?suite= reads and writes), ./benchmark,
+  // and each folder of BENCHMARKS_DIR (Hub working copies pulled by
+  // `npm run dev suite=datasets/...`, and the benchmarks "New benchmark" makes).
+  // A request names one by its key; only listed folders are accepted.
+  const BENCHMARKS_DIR = resolve(process.env.HPV_BENCHMARKS_DIR || resolve(appDir, 'benchmark_datasets'));
+  const SUITE_NAME_RE = /^[a-z0-9][a-z0-9-]*$/;
+  const suiteKey = (dir) => (isWithinDirectory(appDir, dir) ? relative(appDir, dir) : dir);
+
+  function listSuites() {
+    const dirs = [SUITE_DIR, resolve(appDir, 'benchmark')];
+    const others = [];
+    try {
+      for (const entry of readdirSync(BENCHMARKS_DIR, { withFileTypes: true })) {
+        if (entry.isDirectory()) others.push(resolve(BENCHMARKS_DIR, entry.name));
+      }
+    } catch {}
+    const seen = new Set();
+    return [...dirs, ...others.sort()]
+      .filter((dir) => !seen.has(dir) && seen.add(dir) && existsSync(resolve(dir, SUITE_FILE)))
+      .map((dir) => {
+        let raw = {};
+        try { raw = readYamlFile(resolve(dir, SUITE_FILE)) || {}; } catch {}
+        return {
+          key: suiteKey(dir),
+          dir,
+          title: String(raw.title || raw.suite || basename(dir)),
+          description: typeof raw.description === 'string' ? raw.description : '',
+          testCount: readRows(dir).rows.length,
+          session: dir === SUITE_DIR,
+        };
+      });
+  }
+
+  /** The folder a request's ?suite= names (default: the session's); null if it isn't a listed benchmark. */
+  function requestSuiteDir(url) {
+    const key = url.searchParams.get('suite');
+    if (!key) return SUITE_DIR;
+    return listSuites().find((suite) => suite.key === key)?.dir ?? null;
+  }
+
+  async function handleSuites(req, res) {
+    try {
+      if (req.method === 'GET') {
+        sendJson(res, 200, { suites: listSuites(), benchmarksDir: BENCHMARKS_DIR });
+        return;
+      }
+      if (req.method === 'POST') {
+        let body;
+        try {
+          body = await readRequestJson(req);
+        } catch (e) {
+          sendJson(res, 400, { error: e.message });
+          return;
+        }
+        const name = String(body?.name ?? '');
+        if (!SUITE_NAME_RE.test(name)) {
+          sendJson(res, 400, { error: 'A benchmark name is lower case letters, digits and -' });
+          return;
+        }
+        const dir = resolve(BENCHMARKS_DIR, name);
+        if (existsSync(dir)) {
+          sendJson(res, 409, { error: `${suiteKey(dir)} already exists` });
+          return;
+        }
+        const title = typeof body.title === 'string' && body.title.trim() ? body.title.trim() : null;
+        initSuite(dir, { title, exampleTest: false, log: () => {} });
+        sendJson(res, 201, { ok: true, suite: listSuites().find((suite) => suite.dir === dir) });
+        return;
+      }
+      sendJson(res, 405, { error: 'Method not allowed' });
+    } catch (e) {
+      sendJson(res, 500, { error: String(e?.message ?? e) });
+    }
+  }
+
+  function listSequences(suiteDir) {
+    return readRows(suiteDir).rows.map((row) => ({
       file: rowFile(row),
       folder: row.config,
       name: row.name,
@@ -263,8 +342,13 @@ function humanoidDevPlugin() {
     const url = new URL(req.url, 'http://localhost');
     const file = url.searchParams.get('file');
     try {
+      const suiteDir = requestSuiteDir(url);
+      if (!suiteDir) {
+        sendJson(res, 404, { error: `No benchmark ${url.searchParams.get('suite')}` });
+        return;
+      }
       if (req.method === 'GET' && !file) {
-        sendJson(res, 200, { files: listSequences(), suiteDir: SUITE_DIR });
+        sendJson(res, 200, { files: listSequences(suiteDir), suiteDir });
         return;
       }
       const id = file?.replace(/\.json$/, '');
@@ -272,7 +356,7 @@ function humanoidDevPlugin() {
         sendJson(res, 400, { error: 'A test is saved as <category>/<name>: lower case letters, digits and _' });
         return;
       }
-      const { rows } = readRows(SUITE_DIR);
+      const { rows } = readRows(suiteDir);
       const index = rows.findIndex((row) => row.id === id);
       if (req.method === 'GET') {
         if (index < 0) { sendJson(res, 404, { error: 'Not found' }); return; }
@@ -295,17 +379,17 @@ function humanoidDevPlugin() {
           return;
         }
         if (index >= 0) rows[index] = row; else rows.push(row);
-        writeRows(SUITE_DIR, rows.filter((r) => r.config === row.config));
-        sendJson(res, 200, { ok: true, file, entry: listSequences().find((f) => f.file === file) });
+        writeRows(suiteDir, rows.filter((r) => r.config === row.config));
+        sendJson(res, 200, { ok: true, file, entry: listSequences(suiteDir).find((f) => f.file === file) });
         return;
       }
       if (req.method === 'DELETE') {
         if (index < 0) { sendJson(res, 404, { error: 'Not found' }); return; }
         const [removed] = rows.splice(index, 1);
         const left = rows.filter((r) => r.config === removed.config);
-        writeRows(SUITE_DIR, left, { configs: [removed.config] });
+        writeRows(suiteDir, left, { configs: [removed.config] });
         // The last test of a category takes its file (and dataset config) with it.
-        if (!left.length) rmSync(resolve(SUITE_DIR, 'data', removed.config), { recursive: true, force: true });
+        if (!left.length) rmSync(resolve(suiteDir, 'data', removed.config), { recursive: true, force: true });
         sendJson(res, 200, { ok: true, file });
         return;
       }
@@ -414,6 +498,10 @@ function humanoidDevPlugin() {
           res.end(readFileSync(resolvedFilePath));
           return;
         }
+        if (pathname === '/api/suites') {
+          await handleSuites(req, res);
+          return;
+        }
         if (pathname === '/api/sequences') {
           await handleSequences(req, res);
           return;
@@ -503,8 +591,11 @@ export default defineConfig({
     host: '127.0.0.1',
     port: 3000,
     watch: {
-      // Saving trajectory/benchmark JSON must not trigger a full page reload
-      ignored: ['**/benchmark/**', '**/benchmark_runs/**'],
+      // Saving trajectory/benchmark JSON must not trigger a full page reload.
+      // Anchored to the app folder: a bare **/benchmark/** would also stop
+      // edits to src/benchmark/ from hot-reloading.
+      ignored: ['benchmark', 'benchmark_datasets', 'benchmark_runs']
+        .map((folder) => fileURLToPath(new URL(`./${folder}/**`, import.meta.url))),
     },
   },
   css: {

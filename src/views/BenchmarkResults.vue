@@ -495,7 +495,7 @@ export default {
         }
       };
     },
-    /** Saved runs under benchmarks/, newest first, as select items. */
+    /** Saved runs under benchmark_runs/, newest first, as select items. */
     runItems() {
       return appState.benchmarkRuns.map((run) => {
         const when = run.generatedAt ? new Date(run.generatedAt).toLocaleString() : run.file;

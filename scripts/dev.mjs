@@ -9,6 +9,8 @@
 // first use. A Hugging Face dataset is pulled on first use into
 // ./benchmark_datasets/<org>__<name> (gitignored), an ordinary working copy
 // (edit it, `npm run suite diff` / `publish` it); later runs reuse it as is.
+// That folder is where the app opens first; its "New benchmark" button adds
+// more under ./benchmark_datasets/ and the app switches between them.
 //
 // Models: the policy list shows ./models and every Hugging Face model already
 // downloaded (by `npm run hf` or model=), labelled by repo id. model=<org>/<name>

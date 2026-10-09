@@ -197,6 +197,13 @@ npm run suite publish ./new-bench repo=<org>/<name> create     # creates a PRIVA
 
 Plain `npm run dev` uses `./benchmark` (gitignored) and creates a starter benchmark there on first run.
 
+Or start in the viewer: the **Tests & Benchmark** panel lists every benchmark the dev server knows (the one
+`npm run dev` opened, `./benchmark`, and each folder under `./benchmark_datasets/`). **New benchmark** asks for a
+folder name and an optional title and creates an empty `./benchmark_datasets/<name>/` (`HPV_BENCHMARKS_DIR` moves that
+folder); **Add test** inside an open benchmark opens the editor, and Save writes into that benchmark. Click a
+benchmark to open it, double-click it to run its tests. The folder is the same working copy `suite init` makes, so
+`npm run benchmark <model> ./benchmark_datasets/<name>` and `publish` work on it as above.
+
 In the editor a test is saved as **Category / Test name** (the test id `<category>/<name>`). A new category
 gets its own `data/<category>/test.jsonl` (and, once published, its own dataset config). Deleting a category's last test removes it. A category only runs if `suite.yaml` selects it (the
 starter's `{ all: true }` selects everything) and only gets a leaderboard if a task scopes it.

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { cellSeed, mulberry32 } from './rng.js';
 import { ROW_FEATURES, rowToSequence, sequenceToRow, validateTestRow } from './testRow.js';
 import { buildEvalYaml, compatibilityProblems, expandCells, parseSuite, selectTests } from './suite.js';
@@ -236,6 +236,12 @@ test('suite init writes a valid starter benchmark', async () => {
   assert.deepEqual(compatibilityProblems(loaded.suite), []);
   assert.equal(expandCells(selectTests(loaded.suite, loaded.rows)).length, 5);
   assert.throws(() => initSuite(dir, { log: () => {} }), /not empty/);
+
+  const empty = join(dirname(dir), 'empty-bench');
+  initSuite(empty, { log: () => {}, title: 'Push: "hard" cases', exampleTest: false });
+  const blank = loadSuiteDir(empty);
+  assert.equal(blank.rawSuite.title, 'Push: "hard" cases');
+  assert.deepEqual(blank.rows, []);
 });
 
 test('checkTests: player errors stop a run, unselected tests are flagged', async () => {

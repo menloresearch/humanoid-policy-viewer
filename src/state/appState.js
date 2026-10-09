@@ -21,10 +21,11 @@ export const appState = reactive({
   editorFile: null, // filename on disk being edited (null = unsaved/new)
   mass: DEFAULT_MASS, // robot mass for derived-quantity charts
   bodyNames: [], // loaded model's real body names, for the push-event target-body picker
-  benchmarkSelection: [], // relative test-file paths checked to run in the benchmark
+  currentSuite: null, // key of the benchmark open in the browser (see sequenceStore); null = the server's default
+  benchmarkSelection: [], // test files of currentSuite checked to run in the benchmark
   benchmarkResults: null, // the run currently loaded in memory (see benchmarkRunner)
   benchmarkResultsFile: null, // which saved run that is, if it came from disk
-  benchmarkRuns: [] // metadata for the runs saved under benchmarks/, newest first
+  benchmarkRuns: [] // metadata for the runs saved under benchmark_runs/, newest first
 });
 
 /** Adopt a run as the one on show, remembering which file it came from. */

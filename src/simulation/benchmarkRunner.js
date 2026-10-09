@@ -341,7 +341,9 @@ export async function runBenchmarkGroup({
   }
 }
 
-export async function runBenchmark({ demo, component, policies, tests, onProgress }) {
+// Every test against every policy, one cell at a time. `realtime` plays each
+// test at wall-clock speed so the run can be watched in the viewer.
+export async function runBenchmark({ demo, component, policies, tests, onProgress, realtime = false }) {
   const policyList = Array.isArray(policies) ? policies : [];
   const testList = Array.isArray(tests) ? tests : [];
   const results = [];
@@ -388,7 +390,7 @@ export async function runBenchmark({ demo, component, policies, tests, onProgres
         // of silently corrupting the result — caught here so one bad test
         // fails just that row of the report rather than the whole sweep.
         try {
-          const cell = await runBenchmarkCell({ demo, component, sequence: test.sequence });
+          const cell = await runBenchmarkCell({ demo, component, sequence: test.sequence, realtime });
           results.push({
             policyId: policy.id,
             testFile: test.file,
