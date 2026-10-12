@@ -1,7 +1,7 @@
 // Shared ONNX policy discovery for the policy root folders named in
 // HPV_POLICY_ROOTS (see policyLibraryConfig.mjs).
 //
-// Used by vite.config.mjs (to serve /api/policies to the browser),
+// Used by scripts/viewerServer.mjs (to serve /api/policies to the browser),
 // scripts/run-benchmark.mjs (to build the default policy list), and by any
 // embedding repo's tooling, so they never drift on what counts as a
 // discoverable policy.
