@@ -303,20 +303,75 @@ test('license: can name a file in the folder, which is uploaded and linked from 
   assert.equal(preset.files.LICENSE, 'BSD text.\n');
 });
 
-test('no license leaves it off the card with a warning; one that is neither a file nor an id is refused', async () => {
-  const fake = fakeHub();
+/** Publishes with `answer` as the reply to the license question (a function is called with the question). */
+async function publishAsking(fake, dir, repo, answer) {
   const warnings = [];
+  const questions = [];
   const warn = console.warn;
   console.warn = (line) => warnings.push(line);
-  let unset;
   try {
-    unset = await publishedCard(fake, withYaml((yaml) => yaml.replace(/^license: .*\n/m, '')), 'me/unlicensed');
+    const io = { ...fake.io, confirm: async (question) => { questions.push(question); return answer; } };
+    const result = await publish(dir, { repo, create: true }, io).then(() => 'published', (error) => error);
+    const dataset = fake.dataset(repo);
+    const card = dataset ? parseYaml(dataset.commits.get(dataset.main)['README.md'].split('---\n')[1]) : null;
+    return { result, card, warnings, questions };
   } finally {
     console.warn = warn;
   }
-  assert.equal(unset.card.license, undefined);
-  assert.ok(warnings.some((line) => /has no license/.test(line)));
+}
 
+test('with no license: key, publish warns and asks; yes uses bsd-3-clause, no cancels before uploading', async () => {
+  const fake = fakeHub();
+  const unset = () => withYaml((yaml) => yaml.replace(/^license: .*\n/m, ''));
+
+  const yes = await publishAsking(fake, unset(), 'me/yes', true);
+  assert.equal(yes.result, 'published');
+  assert.equal(yes.card.license, 'bsd-3-clause');
+  assert.ok(yes.warnings.some((line) => /has no license/.test(line)));
+  assert.match(yes.questions[0], /Use bsd-3-clause instead\? \[y\/N\]/);
+
+  const no = await publishAsking(fake, unset(), 'me/no', false);
+  assert.match(no.result.message, /Not published: no license chosen, nothing was uploaded/);
+  assert.equal(fake.dataset('me/no'), undefined);
+
+  const noTerminal = await publishAsking(fake, unset(), 'me/pipe', null);
+  assert.match(noTerminal.result.message, /no terminal to ask on/);
+  assert.equal(fake.dataset('me/pipe'), undefined);
+});
+
+test('a blank license: is on purpose: publish warns and asks; no (or no terminal) goes ahead without a license', async () => {
+  const fake = fakeHub();
+  const blank = () => withYaml((yaml) => yaml.replace(/^license: .*$/m, 'license:'));
+
+  const no = await publishAsking(fake, blank(), 'me/blank', false);
+  assert.equal(no.result, 'published');
+  assert.equal(no.card.license, undefined);
+  assert.ok(no.warnings.some((line) => /blank license/.test(line)));
+
+  const noTerminal = await publishAsking(fake, blank(), 'me/blank-pipe', null);
+  assert.equal(noTerminal.result, 'published');
+  assert.equal(noTerminal.card.license, undefined);
+
+  const yes = await publishAsking(fake, blank(), 'me/blank-yes', true);
+  assert.equal(yes.card.license, 'bsd-3-clause');
+});
+
+test('a license in benchmark.yaml is never asked about, and dry-run never asks', async () => {
+  const fake = fakeHub();
+  const set = await publishAsking(fake, DEFAULT, 'me/set', false);
+  assert.equal(set.result, 'published');
+  assert.deepEqual(set.questions, []);
+
+  const unset = withYaml((yaml) => yaml.replace(/^license: .*\n/m, ''));
+  const asked = [];
+  const io = { ...fake.io, confirm: async (question) => { asked.push(question); return false; } };
+  await publish(unset, { repo: 'me/dry', dryRun: true }, io);
+  assert.deepEqual(asked, []);
+  assert.match(fake.output(), /a real publish asks whether to use bsd-3-clause/);
+});
+
+test('a license that is neither a file nor an id is refused', async () => {
+  const fake = fakeHub();
   await assert.rejects(
     publish(withYaml((yaml) => yaml.replace(/^license: .*$/m, 'license: Not A License')), { repo: 'me/bad', create: true }, fake.io),
     /license "Not A License" is neither a file in .* nor a Hugging Face license id/,

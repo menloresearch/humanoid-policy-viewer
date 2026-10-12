@@ -13,6 +13,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { cpSync, existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { createInterface } from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
 import { compatibilityProblems } from '../src/benchmark/settings.js';
 import { collectProvenance } from './benchmarkProvenance.mjs';
@@ -33,8 +34,46 @@ function sha256(text) {
 
 // Where the Hub is. Tests pass a fake one: env (HF_ENDPOINT, HF_TOKEN), fetchImpl,
 // hub (the @huggingface/hub functions used), cacheDir and log.
+/** true or false for a typed answer; null when there is no terminal to ask on. */
+async function askYesNo(question) {
+  if (!process.stdin.isTTY) return null;
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    return /^y(es)?$/i.test((await rl.question(question)).trim());
+  } finally {
+    rl.close();
+  }
+}
+
 function hubIo(io = {}) {
-  return { env: process.env, fetchImpl: fetch, hub: null, cacheDir: undefined, log: console.log, ...io };
+  return { env: process.env, fetchImpl: fetch, hub: null, cacheDir: undefined, log: console.log, confirm: askYesNo, ...io };
+}
+
+export const DEFAULT_LICENSE = 'bsd-3-clause';
+
+/**
+ * The license to publish with. A license in benchmark.yaml is used as it is. With
+ * no `license:` key the author is asked whether to use the default, and declining
+ * cancels the publish. A blank `license:` is on purpose: warn and ask whether to
+ * use the default instead; declining (or no terminal) publishes without a license.
+ * dry-run never asks.
+ */
+async function chooseLicense(raw, { confirm, log }, dryRun) {
+  if (raw.license) return raw.license;
+  const blank = raw.license !== undefined;
+  console.warn(blank
+    ? 'Warning: benchmark.yaml has a blank license, so the card will have no license.'
+    : 'Warning: benchmark.yaml has no license (set license: to a Hugging Face id such as apache-2.0, or to a license file in the folder; leave it blank for none).');
+  if (dryRun) {
+    if (!blank) log(`dry-run: a real publish asks whether to use ${DEFAULT_LICENSE}; the card is shown with it.`);
+    return blank ? null : DEFAULT_LICENSE;
+  }
+  const answer = await confirm(`Use ${DEFAULT_LICENSE} instead? [y/N] `);
+  if (answer) return DEFAULT_LICENSE;
+  if (blank) return null;
+  throw new Error(answer === null
+    ? `Not published: benchmark.yaml has no license and there is no terminal to ask on. Set license: in benchmark.yaml (leave it blank for none).`
+    : 'Not published: no license chosen, nothing was uploaded. Set license: in benchmark.yaml (leave it blank for none).');
 }
 
 /**
@@ -130,7 +169,6 @@ function publishCheck(dir, base) {
     }
     if (!changed && benchmark.version !== previous) warnings.push('version changed but nothing that affects scores did');
   }
-  if (rawBenchmark.license === undefined) warnings.push('benchmark.yaml has no license: the card will have none (set license: to a Hugging Face id such as bsd-3-clause, or to a license file in the folder)');
   if (benchmark.harness.tested_commit) {
     const commit = collectProvenance(appDir).hpv.commit;
     if (commit && commit !== benchmark.harness.tested_commit) {
@@ -253,7 +291,8 @@ export async function publish(dir, { repo, base: rev, pr = false, create = false
       throw new Error(`base=${rev} is stale: datasets/${name} main is now ${main.sha.slice(0, 7)}, not ${base.sha.slice(0, 7)}. See what changed with npm run hf diff ${dir} repo=${name}, then publish without base= (or with base=${main.sha}).`);
     }
   }
-  const loaded = publishCheck(dir, base);
+  const checked = publishCheck(dir, base);
+  const loaded = { ...checked, rawBenchmark: { ...checked.rawBenchmark, license: await chooseLicense(checked.rawBenchmark, io, dryRun) } };
   // Older task ids in the Hub's eval.yaml are kept (a pulled copy has the same file).
   const evalYamlPath = [base && join(base.dir, 'eval.yaml'), join(dir, 'eval.yaml')].find((path) => path && existsSync(path));
   const previousEvalYaml = evalYamlPath ? readYamlFile(evalYamlPath) : null;

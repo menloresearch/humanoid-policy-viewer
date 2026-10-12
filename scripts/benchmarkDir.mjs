@@ -96,10 +96,10 @@ export function writeRows(dir, rows, { configs = [] } = {}) {
  * The card's license fields for benchmark.yaml's `license:`. Either a file in the
  * benchmark folder (the card says `license: other` and links it) or one of the
  * Hub's license ids (https://huggingface.co/docs/hub/repositories-licenses, which
- * the Hub checks when the card is committed). Unset leaves the card without one.
+ * the Hub checks when the card is committed). Unset or blank leaves the card without one.
  */
 export function licenseFields(dir, license, benchmarkName) {
-  if (license === undefined) return {};
+  if (!license) return {};
   if (!license.includes('/') && existsSync(join(dir, license)) && statSync(join(dir, license)).isFile()) {
     return { license: 'other', license_name: `${benchmarkName}-license`, license_link: license };
   }

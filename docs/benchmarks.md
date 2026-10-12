@@ -121,8 +121,13 @@ reference_policies: [menloresearch/asimov1-loco]   # used by `npm run hf baselin
 `license` goes on the dataset card. Use one of the Hub's
 [license ids](https://huggingface.co/docs/hub/repositories-licenses) (`bsd-3-clause`, `apache-2.0`, `mit`,
 `cc-by-4.0`, ...), or name a file in the benchmark folder (`LICENSE`, `LICENSE.md`, `COPYING`, ...): it is uploaded
-and the card says `license: other`, linking to it. Without one, `hf publish` warns and the card has no license.
-`license` and `tags` only change the card, so they never need a version bump.
+and the card says `license: other`, linking to it. `license` and `tags` only change the card, so they never need a
+version bump.
+
+If `license:` is missing, `hf publish` warns and asks `Use bsd-3-clause instead? [y/N]`: yes publishes with
+`bsd-3-clause`, no cancels before anything is uploaded (with no terminal to ask on, it cancels too). A blank
+`license:` means no license on purpose: it warns and asks the same question, but no (or no terminal) publishes without
+one. `dry-run` never asks.
 
 The simulation is deterministic, so `repeats > 1` only makes sense with something randomised; the runner refuses
 otherwise. A scope narrows a task to `config`, `id` and/or `tag` (a test's tags);
