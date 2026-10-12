@@ -1,7 +1,7 @@
-# A tiny suite for tests and quick local checks. Not a benchmark: its numbers
-# mean nothing, they only have to be reproducible.
-suite: smoke
-title: Smoke suite
+# A tiny benchmark for tests and quick local checks. Its numbers mean
+# nothing; they only have to be reproducible.
+name: smoke
+title: Smoke benchmark
 description: Two short tests, two seeded repeats each.
 version: 1
 harness:
