@@ -1,19 +1,19 @@
 # Benchmark datasets
 
-A benchmark suite lives in a Hugging Face **dataset** repo, registered as a Hub benchmark through its
+A benchmark lives in a Hugging Face **dataset** repo, registered as a Hub benchmark through its
 `eval.yaml`. The dataset is the only copy of the tests; this repo holds the code that runs them (and a tiny
-fixture, `test/fixtures/smoke-suite/`, for its own tests).
+fixture, `test/fixtures/smoke-benchmark/`, for its own tests).
 
 ```
-suite.yaml                 what runs, how often, how it is scored, which numbers are leaderboards
+benchmark.yaml             what runs, how often, how it is scored, which numbers are leaderboards
 data/<config>/test.jsonl   one test per line; one dataset config per category (locomotion, push_walking, ...)
 README.md                  optional notes; becomes the dataset card
 METHODOLOGY.md             optional: why the tests are what they are
-calibration/, suites/      optional: calibration records, extra suite files (e.g. suites/smoke.yaml)
+calibration/               optional: calibration records
 tools/                     optional: scripts that generate the tests (published, for reviewers)
 ```
 
-That is all a benchmark needs locally. Publishing adds the Hugging Face files, built from `suite.yaml` and never
+That is all a benchmark needs locally. Publishing adds the Hugging Face files, built from `benchmark.yaml` and never
 kept in the working copy: `eval.yaml` (the Hub benchmark registration, one task per leaderboard) and the card's
 front matter (a default `all` config with every test, one config per category, the declared column types, tags). A task scoped to one
 category points at that config; any other task points at `all`, so `all` is not a valid category name. `npm run suite publish <dir> dry-run` shows them.
@@ -83,19 +83,17 @@ How terrain interacts with the rest of a test:
   geoms as against the floor.
 - Random layouts (`boxes`, `rough`) come from the spec's `seed`, so a test always builds the same course.
 
-What a spec builds is part of `BENCHMARK_PROTOCOL`. `npm run terrain-tests [<benchmark dir>]` writes seven starter
-tests (stairs 5 and 10 cm, ramps 10° and 15°, the 10° ramp with shoulder pushes, boxes, rough tiles), each walked
-at 0.4 m/s for 20 s, to `data/terrain/test.jsonl` (default `./benchmark_datasets/default`).
+What a spec builds is part of `BENCHMARK_PROTOCOL`.
 
-## The suite (`suite.yaml`)
+## The settings (`benchmark.yaml`)
 
 ```yaml
-suite: asimov-locomotion
+name: asimov-locomotion
 title: Asimov Locomotion Benchmark
 version: 1                         # bump when anything that can change a score changes
 harness:
   repo: https://github.com/menloresearch/humanoid-policy-viewer
-  protocol: 1                      # the viewer's BENCHMARK_PROTOCOL this suite was validated with
+  protocol: 1                      # the viewer's BENCHMARK_PROTOCOL this benchmark was validated with
   tested_commit: <viewer commit>
 requires: { robot: { name: asimov-1 }, policy_interface: velocity-command }
 defaults:
@@ -111,7 +109,7 @@ tasks:                             # leaderboard numbers; ids get _v<version> ap
   - { id: survival_rate, metric: survival_rate@1 }
   - { id: survival_time, metric: survival_time@1 }
   - { id: push_walking_survival_rate, metric: survival_rate@1, scope: { config: push_walking } }
-reference_models: [menloresearch/asimov1-loco]   # used by `npm run suite baseline`
+reference_policies: [menloresearch/asimov1-loco]   # used by `npm run suite baseline`
 ```
 
 The simulation is deterministic, so `repeats > 1` only makes sense with something randomised; the runner refuses
@@ -156,31 +154,31 @@ genuinely probabilistic, and every metric is combined the same way:
 3. **Uncertainty**: the standard error of that mean over the seeds (the tests are fixed; only the randomisation is
    random) and a 95% interval, clipped to the metric's range. Each test's spread is smoothed as if one more repeat
    had landed at each end of the range, so 5 survivals out of 5 still show uncertainty. The interval is in
-   `run.json`, printed by `npm run benchmark`, and written into each `.eval_results` entry's `notes` (the Hub has
+   `result.json`, printed by `npm run benchmark`, and written into each `.eval_results` entry's `notes` (the Hub has
    no field for it).
 
 More repeats narrow the interval roughly as 1/√repeats; 5 is a reasonable default. A metric's version fixes how
 it is computed and combined: adding a metric or a new version needs no `BENCHMARK_PROTOCOL` bump, but a published
-version is never changed. Using a metric in a suite (or switching versions) is a suite `version` bump. The other
-numbers `run.json` keeps per run (tracking error, drift, push recovery, gait symmetry, smoothness) feed no
+version is never changed. Using a metric in a benchmark (or switching versions) is a benchmark `version` bump. The other
+numbers `result.json` keeps per run (tracking error, drift, push recovery, gait symmetry, smoothness) feed no
 leaderboard yet; each can become a metric when it is trustworthy.
 
 ## Workflow
 
 ```bash
-npm run suite pull datasets/<org>/<name> ./bench   # working copy (+ .hpv-suite.json)
-npm run dev suite=./bench          # edit tests in the trajectory editor (or edit data/*/test.jsonl)
+npm run suite pull datasets/<org>/<name> ./bench   # working copy (+ .hpv-benchmark.json)
+npm run dev benchmark=./bench      # edit tests in the trajectory editor (or edit data/*/test.jsonl)
 npm run suite diff ./bench         # what changed since the pulled revision, and whether scores can move
-npm run suite baseline ./bench     # run reference models on the old and new suite -> ./bench/baseline.md
+npm run suite baseline ./bench     # run reference policies on the old and new benchmark -> ./bench/baseline.md
 npm run suite publish ./bench pr   # commit (owners) or pull request; description = diff + baseline
 ```
 
-`npm run dev suite=datasets/<org>/<name>[@rev]` does the pull for you: the first time it pulls the dataset into
-`./benchmark_datasets/<org>__<name>` (gitignored), an ordinary working copy like `./bench` above; later runs open
+`npm run dev benchmark=datasets/<org>/<name>[@rev]` does the pull for you: the first time it pulls the dataset into
+`./benchmarks/<org>__<name>` (gitignored), an ordinary working copy like `./bench` above; later runs open
 that copy as it is, edits included (delete the folder to pull afresh).
 
 There is no separate check step. `npm run benchmark` checks the tests before it starts a browser: every row loads
-in the command player, the suite's selection works, and it warns about tests no selector picks. `publish` runs
+in the command player, the benchmark's selection works, and it warns about tests no selector picks. `publish` runs
 the same checks plus "a change that can move a score needs a new `version`".
 
 Hub dataset pull requests have no CI, so the reviewer reproduces the checks:
@@ -192,11 +190,11 @@ npm run suite release datasets/<org>/<name> rev=<merged commit>   # tags v<versi
 # then, in this repo: src/benchmark/default-suite.json -> "revision": "v<version>"
 ```
 
-and re-runs `npm run benchmark` for the reference models so the new leaderboards are not empty.
+and re-runs `npm run benchmark` for the reference policies so the new leaderboards are not empty.
 
 ### When the viewer changes
 
-A change that moves numbers bumps `BENCHMARK_PROTOCOL` (and `npm run benchmark:golden update`). Suites validated
+A change that moves numbers bumps `BENCHMARK_PROTOCOL` (and `npm run benchmark:golden update`). Benchmarks validated
 with the old protocol are then refused for upload until they are re-validated: set `harness.protocol` and
 `tested_commit`, bump `version`, publish, release. Old results keep their old task ids.
 
@@ -205,25 +203,25 @@ with the old protocol are then refused for upload until they are re-validated: s
 Everything happens locally until `publish`:
 
 ```bash
-npm run suite init ./new-bench          # starter suite.yaml (tests: [{ all: true }]) + three example tests
-npm run dev suite=./new-bench           # add tests; type a new Category in the editor to start a category
-npm run benchmark <model> ./new-bench   # real runs, results stay local
+npm run suite init ./new-bench          # a copy of ./benchmarks/default: benchmark.yaml + three example tests
+npm run dev benchmark=./new-bench       # add tests; type a new Category in the editor to start a category
+npm run benchmark <policy> ./new-bench   # real runs, results stay local
 npm run suite publish ./new-bench repo=<org>/<name> dry-run    # what would be uploaded
 npm run suite publish ./new-bench repo=<org>/<name> create     # creates a PRIVATE dataset repo first
 ```
 
-Plain `npm run dev` uses `./benchmark_datasets/default` (gitignored) and creates a starter benchmark there on first run.
-The starter is the example benchmark for trying things out: a forward walk, a 1 m radius circle walk, and one test
-with four 100 N chest pushes (front, back, left, right).
+Plain `npm run dev` uses `./benchmarks/default`, the example benchmark kept in this repo for trying things out: a
+forward walk, a 1 m radius circle walk, and one test with four 100 N chest pushes (front, back, left, right).
+`npm run suite init` starts every new benchmark as a copy of it.
 
 Or start in the viewer: the **Tests & Benchmark** panel lists every benchmark the dev server knows (the one
-`npm run dev` opened and each folder under `./benchmark_datasets/`). **New benchmark** asks for a
-folder name and an optional title and creates an empty `./benchmark_datasets/<name>/` (`HPV_BENCHMARKS_DIR` moves that
+`npm run dev` opened and each folder under `./benchmarks/`). **New benchmark** asks for a
+folder name and an optional title and creates an empty `./benchmarks/<name>/` (gitignored) (`HPV_BENCHMARKS_DIR` moves that
 folder); **Add test** inside an open benchmark opens the editor, and Save writes into that benchmark. Click a
-benchmark to open it, double-click it to run its tests. The folder is the same working copy `suite init` makes, so
-`npm run benchmark <model> ./benchmark_datasets/<name>` and `publish` work on it as above.
+benchmark to open it, double-click it to run its tests. The folder is the same working copy `npm run suite init` makes, so
+`npm run benchmark <policy> ./benchmarks/<name>` and `publish` work on it as above.
 
-#### Editing `suite.yaml` in the viewer
+#### Editing `benchmark.yaml` in the viewer
 
 The gear on a benchmark's row in **Tests & Benchmark** opens **Benchmark settings** (not shown in static builds):
 
@@ -231,10 +229,10 @@ The gear on a benchmark's row in **Tests & Benchmark** opens **Benchmark setting
   noise), the `tests` selection (all tests, a category or one test, each with an optional repeats override) and the
   leaderboard `tasks` (id, metric, an optional category or tag scope). A scope that is not a plain category or tag
   is shown read-only and kept as written.
-- **suite.yaml** tab: the file itself, for anything the form does not cover (`harness`, `requires`,
-  `reference_models`). Saving here replaces the file with this text, so form changes not yet saved are dropped.
+- **benchmark.yaml** tab: the file itself, for anything the form does not cover (`harness`, `requires`,
+  `reference_policies`). Saving here replaces the file with this text, so form changes not yet saved are dropped.
 - Saving applies the same checks as `npm run benchmark`. An invalid result is not written and every problem is
-  listed. A selector that matches no test in the dataset is a warning: the file is written and the dialog stays
+  listed. A selector that matches no test in the benchmark is a warning: the file is written and the dialog stays
   open to show it. If the file changed on disk after the dialog loaded it, the save is refused; reopen the dialog.
 - The form changes only the keys you edit, so the file's comments and layout stay. When an edit can move a score
   (repeats, seed, timeout, randomisation, tests or tasks), the dialog offers **Bump to N+1**: task ids end in `_v<version>`, so old and
@@ -244,7 +242,7 @@ These settings drive `npm run benchmark` only. The viewer's own Run plays each t
 randomisation ([Benchmarking](benchmarking.md#speed-parallelism-and-determinism)).
 
 In the editor a test is saved as **Category / Test name** (the test id `<category>/<name>`). A new category
-gets its own `data/<category>/test.jsonl` (and, once published, its own dataset config). Deleting a category's last test removes it. A category only runs if `suite.yaml` selects it (the
+gets its own `data/<category>/test.jsonl` (and, once published, its own dataset config). Deleting a category's last test removes it. A category only runs if `benchmark.yaml` selects it (the
 starter's `{ all: true }` selects everything) and only gets a leaderboard if a task scopes it.
 
 The editor's **Environment** panel sets a test's terrain (type and parameters), foot friction (scene default, wet,

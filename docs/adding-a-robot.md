@@ -15,12 +15,12 @@
 
 - Create `public/examples/checkpoints/<robot>/tracking_policy.json`.
 - Place the ONNX model at `public/examples/checkpoints/<robot>/tracking_policy.onnx`,
-  or put it in a [model library](model-library.md) root when you want its
-  training artifacts (`env.yaml`) and benchmark runs beside the model.
+  or put it in a [policy library](policy-library.md) root when you want its
+  training artifacts (`env.yaml`) and benchmark runs beside the policy.
 - In the JSON, make sure these fields are correct:
   - `onnx.path` points to your ONNX file, for example
     `./examples/checkpoints/<robot>/tracking_policy.onnx` or
-    `/model-library/<root>/<checkpoint>/policy.onnx`
+    `/policy-library/<root>/<policy>/policy.onnx`
   - `policy_joint_names` matches the joint names in your MJCF actuators
   - `obs_config` uses observation names that exist in `src/simulation/observationHelpers.js`
   - `action_scale`, `stiffness`, `damping`, and `default_joint_pos` lengths match `policy_joint_names`

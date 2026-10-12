@@ -1,13 +1,13 @@
 # Run a policy from Hugging Face
 
 ```bash
-npm run hf <model>
+npm run hf <policy>
 
 # example
 npm run hf Menlo/asimov1-locomotion-0818
 ```
 
-`<model>` is the Hugging Face repo id (`org/name`) or its URL, for example
+`<policy>` is the Hugging Face repo id (`org/name`) or its URL, for example
 `https://huggingface.co/Menlo/asimov1-locomotion-0818`. Capitalisation does not
 matter.
 
@@ -31,7 +31,7 @@ itself: `npm run hf Menlo/asimov1-locomotion-0818 -- --no-open`.
 
 ## Run a policy from a folder
 
-`<model>` can also be a folder or an `.onnx` file on disk, for example a policy
+`<policy>` can also be a folder or an `.onnx` file on disk, for example a policy
 exported by a training repo before (or instead of) uploading it:
 
 ```bash
@@ -39,8 +39,8 @@ npm run hf ./my-policy
 npm run hf ./my-policy/policy.onnx
 ```
 
-Nothing is downloaded or copied: the folder is linked into a temporary model
-library and served under `/model-library/<folder name>/`, so re-exporting into
+Nothing is downloaded or copied: the folder is linked into a temporary policy
+library and served under `/policy-library/<folder name>/`, so re-exporting into
 it and reloading the page picks up the new files. The link is removed when the
 server stops. The folder needs the same files as a Hub repo (below) and gets the
 same [checks](#checks), except the model card one. A folder must hold
@@ -155,7 +155,7 @@ After downloading, the script checks the repo before running it:
 
 Warnings are printed and the viewer still starts. An error exits with status 1
 before the dev server starts; the download stays cached. When everything passes
-it prints `Checked env.yaml and agent.yaml: OK`. A checkpoint's own
+it prints `Checked env.yaml and agent.yaml: OK`. A policy's own
 `tracking_policy.json` is not consulted: the joint list always comes from
 `reference_policy_config.json`.
 
@@ -188,12 +188,12 @@ offline, the cached copy is used. Delete the folder to clear it.
 
 ## How it works
 
-`npm run hf` (`scripts/run-hf-model.mjs`, download logic in `scripts/hfModel.mjs`,
-local folders in `scripts/localModel.mjs`, checks in `scripts/checkpointChecks.mjs`)
+`npm run hf` (`scripts/run-hf-model.mjs`, download logic in `scripts/hfPolicy.mjs`,
+local folders in `scripts/localPolicy.mjs`, checks in `scripts/policyChecks.mjs`)
 treats the cache as a
-[model library](model-library.md), so the download is served under
-`/model-library/hf/<org>__<name>/` and listed in the policy dropdown like any
-other checkpoint. It then opens the page with a
-`?policy=ckpt:hf/<org>__<name>/policy.onnx` query parameter, which
+[policy library](policy-library.md), so the download is served under
+`/policy-library/hf/<org>__<name>/` and listed in the policy dropdown like any
+other policy. It then opens the page with a
+`?policy=lib:hf/<org>__<name>/policy.onnx` query parameter, which
 `selectPolicyFromUrl` in `src/views/Demo.vue` uses to select that entry once the
 catalog has loaded. The parameter only resolves on a server started this way.

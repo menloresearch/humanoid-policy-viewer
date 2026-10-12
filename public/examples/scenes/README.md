@@ -20,7 +20,7 @@ either way.
 `asimov_1.xml` defines no actuators (the training sim adds them in Python).
 `src/simulation/sceneOverlay.js` splices one torque motor per `class="motor"`
 joint into the XML in memory just before it is compiled. Those motors start
-unclamped: each checkpoint's torque limits come from the `effort_limit` in its
+unclamped: each policy's torque limits come from the `effort_limit` in its
 training `env.yaml` (applied on policy load), because the robot model's own
 limits are hardware maxima that usually differ from what a policy trained with.
 

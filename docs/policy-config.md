@@ -1,7 +1,7 @@
 # Policy config vs training artifacts
 
 The viewer runs out of the box on a bundled Asimov policy
-(`public/examples/checkpoints/asimov/model_aug_18_1/`), no model library needed.
+(`public/examples/checkpoints/asimov/model_aug_18_1/`), no policy library needed.
 Three kinds of file describe a policy, and they have different owners:
 
 | File | What it is | Who owns it | Read by the viewer? |
@@ -14,7 +14,7 @@ Three kinds of file describe a policy, and they have different owners:
 
 | Setting | `reference_policy_config.json` | `env.yaml` | What the viewer uses |
 |---|---|---|---|
-| ONNX path and input shape | yes | - | the JSON (catalog checkpoints swap in their own `.onnx`) |
+| ONNX path and input shape | yes | - | the JSON (library policies swap in their own `.onnx`) |
 | Joint order (`policy_joint_names`) | yes | `actions.joint_pos.joint_names` | the JSON; a policy whose `env.yaml` lists the action joints in another order is refused |
 | Observation recipe (`obs_config`) | fallback only | `observations.policy` | **`env.yaml`** when it has `observations.policy` (see [Supported policies](huggingface.md#supported-policies)), else the JSON |
 | `policy_hz`, `action_lpf_hz`, `kd_ff`, `control_type` | yes | `policy_hz` = 1 / (`dt` x `decimation`) | the JSON; the policy always runs at 50 Hz, and one trained at another rate is refused |
@@ -29,7 +29,7 @@ Three kinds of file describe a policy, and they have different owners:
 **For every setting `env.yaml` records, `env.yaml` wins over the JSON.** It is
 never the other way round. The JSON's values for those settings are only a
 fallback, used when no `env.yaml` is found beside the `.onnx` (the console warns
-for model-library checkpoints). Settings `env.yaml` does not feed the viewer, such as
+for policy-library policies). Settings `env.yaml` does not feed the viewer, such as
 the joint order and rates, always come from the JSON. They are checked against
 `env.yaml` instead: a policy trained at another rate (`sim.dt` x `decimation`
 other than 0.02 s), or whose `actions.joint_pos` lists the joints in another
@@ -39,21 +39,21 @@ is refused when it loads, naming the difference.
 ## Where `env.yaml` is looked up
 
 In the folder the `.onnx` sits in, as `params/env.yaml` first and then
-`env.yaml`. For a [model-library](model-library.md) checkpoint that is its
-`<root>/<model>/` folder. The viewer maps the YAML's joint action scale,
+`env.yaml`. For a [policy-library](policy-library.md) policy that is its
+`<root>/<policy>/` folder. The viewer maps the YAML's joint action scale,
 actuator stiffness/damping (one value per actuator group, or a map per joint
 pattern) and initial joint pose to `policy_joint_names`, builds the observation
 recipe from `observations.policy`, and
 applies the actuators' `effort_limit` as each joint's torque cap. If there is no
 `env.yaml`, the JSON arrays are used and torque is unclamped.
 
-## Per-checkpoint `tracking_policy.json`
+## Per-policy `tracking_policy.json`
 
-A checkpoint may also ship a `tracking_policy.json` (looked up like
-`env.yaml`: `params/` first, then the model folder). Its fields replace the
+A policy may also ship a `tracking_policy.json` (looked up like
+`env.yaml`: `params/` first, then the policy folder). Its fields replace the
 base policy config's, with `onnx` merged one level deep so the ONNX path still
-follows the checkpoint. `npm run hf` downloads the file from a Hugging Face repo
-when present. Checkpoints without one load as before.
+follows the policy. `npm run hf` downloads the file from a Hugging Face repo
+when present. Policies without one load as before.
 
 Recurrent policies (LSTM, GRU, frame history) do not need one: the viewer finds
 their state inputs and the outputs that feed them in the ONNX itself (see
@@ -69,11 +69,11 @@ the viewer adds actuators at load (`src/simulation/sceneOverlay.js`). Torque
 limits deliberately follow training, not the robot model, whose limits are
 hardware maxima that usually differ. See `public/examples/scenes/README.md`.
 
-## Shipping a checkpoint you want to benchmark
+## Shipping a policy you want to benchmark
 
 Ship `env.yaml` (and `agent.yaml` as a record of the training run) with every
-checkpoint, and make sure `env.yaml` explicitly declares stiffness, damping and
+policy, and make sure `env.yaml` explicitly declares stiffness, damping and
 `effort_limit` for every joint in `policy_joint_names`. Otherwise the viewer
 silently falls back to the JSON's gains and unclamped torque, so every
-checkpoint would be benchmarked with the same gains. A
-CI job can enforce this before running the suite.
+policy would be benchmarked with the same gains. A
+CI job can enforce this before running the benchmark.
