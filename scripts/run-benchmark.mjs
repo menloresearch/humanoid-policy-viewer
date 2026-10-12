@@ -15,7 +15,7 @@ import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compatibilityProblems } from '../src/benchmark/settings.js';
 import {
-  MAX_ROBOTS, RESULT_SCHEMA, buildJobs, cellResult, isComplete, mergeResults, planCells, sortCells, summarize, toReport,
+  MAX_ROBOTS, RESULT_SCHEMA, buildJobs, cellResult, isComplete, mergeResults, planCells, sortCells, summarize,
 } from '../src/benchmark/run.js';
 import { rowToSequence } from '../src/benchmark/testRow.js';
 import { buildBenchmarkReportHtml } from '../src/simulation/benchmarkReport.js';
@@ -154,7 +154,7 @@ function linkLibrary(policies) {
 function writeOutputs(outDir, run) {
   mkdirSync(outDir, { recursive: true });
   writeFileSync(join(outDir, 'result.json'), JSON.stringify(run));
-  writeFileSync(join(outDir, 'report.html'), buildBenchmarkReportHtml(toReport(run)));
+  writeFileSync(join(outDir, 'report.html'), buildBenchmarkReportHtml(run));
 }
 
 /** Each policy's scores, then whether the result can be submitted to the Hub. */

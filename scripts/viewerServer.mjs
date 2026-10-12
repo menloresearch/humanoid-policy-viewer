@@ -19,7 +19,7 @@ import { initBenchmark } from './benchmarkInit.mjs';
 import { BENCHMARK_FILE, readRows, readYamlFile, writeRows } from './benchmarkDir.mjs';
 import { collectProvenance, policyFileHashes } from './benchmarkProvenance.mjs';
 import { applyBenchmarkEdit, benchmarkFormFields, checkBenchmarkText } from './benchmarkEdit.mjs';
-import { RESULT_SCHEMA, isComplete, summarize, toReport } from '../src/benchmark/run.js';
+import { RESULT_SCHEMA, isComplete, summarize } from '../src/benchmark/run.js';
 import { OPT_IN_METRICS, rowToSequence, sequenceToRow, validateGoal, validateTestRow } from '../src/benchmark/testRow.js';
 import { buildBenchmarkReportHtml } from '../src/simulation/benchmarkReport.js';
 import { validateTerrain } from '../src/simulation/terrainGen.js';
@@ -492,7 +492,7 @@ export function viewerServer({
 
   // ---- Benchmark results (/api/results) ----
   // Every <folder>/result.json under resultsDir: the CLI's out dirs and the
-  // viewer's own Runs alike. POST saves a Run's result as a new
+  // in-app benchmark's results alike. POST saves an in-app result as a new
   // <timestamp>/result.json + report.html, with what the server knows added:
   // provenance (viewer commit, runtime) and each policy's file hashes.
   function listResults() {
@@ -562,7 +562,7 @@ export function viewerServer({
     mkdirSync(dir, { recursive: true });
     // Compact, as the CLI writes it: machine-written and machine-read.
     writeFileSync(resolve(dir, RESULT_FILE), JSON.stringify(result));
-    writeFileSync(resolve(dir, 'report.html'), buildBenchmarkReportHtml(toReport(result)));
+    writeFileSync(resolve(dir, 'report.html'), buildBenchmarkReportHtml(result));
     return `${name}/${RESULT_FILE}`;
   }
 

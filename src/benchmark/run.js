@@ -1,8 +1,8 @@
 // The parts of a benchmark run that need neither a browser page nor Node: which
 // cells a benchmark plans, how they are grouped into jobs and in what order, the
-// result.json format, per-policy summaries, merging shard outputs and the report
-// shape. `npm run benchmark` (scripts/run-benchmark.mjs) and the viewer's own
-// Run (Demo.vue) both build their result.json with these, so the two agree.
+// result.json format, per-policy summaries and merging shard outputs. `npm run
+// benchmark` (scripts/run-benchmark.mjs) and the in-app benchmark (Demo.vue)
+// both build their result.json with these, so the two agree.
 //
 // result.json (schema "hpv-benchmark-result/1") is self-contained: it embeds the
 // benchmark.yaml and test rows it ran, so it can be summarised, merged and turned
@@ -10,7 +10,6 @@
 
 import { expandCells, parseBenchmark, selectTests } from './settings.js';
 import { computeTasks, summarizeTests } from './summary.js';
-import { rowToSequence } from './testRow.js';
 import { MAX_ROBOTS } from '../simulation/benchmarkRunner.js';
 
 export { MAX_ROBOTS };
@@ -175,37 +174,5 @@ export function resultForPolicy(result, policyKey) {
     expectedCells: result.expectedCells / result.policies.length,
     perTest: result.perTest ? { [policyKey]: result.perTest[policyKey] } : undefined,
     tasks: result.tasks ? { [policyKey]: result.tasks[policyKey] } : undefined,
-  };
-}
-
-/**
- * The shape src/simulation/benchmarkReport.js and the results view render
- * ({ policies, tests, results }). Each repeat becomes its own report row
- * ("<test id> #<repeat>") when a test runs more than once.
- */
-export function toReport(result) {
-  const repeated = new Set(result.cells.filter((cell) => cell.repeat > 0).map((cell) => cell.testId));
-  const label = (cell) => (repeated.has(cell.testId) ? `${cell.testId} #${cell.repeat}` : cell.testId);
-  const rowsById = new Map(result.tests.map((row) => [row.id, row]));
-  const tests = new Map();
-  for (const cell of [...result.cells].sort((a, b) => a.cellId.localeCompare(b.cellId))) {
-    const file = label(cell);
-    if (tests.has(file)) continue;
-    const row = rowsById.get(cell.testId);
-    tests.set(file, { file, name: repeated.has(cell.testId) ? `${row.name} #${cell.repeat}` : row.name, duration: row.duration, sequence: rowToSequence(row) });
-  }
-  return {
-    generatedAt: result.generatedAt,
-    policies: result.policies.map((policy) => ({ id: policy.key, label: policy.label, configPath: null, onnxPath: null })),
-    tests: [...tests.values()],
-    results: result.cells.map((cell) => ({
-      policyId: cell.policyKey,
-      testFile: label(cell),
-      frames: cell.frames,
-      expectedFrames: cell.expectedFrames,
-      warning: cell.warning,
-      ...(cell.error ? { error: cell.error } : {}),
-      metrics: cell.metrics,
-    })),
   };
 }

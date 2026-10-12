@@ -1,11 +1,14 @@
-// Standalone HTML report for a saved benchmark result.
+// Standalone HTML report (report.html) for a result.json.
 //
-// Everything is inlined — charts are hand-drawn SVG, no CDN and no runtime JS —
-// so the downloaded file renders identically offline and can be attached to a
-// review or checked in next to a policy. The numbers here are derived the
-// same way as BenchmarkResults.vue so the two never disagree.
+// Everything is inlined — charts are hand-drawn SVG, no CDN, and only a few
+// lines of script for the tabs — so the downloaded file renders identically
+// offline and can be attached to a review or checked in next to a policy. The
+// tables come from resultView (src/benchmark/resultView.js), as on the results
+// page (BenchmarkResults.vue), so the two never disagree.
 
 import { COMMAND_LIMITS } from './commandSequencer.js';
+import { RESULT_SCHEMA } from '../benchmark/run.js';
+import { MEANS, formatTask, resultView } from '../benchmark/resultView.js';
 
 const PALETTE = ['#2a78d6', '#1baf7a', '#eda100', '#008300', '#4a3aa7', '#e34948', '#e87ba4', '#eb6834'];
 const CANONICAL_COLOR = '#8d99a6';
@@ -32,11 +35,6 @@ function esc(value) {
 
 function fmt(value, digits = 3) {
   return Number.isFinite(value) ? Number(value).toFixed(digits) : 'n/a';
-}
-
-export function mean(values) {
-  const v = values.filter((x) => Number.isFinite(x));
-  return v.length ? v.reduce((a, b) => a + b, 0) / v.length : NaN;
 }
 
 function extent(values) {
@@ -241,15 +239,15 @@ function inputTrajectoryCharts(sequence) {
       ],
     })
     : '';
-  const keypointTable = '<table><thead><tr><th>t (s)</th><th>vx</th><th>vy</th><th>wz</th></tr></thead><tbody>'
+  const keypointTable = scroll('<table><thead><tr><th>t (s)</th><th>vx</th><th>vy</th><th>wz</th></tr></thead><tbody>'
     + [...sequence.commands].sort((a, b) => a.t - b.t).map((c) => (
       `<tr><td>${fmt(c.t, 2)}</td><td>${fmt(c.vx, 2)}</td><td>${fmt(c.vy, 2)}</td><td>${fmt(c.wz, 2)}</td></tr>`
     )).join('')
-    + '</tbody></table>';
+    + '</tbody></table>');
   const eventTable = events.length
-    ? '<table><thead><tr><th>t (s)</th><th>direction</th><th>force (N)</th><th>duration (s)</th><th>target body</th></tr></thead><tbody>'
+    ? scroll('<table><thead><tr><th>t (s)</th><th>direction</th><th>force (N)</th><th>duration (s)</th><th>target body</th></tr></thead><tbody>'
       + events.map((e) => `<tr><td>${fmt(e.t, 2)}</td><td>[${fmt(e.dir?.[0], 2)}, ${fmt(e.dir?.[1], 2)}]</td><td>${fmt(e.force, 1)}</td><td>${fmt(e.duration, 3)}</td><td>${esc(e.targetBody || 'pelvis')}</td></tr>`).join('')
-      + '</tbody></table>'
+      + '</tbody></table>')
     : '';
   return charts
     + pushChart
@@ -337,158 +335,201 @@ function section(title, note, body) {
   return `<section><h3>${esc(title)}</h3>${note ? `<p class="explain">${esc(note)}</p>` : ''}${body}</section>`;
 }
 
-// ---------------------------------------------------------------------------
-// categorization — a test id is <category>/<name> (the category is the
-// benchmark dataset config the test lives in), so the report needs no separate
-// taxonomy. An id without a category is "general".
-// ---------------------------------------------------------------------------
-
-export function categoryOf(file) {
-  const idx = String(file || '').lastIndexOf('/');
-  return idx === -1 ? 'general' : file.slice(0, idx);
-}
-
-// push_standing, push_walking, ...; runs from before the dataset format used push/standing folders.
-export function isPushCategory(cat) {
-  return /^push([_/]|$)/.test(cat);
-}
-
-const CATEGORY_LABELS = {
-  general: 'General',
-  locomotion: 'Locomotion',
-  distance: 'Distance / endurance',
-  friction: 'Friction stress',
-  push_standing: 'Push — standing',
-  push_walking: 'Push — walking',
-  push_sustained: 'Push — sustained ramp',
-};
-
-export function categoryLabel(cat) {
-  return CATEGORY_LABELS[cat] || cat.split(/[/_]/).filter(Boolean).map((s) => s[0].toUpperCase() + s.slice(1)).join(' — ');
-}
-
-// ---------------------------------------------------------------------------
-// row derivation (mirrors BenchmarkResults.vue deriveRow)
-// ---------------------------------------------------------------------------
-
-export function deriveRow(result) {
-  const m = result?.metrics || {};
-  const ct = m.commandTracking?.overall || {};
-  const gs = m.gaitSymmetry || {};
-  const as = m.actionSmoothness || {};
-  const drift = m.drift || {};
-  const pert = m.perturbations || null;
-  return {
-    policyId: result.policyId,
-    error: result.error || null,
-    warning: result.warning || null,
-    frames: result.frames ?? m.frames ?? null,
-    metrics: m,
-    rmse: ct,
-    trackRmse: mean([ct.vx, ct.vy, ct.wz]),
-    symmetry: gs.symmetryScorePercent,
-    pairs: gs.pairs || [],
-    finalDrift: drift.final_m,
-    maxDrift: drift.max_m,
-    jerk: as.jerkLikeScore,
-    meanDelta: as.meanAbsDelta,
-    rmsDelta: as.rmsDelta,
-    perturbations: pert,
-    fell: !!m.fell?.fell,
-    fellTime: m.fell?.time ?? null,
-    // The test's end zone, when it has one: null (no zone), or whether the base got there.
-    goalReached: m.goal ? m.goal.reached : null,
-    goalMiss: m.goal?.miss_m ?? null,
-    // Stayed upright for the whole test but never got to its end zone: a failure, but not a fall.
-    missedGoal: !result.error && !m.fell?.fell && m.goal?.reached === false,
-  };
-}
-
-/**
- * Highest push force (N) actually survived across a set of derived rows —
- * the max `force` among perturbation events with `recovered === true`. A
- * "9/10 survived" count doesn't say whether that's 9 easy low-force pushes
- * or 9 pushes right up near the policy's real limit; this does. Returns
- * null when the rows carry no recovered push event (non-push categories,
- * or a category where every push failed).
- */
-export function maxForceSurvived(rows) {
-  let max = null;
-  for (const row of rows) {
-    for (const e of row?.perturbations?.events || []) {
-      if (e?.recovered !== true || !Number.isFinite(e.force)) continue;
-      const f = Math.abs(e.force);
-      if (max === null || f > max) max = f;
-    }
-  }
-  return max;
-}
-
-/**
- * A row counts as "upright" when it produced a usable result that didn't
- * fall — a warning does NOT disqualify it, it's just a caveat surfaced
- * alongside. Shared by the category rollup below and by
- * BenchmarkResults.vue's fall-summary matrix so the two "upright" concepts
- * can't quietly diverge, even though they're displayed differently (a plain
- * count here, a titled matrix cell there).
- */
-export function isUpright(row) {
-  return !row.error && !row.fell;
-}
-
-/** Upright and, if the test has an end zone, got there: the test was passed. */
-export function isPassed(row) {
-  return isUpright(row) && !row.missedGoal;
-}
-
-/** "upright, missed end zone by 1.2 m" for a row with missedGoal. */
-export function missedGoalText(row) {
-  return `upright, missed end zone${row.goalMiss != null ? ` by ${row.goalMiss.toFixed(2)} m` : ''}`;
-}
-
-/**
- * Group `tests` by category (see categoryOf) and, within each category,
- * build one summary per policy from its rows — the loop that used to be
- * reimplemented near-verbatim in benchmarkReport.js, render-pr-summary.mjs
- * and BenchmarkResults.vue. Each consumer formats/labels the numbers
- * differently (HTML table, Markdown table, reactive Vue rows), so this
- * returns the raw per-policy numbers rather than pre-formatted strings.
- */
-export function computeCategoryRollup(tests, policies, results) {
-  const categories = [...new Set(tests.map((t) => categoryOf(t.file)))].sort();
-  return categories.map((category) => {
-    const catTests = tests.filter((t) => categoryOf(t.file) === category);
-    const perPolicy = policies.map((policy) => {
-      const rows = catTests
-        .map((t) => results.find((r) => r.testFile === t.file && r.policyId === policy.id))
-        .filter(Boolean)
-        .map(deriveRow);
-      const pushSurvived = rows.reduce((sum, r) => sum + (r.perturbations?.survived ?? 0), 0);
-      const pushTotal = rows.reduce((sum, r) => sum + (r.perturbations?.total ?? 0), 0);
-      return {
-        policyId: policy.id,
-        policy,
-        rows,
-        total: rows.length,
-        upright: rows.filter(isUpright).length,
-        missedGoal: rows.filter((r) => r.missedGoal).length,
-        trackRmse: mean(rows.map((r) => r.trackRmse)),
-        finalDrift: mean(rows.map((r) => r.finalDrift)),
-        pushSurvived,
-        pushTotal,
-        maxForce: maxForceSurvived(rows),
-        errors: rows.filter((r) => r.error).length,
-      };
-    });
-    return { category, categoryLabel: categoryLabel(category), perPolicy };
-  });
-}
-
 function xySeries(times, values) {
   const points = [];
   const n = Math.min(times?.length ?? 0, values?.length ?? 0);
   for (let i = 0; i < n; i++) points.push([times[i], values[i]]);
   return points;
+}
+
+// ---------------------------------------------------------------------------
+// tables — the rows come from resultView, as on the results page
+// ---------------------------------------------------------------------------
+
+const scroll = (table) => `<div class="scroll">${table}</div>`;
+
+const swatch = (color) => `<span class="swatch" style="background:${color}"></span>`;
+
+// A policy in a table: its swatch and last path segment, the full label on
+// hover (a local policy's label is its absolute path; the legend shows it).
+const policyName = (policy, colorFor) => (
+  `${swatch(colorFor(policy.key))} <span title="${esc(policy.label)}">${esc(String(policy.label).split('/').pop())}</span>`
+);
+
+const meanHeader = (m) => `<th title="${esc(m.description)}">${esc(m.label)}${m.unit ? ` (${esc(m.unit)})` : ''}</th>`;
+
+const pushText = (pushes) => (pushes ? `${pushes.survived}/${pushes.total}` : 'n/a');
+
+/** One repeat's outcome as a coloured pill; its seed and any error or warning in the tooltip. */
+function outcomePill(outcome) {
+  if (!outcome) return '<span class="pill none" title="not in this result">—</span>';
+  const title = [`seed ${outcome.seed}`, outcome.detail].filter(Boolean).join(' — ');
+  return `<span class="pill ${outcome.kind}" title="${esc(title)}">${esc(outcome.text)}</span>`;
+}
+
+/** Tasks × policies, each a value with its 95% interval. */
+function tasksTable(view, colorFor) {
+  const tasks = view.policies[0]?.tasks ?? [];
+  if (!tasks.length) return '';
+  return scroll('<table><thead><tr><th>Task</th>'
+    + view.policies.map((p) => `<th>${policyName(p, colorFor)}</th>`).join('')
+    + '</tr></thead><tbody>'
+    + tasks.map((task, i) => `<tr>
+        <td><b>${esc(task.id)}</b> <span class="muted">${esc(task.taskId)}</span><br><span class="muted">${esc(task.description)}</span></td>
+        ${view.policies.map((p) => `<td>${esc(formatTask(p.tasks[i]))}</td>`).join('')}
+      </tr>`).join('')
+    + '</tbody></table>');
+}
+
+/** One policy's tests × repeats, with how many passed and the metric means per test. */
+function policyOutcomeTable(view, policy) {
+  const repeatNumbers = [...new Set(view.tests.flatMap((t) => t.repeats.map((r) => r.repeat)))].sort((a, b) => a - b);
+  return scroll('<table><thead><tr><th>Test</th>'
+    + repeatNumbers.map((n) => `<th>#${n}</th>`).join('')
+    + '<th>Passed</th>' + MEANS.map(meanHeader).join('') + '<th>Pushes survived</th>'
+    + '</tr></thead><tbody>'
+    + view.tests.map((test, ti) => {
+      const pt = policy.tests[ti];
+      return `<tr><td>${esc(test.name)} <span class="muted">${esc(test.config)}</span></td>`
+        + repeatNumbers.map((n) => {
+          const ri = test.repeats.findIndex((r) => r.repeat === n);
+          return `<td class="center">${ri < 0 ? '' : outcomePill(pt.outcomes[ri])}</td>`;
+        }).join('')
+        + `<td>${pt.counts.passed}/${pt.counts.total}</td>`
+        + MEANS.map((m) => `<td>${fmt(pt.means[m.key], m.digits)}</td>`).join('')
+        + `<td>${pushText(pt.pushes)}</td></tr>`;
+    }).join('')
+    + `<tr class="total"><td>All tests</td><td colspan="${repeatNumbers.length}"></td>`
+    + `<td>${policy.counts.passed}/${policy.counts.total}</td>`
+    + MEANS.map((m) => `<td>${fmt(policy.means[m.key], m.digits)}</td>`).join('')
+    + `<td>${pushText(policy.pushes)}</td></tr>`
+    + '</tbody></table>');
+}
+
+/** One row per policy: outcome counts and its metric means across tests. */
+function aggregateTable(view, colorFor) {
+  return scroll('<table><thead><tr><th>Policy</th><th>Passed</th><th>Fell</th><th>Missed end zone</th><th>Errors</th>'
+    + MEANS.map(meanHeader).join('') + '<th>Pushes survived</th></tr></thead><tbody>'
+    + view.policies.map((p) => `<tr>
+        <td>${policyName(p, colorFor)}</td>
+        <td>${p.counts.passed}/${p.counts.total}</td><td>${p.counts.fell}</td><td>${p.counts.missed}</td>
+        <td>${p.counts.error ? `<span class="err">${p.counts.error}</span>` : 0}</td>
+        ${MEANS.map((m) => `<td>${fmt(p.means[m.key], m.digits)}</td>`).join('')}
+        <td>${pushText(p.pushes)}</td>
+      </tr>`).join('')
+    + '</tbody></table>');
+}
+
+// ---------------------------------------------------------------------------
+// one repeat of one test, every policy side by side
+// ---------------------------------------------------------------------------
+
+function repeatBody(test, entries, colorFor) {
+  if (!entries.length) return '<p class="muted">No cells recorded for this repeat.</p>';
+  const ok = entries.filter((e) => e.outcome.kind !== 'error' && e.metrics.series);
+  const failed = entries.filter((e) => e.outcome.kind === 'error');
+  const line = (e) => ({ label: e.policy.label, color: colorFor(e.policy.key) });
+
+  // Outcome first: passed / fell / missed the end zone / errored, plus any capture caveat.
+  const STATE = { passed: 'good', missed: 'warn', fell: 'bad', error: 'bad' };
+  const outcomes = '<div class="outcomes">'
+    + entries.map(({ policy, outcome }) => `<span class="outcome ${STATE[outcome.kind]}">`
+      + swatch(colorFor(policy.key))
+      + `<b>${esc(outcome.text)}</b> <span class="outcome-policy">${esc(policy.label.split('/').pop())}</span>`
+      + (outcome.kind !== 'error' && outcome.detail ? `<span class="outcome-note">${esc(outcome.detail)}</span>` : '')
+      + '</span>').join('')
+    + '</div>';
+  const errorNotes = failed.map((e) => `<div class="warn"><b>${esc(e.policy.label)}</b>: ${esc(e.outcome.detail)}</div>`).join('');
+
+  const kpiTable = scroll(`<table><thead><tr>
+      <th>Policy</th><th>Outcome</th><th>RMSE vx</th><th>RMSE vy</th><th>RMSE wz</th><th>Symmetry %</th>
+      <th>Final drift (m)</th><th>Max drift (m)</th><th>Jerk</th><th>RMS action Δ</th><th>Pushes</th>
+    </tr></thead><tbody>`
+    + entries.map(({ policy, outcome, metrics: m }) => {
+      const rmse = m.commandTracking?.overall ?? {};
+      return `<tr>
+        <td>${policyName(policy, colorFor)}</td>
+        <td>${outcomePill(outcome)}</td>
+        <td>${fmt(rmse.vx)}</td><td>${fmt(rmse.vy)}</td><td>${fmt(rmse.wz)}</td>
+        <td>${fmt(m.gaitSymmetry?.symmetryScorePercent, 1)}</td>
+        <td>${fmt(m.drift?.final_m, 2)}</td><td>${fmt(m.drift?.max_m, 2)}</td>
+        <td>${fmt(m.actionSmoothness?.jerkLikeScore)}</td><td>${fmt(m.actionSmoothness?.rmsDelta, 4)}</td>
+        <td>${pushText(m.perturbations?.total ? m.perturbations : null)}</td>
+      </tr>`;
+    }).join('')
+    + '</tbody></table>');
+
+  // Actual velocity per policy; the commanded profile is charted once per test,
+  // above the repeat tabs, rather than repeated under every axis.
+  const trackingCharts = AXES.map((axis) => lineChart({
+    title: `${axis.label} — actual per policy`,
+    xLabel: 't (s)',
+    yLabel: axis.unit,
+    yBounds: limitsOf(test.sequence, axis.key),
+    series: ok.map((e) => ({ ...line(e), points: xySeries(e.metrics.series.time, e.metrics.series.actual?.[axis.key]) })),
+  })).join('');
+
+  const errorCharts = AXES.map((axis) => lineChart({
+    title: `${axis.label} — tracking error (actual − command)`,
+    xLabel: 't (s)',
+    yLabel: axis.unit,
+    series: ok.map((e) => ({ ...line(e), points: xySeries(e.metrics.series.time, e.metrics.series.error?.[axis.key]) })),
+  })).join('');
+
+  const driftChart = lineChart({
+    title: 'Position drift over time',
+    note: 'Distance between the actual root position and the position implied by integrating the commanded velocity.',
+    xLabel: 't (s)',
+    yLabel: 'm',
+    series: ok.map((e) => ({ ...line(e), points: xySeries(e.metrics.series.time, e.metrics.series.drift) })),
+  });
+
+  // Top-down: one panel per policy, each against its own canonical path.
+  const topDown = ok.length ? '<h3>Top-down trajectory — one panel per policy</h3>'
+    + '<p class="explain">Floor-plan view (x versus y). The dashed grey line is the canonical path implied by the commands; the coloured line is what the policy actually walked. Dots mark the start.</p>'
+    + '<div class="grid">'
+    + ok.map((e) => pathChart({
+      title: e.policy.label,
+      series: [
+        { label: 'canonical', color: CANONICAL_COLOR, dashed: true, points: e.metrics.topDown?.expected || [] },
+        { label: 'actual', color: colorFor(e.policy.key), points: e.metrics.topDown?.actual || [] },
+      ],
+    })).join('')
+    + '</div>' : '';
+
+  const pairsOf = (e) => e.metrics.gaitSymmetry?.pairs || [];
+  const jointLabels = [...new Set(ok.flatMap((e) => pairsOf(e).map((p) => p.joint)))];
+  const symmetryChart = jointLabels.length ? groupedBars({
+    title: 'Gait symmetry — per-joint mirror RMSE',
+    note: 'Left/right mirror error per joint pair over the whole test. Lower is more symmetric; a limp shows up as one or two tall bars.',
+    categories: jointLabels,
+    yLabel: 'rad',
+    groups: ok.map((e) => ({ ...line(e), values: jointLabels.map((joint) => pairsOf(e).find((p) => p.joint === joint)?.mirrorRmse ?? NaN) })),
+  }) : '';
+
+  const pushRows = ok.filter((e) => e.metrics.perturbations);
+  const pushCell = (event) => {
+    if (event.fallenBeforePush) return '<span class="err">already down</span>';
+    if (event.score == null) return 'n/a';
+    const label = event.recovered ? fmt(event.score, 2) : '<span class="err">fell</span>';
+    return `${label}<br><span class="muted">${esc(event.alignClass)}</span>`;
+  };
+  const pushTable = pushRows.length
+    ? section('Push recovery', 'Each push is a real force (N) through the target body\'s own center of mass, held for a duration. Score (0-1) measures how well command tracking survived the push — not just whether the robot fell — accounting for whether the push went with or against the robot\'s own commanded motion; see the "align" row.',
+      scroll('<table><thead><tr><th>Policy</th><th>Survived</th><th>Mean score</th>'
+        + (pushRows[0].metrics.perturbations.events || []).map((e) => `<th>t=${fmt(e.t, 1)}s<br>[${fmt(e.dir?.[0], 1)}, ${fmt(e.dir?.[1], 1)}] F=${fmt(e.force, 0)}N${e.targetBody ? ` @${esc(e.targetBody)}` : ''}</th>`).join('')
+        + '</tr></thead><tbody>'
+        + pushRows.map((e) => {
+          const pert = e.metrics.perturbations;
+          return `<tr><td>${policyName(e.policy, colorFor)}</td>`
+            + `<td>${pert.survived}/${pert.total}</td><td>${fmt(pert.meanScore, 2)}</td>`
+            + (pert.events || []).map((event) => `<td>${pushCell(event)}</td>`).join('')
+            + '</tr>';
+        }).join('')
+        + '</tbody></table>'))
+    : '';
+
+  return outcomes + errorNotes + kpiTable + trackingCharts + errorCharts + driftChart + topDown + symmetryChart + pushTable;
 }
 
 // ---------------------------------------------------------------------------
@@ -498,17 +539,21 @@ function xySeries(times, values) {
 const STYLE = `
 :root { color-scheme: light }
 body { margin: 0; padding: 32px 36px 64px; background: #f7f9fb; color: #17212b;
-       font: 14px/1.5 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif }
+       font: 14px/1.5 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+       overflow-wrap: anywhere }
 h1 { margin: 0 0 4px; font-size: 26px; letter-spacing: -0.01em }
 h2 { margin: 40px 0 4px; font-size: 19px; border-bottom: 1px solid #dbe2e8; padding-bottom: 6px }
 h3 { margin: 22px 0 4px; font-size: 14px; text-transform: uppercase; letter-spacing: .06em; color: #43525f }
 .muted { color: #63727f }
 .explain { max-width: 70ch; color: #52606d; margin: 2px 0 10px }
 section { margin-bottom: 8px }
+.scroll { max-width: 100%; overflow-x: auto }
 table { border-collapse: collapse; margin: 6px 0 14px; background: #fff; font-variant-numeric: tabular-nums }
 th, td { border: 1px solid #dbe2e8; padding: 6px 10px; text-align: right; white-space: nowrap }
 th:first-child, td:first-child { text-align: left }
+td.center { text-align: center }
 thead th { background: #eef2f6; font-weight: 600 }
+tr.total td { background: #f3f6f9; font-weight: 600 }
 svg { width: 100%; max-width: 820px; height: auto; background: #fff; border: 1px solid #dbe2e8; border-radius: 4px }
 svg.square { max-width: 400px }
 .tick { font-size: 9px; fill: #63727f }
@@ -521,10 +566,11 @@ svg.square { max-width: 400px }
 .grid > section { margin: 0 }
 .err { color: #b3261e; font-weight: 600 }
 code { background: #eef2f6; border-radius: 3px; padding: 1px 5px; font-size: 12px }
-.pill { display: inline-block; min-width: 66px; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 500 }
-.pill.upright { background: #d9f2e8; color: #0b6b4a }
+.pill { display: inline-block; min-width: 66px; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 500; text-align: center }
+.pill.passed { background: #d9f2e8; color: #0b6b4a }
 .pill.fell { background: #fbdedd; color: #a3201f }
 .pill.missed { background: #fdefd3; color: #8a5300 }
+.pill.error { background: #3a2a2a; color: #fff }
 .pill.none { background: #eceff2; color: #7b8794 }
 .outcomes { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 14px }
 .outcome { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 6px; border: 1px solid; font-size: 13px }
@@ -534,8 +580,8 @@ code { background: #eef2f6; border-radius: 3px; padding: 1px 5px; font-size: 12p
 .outcome-policy { color: #63727f; font-size: 12px }
 .outcome-note { background: rgba(0,0,0,.06); color: #52606d; border-radius: 10px; padding: 1px 7px; font-size: 11px }
 .warn { background: #fff4f3; border: 1px solid #f3c6c2; border-radius: 4px; padding: 8px 12px; margin: 8px 0 }
-.tabs { position: sticky; top: 0; z-index: 1; display: flex; flex-wrap: wrap; gap: 4px;
-        background: #f7f9fb; padding: 10px 0; margin: 4px 0 8px; border-bottom: 1px solid #dbe2e8 }
+.tabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0 8px }
+.tabs.main { position: sticky; top: 0; z-index: 1; background: #f7f9fb; padding: 10px 0; border-bottom: 1px solid #dbe2e8 }
 .tab { font: inherit; font-size: 13px; cursor: pointer; border: 1px solid #dbe2e8; background: #fff;
        color: #43525f; border-radius: 6px; padding: 6px 14px }
 .tab:hover { border-color: #b7c2cb }
@@ -544,383 +590,157 @@ code { background: #eef2f6; border-radius: 3px; padding: 1px 5px; font-size: 12p
        letter-spacing: .05em; color: #8d99a6; padding: 0 4px 0 10px; margin-left: 6px;
        border-left: 1px solid #dbe2e8 }
 .tab-group-label:first-child { border-left: none; margin-left: 0 }
+@media (max-width: 600px) { body { padding: 16px 16px 48px } h1 { font-size: 21px } }
 `;
 
-/** Build the full standalone HTML document for a benchmark result. */
-export function buildBenchmarkReportHtml(run) {
-  if (!run || !Array.isArray(run.results)) {
-    throw new Error('No benchmark results to report');
-  }
-  const policies = Array.isArray(run.policies) ? run.policies : [];
-  const tests = Array.isArray(run.tests) ? run.tests : [];
-  const colorFor = (policyId) => PALETTE[Math.max(0, policies.findIndex((p) => p.id === policyId)) % PALETTE.length];
-  const labelFor = (policyId) => policies.find((p) => p.id === policyId)?.label || policyId;
-
-  const rowsFor = (testFile) => policies
-    .map((p) => run.results.find((r) => r.testFile === testFile && r.policyId === p.id))
-    .filter(Boolean)
-    .map(deriveRow);
-
-  // ---- aggregate ----
-  const aggregate = policies.map((policy) => {
-    const rows = run.results.filter((r) => r.policyId === policy.id).map(deriveRow);
-    const pushSurvived = rows.reduce((sum, r) => sum + (r.perturbations?.survived ?? 0), 0);
-    const pushTotal = rows.reduce((sum, r) => sum + (r.perturbations?.total ?? 0), 0);
-    return {
-      policy,
-      tests: rows.length,
-      trackRmse: mean(rows.map((r) => r.trackRmse)),
-      symmetry: mean(rows.map((r) => r.symmetry)),
-      finalDrift: mean(rows.map((r) => r.finalDrift)),
-      jerk: mean(rows.map((r) => r.jerk)),
-      pushes: pushTotal ? `${pushSurvived}/${pushTotal}` : 'n/a',
-      // Coarse, across every push category combined — see "Results by
-      // category" below for the per-location breakdown a single number like
-      // this necessarily hides (e.g. groin/pelvis tolerating far more force
-      // than shoulders).
-      maxForce: maxForceSurvived(rows),
-      falls: rows.filter((r) => r.fell).length,
-      missedGoal: rows.filter((r) => r.missedGoal).length,
-      errors: rows.filter((r) => r.error).length,
-    };
-  });
-
-  // Survival matrix: policy × test, read before any of the averages.
-  const cellFor = (policyId, testFile) => {
-    const result = run.results.find((r) => r.policyId === policyId && r.testFile === testFile);
-    if (!result) return { text: '—', cls: 'none' };
-    if (result.error) return { text: '—', cls: 'none' };
-    const row = deriveRow(result);
-    if (row.fell) return { text: `fell ${fmt(row.fellTime, 1)}s`, cls: 'fell' };
-    if (row.missedGoal) return { text: `missed end zone${row.goalMiss != null ? ` by ${fmt(row.goalMiss, 2)} m` : ''}`, cls: 'missed' };
-    return { text: row.goalReached ? 'reached end zone' : 'upright', cls: 'upright' };
-  };
-  const fallTable = '<table><thead><tr><th>Policy</th>'
-    + tests.map((t) => `<th>${esc(t.name || t.file)}</th>`).join('')
-    + '<th>Passed</th></tr></thead><tbody>'
-    + policies.map((p) => {
-      const cells = tests.map((t) => cellFor(p.id, t.file));
-      const passed = cells.filter((c) => c.cls === 'upright').length;
-      return `<tr>
-        <td><span class="swatch" style="background:${colorFor(p.id)}"></span> ${esc(p.label)}</td>
-        ${cells.map((c) => `<td><span class="pill ${c.cls}">${esc(c.text)}</span></td>`).join('')}
-        <td>${passed} / ${tests.length}</td>
-      </tr>`;
-    }).join('')
-    + '</tbody></table>';
-
-  const aggregateTable = `<table><thead><tr>
-      <th>Policy</th><th>Tests</th><th>Track RMSE</th><th>Symmetry %</th>
-      <th>Final drift (m)</th><th>Jerk</th><th>Pushes survived</th><th>Max force survived (N)</th><th>Falls</th><th>Missed end zone</th>
-    </tr></thead><tbody>`
-    + aggregate.map((a) => `<tr>
-        <td><span class="swatch" style="background:${colorFor(a.policy.id)}"></span> ${esc(a.policy.label)}${a.errors ? ' <span class="err">(load failed)</span>' : ''}</td>
-        <td>${a.tests}</td><td>${fmt(a.trackRmse)}</td><td>${fmt(a.symmetry, 1)}</td>
-        <td>${fmt(a.finalDrift, 2)}</td><td>${fmt(a.jerk)}</td><td>${esc(a.pushes)}</td>
-        <td>${a.maxForce != null ? fmt(a.maxForce, 0) : 'n/a'}</td><td>${a.falls}</td><td>${a.missedGoal}</td>
-      </tr>`).join('')
-    + '</tbody></table>';
-
-  // ---- by category ----
-  // A category is a test's folder (push/standing, locomotion, friction, ...).
-  // Same per-row metrics as the aggregate table above, just grouped — this
-  // is what actually answers "did standing pushes get worse but walking
-  // pushes get better," which one flat aggregate number can't.
-  const categoryRollup = computeCategoryRollup(tests, policies, run.results);
-  const categoryTable = '<table><thead><tr><th>Category</th><th>Policy</th><th>Tests</th><th>Upright</th>'
-    + '<th>Track RMSE</th><th>Final drift (m)</th><th>Pushes survived</th><th>Max force survived (N)</th></tr></thead><tbody>'
-    + categoryRollup.flatMap(({ category, perPolicy }) => perPolicy.map((p, i) => `<tr>
-        ${i === 0 ? `<td rowspan="${perPolicy.length}">${esc(categoryLabel(category))}</td>` : ''}
-        <td><span class="swatch" style="background:${colorFor(p.policy.id)}"></span> ${esc(p.policy.label)}${p.errors ? ' <span class="err">(load failed)</span>' : ''}</td>
-        <td>${p.total}</td>
-        <td>${p.upright}/${p.total}${p.missedGoal ? ` <span class="muted">(${p.missedGoal} missed end zone)</span>` : ''}</td>
-        <td>${fmt(p.trackRmse)}</td>
-        <td>${fmt(p.finalDrift, 2)}</td>
-        <td>${p.pushTotal ? `${p.pushSurvived}/${p.pushTotal}` : 'n/a'}</td>
-        <td>${p.maxForce != null ? fmt(p.maxForce, 0) : 'n/a'}</td>
-      </tr>`)).join('')
-    + '</tbody></table>';
-
-  // ---- push envelope by location ----
-  // The category rollup above groups by category (push_standing, push_walking,
-  // ...), which still lumps e.g. groin/pelvis pushes in with shoulder pushes
-  // — exactly the kind of single-number masking maxForceSurvived exists to
-  // avoid. Each push test IS one location, so
-  // one row per (test, policy) here is the actual per-location breakdown.
-  const pushTests = tests.filter((t) => isPushCategory(categoryOf(t.file)));
-  const pushEnvelopeTable = pushTests.length ? '<table><thead><tr><th>Location</th><th>Policy</th>'
-    + '<th>Survived</th><th>Max force survived (N)</th></tr></thead><tbody>'
-    + pushTests.flatMap((t) => policies.map((p, i) => {
-      const result = run.results.find((r) => r.testFile === t.file && r.policyId === p.id);
-      if (!result) return '';
-      const row = deriveRow(result);
-      const pert = row.perturbations;
-      const maxForce = maxForceSurvived([row]);
-      return `<tr>
-        ${i === 0 ? `<td rowspan="${policies.length}">${esc(t.name || t.file)}</td>` : ''}
-        <td><span class="swatch" style="background:${colorFor(p.id)}"></span> ${esc(p.label)}${row.error ? ` <span class="err" title="${esc(row.error)}">(error)</span>` : ''}</td>
-        <td>${pert ? `${pert.survived}/${pert.total}` : 'n/a'}</td>
-        <td>${maxForce != null ? fmt(maxForce, 0) : 'n/a'}</td>
-      </tr>`;
-    })).join('')
-    + '</tbody></table>' : '';
-
-  // ---- per test ----
-  // Each test's markup is wrapped in a `view` div the tab script below
-  // shows/hides — same aggregate/per-test split as BenchmarkResults.vue's
-  // view-mode toggle, just tabs over a static document instead of a
-  // v-if branch. Indexed ids (t0, t1, ...) avoid escaping test file paths
-  // for use as attribute-selector values.
-  const testSections = tests.map((test, index) => {
-    const rows = rowsFor(test.file);
-    const viewId = `t${index}`;
-    if (!rows.length) {
-      return `<div class="view" data-view="${viewId}" hidden><h2>${esc(test.name || test.file)}</h2><p class="muted">No results recorded for this test.</p></div>`;
-    }
-    const failed = rows.filter((r) => r.error);
-    const ok = rows.filter((r) => !r.error && r.metrics.series);
-
-    const kpiTable = `<table><thead><tr>
-        <th>Policy</th><th>RMSE vx</th><th>RMSE vy</th><th>RMSE wz</th><th>Symmetry %</th>
-        <th>Final drift (m)</th><th>Max drift (m)</th><th>Jerk</th><th>RMS action Δ</th>
-        <th>Pushes</th><th>Fell</th><th>End zone</th>
-      </tr></thead><tbody>`
-      + rows.map((r) => `<tr>
-          <td><span class="swatch" style="background:${colorFor(r.policyId)}"></span> ${esc(labelFor(r.policyId))}</td>
-          <td>${fmt(r.rmse.vx)}</td><td>${fmt(r.rmse.vy)}</td><td>${fmt(r.rmse.wz)}</td>
-          <td>${fmt(r.symmetry, 1)}</td><td>${fmt(r.finalDrift, 2)}</td><td>${fmt(r.maxDrift, 2)}</td>
-          <td>${fmt(r.jerk)}</td><td>${fmt(r.rmsDelta, 4)}</td>
-          <td>${r.perturbations ? `${r.perturbations.survived}/${r.perturbations.total}` : 'n/a'}</td>
-          <td>${r.fell ? `<span class="err">yes @ ${fmt(r.fellTime, 1)}s</span>` : 'no'}</td>
-          <td>${r.goalReached === null ? 'n/a' : r.goalReached ? 'reached' : `<span class="pill missed">missed${r.goalMiss != null ? ` by ${fmt(r.goalMiss, 2)} m` : ''}</span>`}</td>
-        </tr>`).join('')
-      + '</tbody></table>';
-
-    const errorNotes = failed.map((r) => `<div class="warn"><b>${esc(labelFor(r.policyId))}</b>: ${esc(r.error)}</div>`).join('');
-
-    // Actual velocity per policy; the commanded profile is charted once, in the
-    // test-input section above, rather than repeated under every axis.
-    const trackingCharts = AXES.map((axis) => lineChart({
-      title: `${axis.label} — actual per policy`,
-      xLabel: 't (s)',
-      yLabel: axis.unit,
-      yBounds: limitsOf(test.sequence, axis.key),
-      series: ok.map((r) => ({
-        label: labelFor(r.policyId),
-        color: colorFor(r.policyId),
-        points: xySeries(r.metrics.series.time, r.metrics.series.actual?.[axis.key]),
-      })),
-    })).join('');
-
-    const errorCharts = AXES.map((axis) => lineChart({
-      title: `${axis.label} — tracking error (actual − command)`,
-      xLabel: 't (s)',
-      yLabel: axis.unit,
-      series: ok.map((r) => ({
-        label: labelFor(r.policyId),
-        color: colorFor(r.policyId),
-        points: xySeries(r.metrics.series.time, r.metrics.series.error?.[axis.key]),
-      })),
-    })).join('');
-
-    const driftChart = lineChart({
-      title: 'Position drift over time',
-      note: 'Distance between the actual root position and the position implied by integrating the commanded velocity.',
-      xLabel: 't (s)',
-      yLabel: 'm',
-      series: ok.map((r) => ({
-        label: labelFor(r.policyId),
-        color: colorFor(r.policyId),
-        points: xySeries(r.metrics.series.time, r.metrics.series.drift),
-      })),
-    });
-
-    // Top-down: one panel per policy, each against its own canonical path.
-    const topDown = '<h3>Top-down trajectory — one panel per policy</h3>'
-      + '<p class="explain">Floor-plan view (x versus y). The dashed grey line is the canonical path implied by the commands; the coloured line is what the policy actually walked. Dots mark the start.</p>'
-      + '<div class="grid">'
-      + ok.map((r) => pathChart({
-        title: labelFor(r.policyId),
-        series: [
-          { label: 'canonical', color: CANONICAL_COLOR, dashed: true, points: r.metrics.topDown?.expected || [] },
-          { label: 'actual', color: colorFor(r.policyId), points: r.metrics.topDown?.actual || [] },
-        ],
-      })).join('')
-      + '</div>';
-
-    const jointLabels = [...new Set(ok.flatMap((r) => r.pairs.map((p) => p.joint)))];
-    const symmetryChart = jointLabels.length ? groupedBars({
-      title: 'Gait symmetry — per-joint mirror RMSE',
-      note: 'Left/right mirror error per joint pair over the whole test. Lower is more symmetric; a limp shows up as one or two tall bars.',
-      categories: jointLabels,
-      yLabel: 'rad',
-      groups: ok.map((r) => ({
-        label: labelFor(r.policyId),
-        color: colorFor(r.policyId),
-        values: jointLabels.map((joint) => r.pairs.find((p) => p.joint === joint)?.mirrorRmse ?? NaN),
-      })),
-    }) : '';
-
-    const pushRows = ok.filter((r) => r.perturbations);
-    const pushCell = (e) => {
-      if (e.fallenBeforePush) return '<span class="err">already down</span>';
-      if (e.score == null) return 'n/a';
-      const label = e.recovered ? fmt(e.score, 2) : `<span class="err">fell</span>`;
-      return `${label}<br><span class="text-caption">${e.alignClass}</span>`;
-    };
-    const pushTable = pushRows.length
-      ? section('Push recovery', 'Each push is a real force (N) through the target body\'s own center of mass, held for a duration. Score (0-1) measures how well command tracking survived the push — not just whether the robot fell — accounting for whether the push went with or against the robot\'s own commanded motion; see the "align" row.',
-        '<table><thead><tr><th>Policy</th><th>Survived</th><th>Mean score</th>'
-        + (pushRows[0].perturbations.events || []).map((e) => `<th>t=${fmt(e.t, 1)}s<br>[${fmt(e.dir?.[0], 1)}, ${fmt(e.dir?.[1], 1)}] F=${fmt(e.force, 0)}N${e.targetBody ? ` @${esc(e.targetBody)}` : ''}</th>`).join('')
-        + '</tr></thead><tbody>'
-        + pushRows.map((r) => `<tr><td><span class="swatch" style="background:${colorFor(r.policyId)}"></span> ${esc(labelFor(r.policyId))}</td>`
-          + `<td>${r.perturbations.survived}/${r.perturbations.total}</td>`
-          + `<td>${fmt(r.perturbations.meanScore, 2)}</td>`
-          + (r.perturbations.events || []).map((e) => `<td>${pushCell(e)}</td>`).join('')
-          + '</tr>').join('')
-        + '</tbody></table>')
-      : '';
-
-    // Outcome first: fell / missed the end zone / passed / failed, plus any capture caveat.
-    const outcomes = '<div class="outcomes">'
-      + rows.map((r) => {
-        const state = r.error || r.fell ? 'bad' : r.missedGoal ? 'warn' : 'good';
-        const text = r.error
-          ? 'failed to load'
-          : r.fell ? `FELL at ${fmt(r.fellTime, 1)}s`
-            : r.missedGoal ? missedGoalText(r)
-              : r.goalReached ? 'completed upright, reached end zone' : 'completed upright';
-        return `<span class="outcome ${state}">`
-          + `<span class="swatch" style="background:${colorFor(r.policyId)}"></span>`
-          + `<b>${esc(text)}</b> <span class="outcome-policy">${esc(labelFor(r.policyId).split('/').pop())}</span>`
-          + (r.warning ? `<span class="outcome-note">${esc(r.warning)}</span>` : '')
-          + '</span>';
-      }).join('')
-      + '</div>';
-
-    return `<div class="view" data-view="${viewId}" hidden>`
-      + `<h2>${esc(test.name || test.file)}</h2>`
-      + `<p class="muted">${esc(test.file)} · ${fmt(test.duration, 0)}s · ${ok.length} policy(ies) recorded</p>`
-      + outcomes
-      + errorNotes
-      + '<h3>Test input — commanded trajectory</h3>'
-      + (test.sequenceRecoveredFromDisk
-        ? '<p class="explain">Recovered from the test file on disk — it was not stored with this result, so it may have been edited since.</p>'
-        : '')
-      + inputTrajectoryCharts(test.sequence)
-      + kpiTable
-      + trackingCharts
-      + errorCharts
-      + driftChart
-      + topDown
-      + symmetryChart
-      + pushTable
-      + '</div>';
-  }).join('');
-
-  // Tests are already sorted by file path (see listTests), so a
-  // folder's tests are already contiguous — this just adds a visible label
-  // each time the category changes, rather than re-sorting or re-grouping.
-  let lastTabCategory = null;
-  const tabs = '<nav class="tabs">'
-    + `<button type="button" class="tab active" data-view="agg">Aggregate</button>`
-    + tests.map((t, index) => {
-      const cat = categoryOf(t.file);
-      const divider = cat !== lastTabCategory ? `<span class="tab-group-label">${esc(categoryLabel(cat))}</span>` : '';
-      lastTabCategory = cat;
-      return divider + `<button type="button" class="tab" data-view="t${index}">${esc(t.name || t.file)}</button>`;
-    }).join('')
-    + '</nav>';
-
-  // Vanilla JS, no build step: show the view matching the clicked tab's
-  // data-view, hide the rest. Runs once at the bottom of the document, after
-  // every .view/.tab element already exists.
-  const tabScript = `<script>
+// Vanilla JS, no build step: a tab shows the pane of its group whose
+// data-pane matches its data-show and hides the group's other panes. The main
+// group switches between the aggregate and the tests; each test has a group
+// for its repeats. Runs once at the bottom of the document.
+const TAB_SCRIPT = `<script>
 (function () {
-  var tabs = document.querySelectorAll('.tab');
-  var views = document.querySelectorAll('.view');
-  tabs.forEach(function (tab) {
+  document.querySelectorAll('.tab').forEach(function (tab) {
     tab.addEventListener('click', function () {
-      var target = tab.getAttribute('data-view');
-      tabs.forEach(function (t) { t.classList.toggle('active', t === tab); });
-      views.forEach(function (v) { v.hidden = v.getAttribute('data-view') !== target; });
-      window.scrollTo({ top: 0, behavior: 'instant' in window ? 'instant' : 'auto' });
+      var group = tab.getAttribute('data-group');
+      var target = tab.getAttribute('data-show');
+      document.querySelectorAll('.tab[data-group="' + group + '"]').forEach(function (t) { t.classList.toggle('active', t === tab); });
+      document.querySelectorAll('.pane[data-group="' + group + '"]').forEach(function (p) { p.hidden = p.getAttribute('data-pane') !== target; });
+      if (group === 'main') window.scrollTo({ top: 0, behavior: 'instant' in window ? 'instant' : 'auto' });
     });
   });
 })();
 </script>`;
 
-  // ---- manifest: exactly which policies and which test JSONs took part ----
+const tab = (group, show, label, active, title = '') => `<button type="button" class="tab${active ? ' active' : ''}" data-group="${group}" data-show="${show}"${title ? ` title="${esc(title)}"` : ''}>${esc(label)}</button>`;
+
+const pane = (group, name, body, shown) => `<div class="pane" data-group="${group}" data-pane="${name}"${shown ? '' : ' hidden'}>${body}</div>`;
+
+/** Build the full standalone HTML document for a result.json. */
+export function buildBenchmarkReportHtml(result) {
+  if (result?.schema !== RESULT_SCHEMA) throw new Error(`Not a benchmark result (expected schema ${RESULT_SCHEMA})`);
+  const view = resultView(result);
+  const policies = view.policies;
+  const colorFor = (key) => PALETTE[Math.max(0, policies.findIndex((p) => p.key === key)) % PALETTE.length];
+  const generated = view.generatedAt ? new Date(view.generatedAt).toLocaleString() : new Date().toLocaleString();
+  const cellCount = (n) => `${n} cell${n === 1 ? '' : 's'}`;
+
+  const partial = view.complete ? ''
+    : `<div class="warn"><b>Partial result</b>: ${view.cellCount} of ${cellCount(view.expectedCells)}`
+      + `${view.shard ? ` (shard ${view.shard.index}/${view.shard.count})` : ''}. Task values need every cell, so they are left out.</div>`;
+
+  // ---- aggregate ----
+  const aggregate = (view.complete ? `<h2>Tasks</h2>
+<p class="explain">The benchmark's scores: each is a mean over the tests in its scope, with a 95% interval from the spread across repeats.</p>
+${tasksTable(view, colorFor)}` : '')
+    + `<h2>Outcomes</h2>
+<p class="explain">How each repeat ended: passed, fell (with the time), stayed upright but missed the test's end zone (with the distance), or errored. Hover a cell for its seed and any error or capture warning. The means leave out errored repeats.</p>`
+    + policies.map((p) => `<h3>${swatch(colorFor(p.key))} ${esc(p.label)}</h3>${policyOutcomeTable(view, p)}`).join('')
+    + '<h2>Across all tests</h2>'
+    + aggregateTable(view, colorFor);
+
+  // ---- per test, a tab per repeat ----
+  // Indexed names (t0, t1, ...) avoid escaping test ids for use in attribute selectors.
+  const testPanes = view.tests.map((test, ti) => {
+    const group = `t${ti}`;
+    const repeats = test.repeats.map(({ repeat, seed }, ri) => {
+      const entries = policies
+        .map((policy) => ({ policy, outcome: policy.tests[ti].outcomes[ri] }))
+        .filter((e) => e.outcome)
+        .map((e) => ({ ...e, metrics: e.outcome.cell.metrics || {} }));
+      return { repeat, seed, body: `<p class="muted">Repeat #${repeat} · seed ${seed}</p>${repeatBody(test, entries, colorFor)}` };
+    });
+    const repeatTabs = repeats.length > 1
+      ? `<nav class="tabs">${repeats.map((r, i) => tab(group, `r${i}`, `#${r.repeat}`, i === 0, `seed ${r.seed}`)).join('')}</nav>`
+      : '';
+    const outcomeRows = scroll('<table><thead><tr><th>Policy</th>'
+      + test.repeats.map((r) => `<th title="seed ${r.seed}">#${r.repeat}</th>`).join('')
+      + '<th>Passed</th></tr></thead><tbody>'
+      + policies.map((p) => `<tr><td>${policyName(p, colorFor)}</td>`
+        + p.tests[ti].outcomes.map((o) => `<td class="center">${outcomePill(o)}</td>`).join('')
+        + `<td>${p.tests[ti].counts.passed}/${p.tests[ti].counts.total}</td></tr>`).join('')
+      + '</tbody></table>');
+    const body = `<h2>${esc(test.name)}</h2>`
+      + `<p class="muted">${esc(test.id)} · ${fmt(test.duration, 0)} s · ${test.repeats.length} repeat(s)</p>`
+      + outcomeRows
+      + '<h3>Test input — commanded trajectory</h3>'
+      + inputTrajectoryCharts(test.sequence)
+      + repeatTabs
+      + (repeats.length ? repeats.map((r, i) => pane(group, `r${i}`, r.body, i === 0)).join('') : '<p class="muted">No cells recorded for this test.</p>');
+    return pane('main', group, body, false);
+  }).join('');
+
+  // Tests come grouped by config; label each run of tests with its config.
+  let lastConfig = null;
+  const tabs = '<nav class="tabs main">'
+    + tab('main', 'agg', 'Aggregate', true)
+    + view.tests.map((t, ti) => {
+      const divider = t.config !== lastConfig ? `<span class="tab-group-label">${esc(t.config)}</span>` : '';
+      lastConfig = t.config;
+      return divider + tab('main', `t${ti}`, t.name, false, t.id);
+    }).join('')
+    + '</nav>';
+
+  // ---- manifest: exactly which policies and which tests took part ----
   const policyTable = '<h3>Policies</h3>'
-    + '<table><thead><tr><th>Policy</th><th>ONNX weights</th><th>Base config</th></tr></thead><tbody>'
-    + policies.map((p) => `<tr>
-        <td><span class="swatch" style="background:${colorFor(p.id)}"></span> ${esc(p.label)}</td>
-        <td>${esc(p.onnxPath || 'from base config')}</td>
-        <td>${esc(p.configPath || 'n/a')}</td>
-      </tr>`).join('')
-    + '</tbody></table>';
+    + scroll('<table><thead><tr><th>Policy</th><th>Id</th><th>Weights</th><th>ONNX sha256</th><th>Revision</th></tr></thead><tbody>'
+      + result.policies.map((p) => `<tr>
+          <td>${swatch(colorFor(p.key))} ${esc(p.label)}</td><td>${esc(p.id)}</td>
+          <td>${esc(p.primary || 'n/a')}</td><td>${p.files?.onnx ? `<code>${esc(p.files.onnx.slice(0, 12))}</code>` : 'n/a'}</td>
+          <td>${p.sha ? `<code>${esc(p.sha.slice(0, 12))}</code>` : 'n/a'}</td>
+        </tr>`).join('')
+      + '</tbody></table>');
   const testTable = '<h3>Tests</h3>'
-    + '<table><thead><tr><th>Test</th><th>File</th><th>Duration (s)</th><th>Keypoints</th><th>Push events</th><th>Command limits vx / vy / wz</th></tr></thead><tbody>'
-    + tests.map((t) => `<tr>
-        <td>${esc(t.name || t.file)}</td><td>${esc(t.file)}</td><td>${fmt(t.duration, 0)}</td>
-        <td>${t.sequence?.commands?.length ?? 'n/a'}</td>
-        <td>${t.sequence?.events?.length ?? 0}</td>
-        <td>${['vx', 'vy', 'wz'].map((axis) => {
-          const l = limitsOf(t.sequence, axis);
-          return l ? `${fmt(l[0], 1)}…${fmt(l[1], 1)}` : 'n/a';
-        }).join(' / ')}</td>
-      </tr>`).join('')
-    + '</tbody></table>';
-  const manifest = policyTable + testTable;
+    + scroll('<table><thead><tr><th>Test</th><th>Id</th><th>Duration (s)</th><th>Repeats</th><th>Keypoints</th><th>Push events</th><th>Command limits vx / vy / wz</th></tr></thead><tbody>'
+      + view.tests.map((t) => `<tr>
+          <td>${esc(t.name)}</td><td>${esc(t.id)}</td><td>${fmt(t.duration, 0)}</td>
+          <td title="seeds ${esc(t.repeats.map((r) => r.seed).join(', '))}">${t.repeats.length}</td>
+          <td>${t.sequence?.commands?.length ?? 'n/a'}</td>
+          <td>${t.sequence?.events?.length ?? 0}</td>
+          <td>${AXES.map((axis) => {
+            const l = limitsOf(t.sequence, axis.key);
+            return l ? `${fmt(l[0], 1)}…${fmt(l[1], 1)}` : 'n/a';
+          }).join(' / ')}</td>
+        </tr>`).join('')
+      + '</tbody></table>');
+  const source = view.benchmark.id || result.benchmark.path || result.benchmark.source || '';
 
   // Escaping `</` keeps the payload from terminating the <script> element early.
-  const embedded = JSON.stringify(run).replace(/<\//g, '<\\/');
-
-  const generated = run.generatedAt ? new Date(run.generatedAt).toLocaleString() : new Date().toLocaleString();
+  const embedded = JSON.stringify(result).replace(/<\//g, '<\\/');
 
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Benchmark report — ${esc(generated)}</title>
+<title>${esc(view.benchmark.title)} v${esc(view.benchmark.version)} — ${esc(generated)}</title>
 <style>${STYLE}</style>
 </head>
 <body>
-<h1>Humanoid policy benchmark</h1>
-<p class="muted">${esc(generated)} · ${policies.length} policy(ies) × ${tests.length} test(s)</p>
-${legend(policies.map((p) => ({ label: p.label, color: colorFor(p.id) })))}
+<h1>${esc(view.benchmark.title)} <span class="muted">v${esc(view.benchmark.version)}</span></h1>
+<p class="muted">${esc(generated)} · ${policies.length} policy(ies) × ${view.tests.length} test(s) · ${cellCount(view.cellCount)}${source ? ` · ${esc(source)}` : ''}</p>
+${partial}
+${legend(policies.map((p) => ({ label: p.label, color: colorFor(p.key) })))}
 <h2>What was run</h2>
-${manifest}
+${policyTable}
+${testTable}
 ${tabs}
-<div class="view" data-view="agg">
-<h2>Fall summary — did the robot stay upright (and reach the end zone)?</h2>
-${fallTable}
-<h2>Aggregate across all tests</h2>
-${aggregateTable}
-<h2>Results by category</h2>
-<p class="explain">Same metrics, grouped by each test's category — this is what shows whether a policy is uniformly robust or has a specific weak spot (e.g. fine standing, weak mid-walk; fine on rapid pushes, weak on friction).</p>
-${categoryTable}
-${pushEnvelopeTable ? `<h2>Push envelope by location</h2>
-<p class="explain">One row per push test file — each file targets one location (groin/pelvis, chest, a specific shoulder axis, ...), so this is the actual per-location breakdown the category table above can't show (e.g. groin/pelvis reliably tolerating far more force than a shoulder push does). "Max force survived" is the highest force among that location's push events the policy actually recovered from.</p>
-${pushEnvelopeTable}` : ''}
-</div>
-${testSections}
+${pane('main', 'agg', aggregate, true)}
+${testPanes}
 <h2>Raw data</h2>
-<p class="explain">The complete run — every policy, every test JSON and every metric series drawn
-above — is embedded in this file as JSON. Open this file in a text editor, or in a browser console run
-<code>JSON.parse(document.getElementById('benchmark-run').textContent)</code> to get it back.</p>
-<script type="application/json" id="benchmark-run">${embedded}</script>
-${tabScript}
+<p class="explain">The complete result.json — every policy, every test and every metric series drawn
+above — is embedded in this file. Open this file in a text editor, or in a browser console run
+<code>JSON.parse(document.getElementById('benchmark-result').textContent)</code> to get it back.</p>
+<script type="application/json" id="benchmark-result">${embedded}</script>
+${TAB_SCRIPT}
 </body>
 </html>
 `;
 }
 
 /** Build the report and hand it to the browser as a download. */
-export function downloadBenchmarkReport(run, filename = null) {
-  const html = buildBenchmarkReportHtml(run);
-  const stamp = (run?.generatedAt || new Date().toISOString()).slice(0, 19).replace(/[-:]/g, '');
+export function downloadBenchmarkReport(result, filename = null) {
+  const html = buildBenchmarkReportHtml(result);
+  const stamp = (result?.generatedAt || new Date().toISOString()).slice(0, 19).replace(/[-:]/g, '');
   const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');

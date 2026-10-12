@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadBenchmarkDir } from '../../scripts/benchmarkDir.mjs';
 import {
-  RESULT_SCHEMA, cellResult, groupCells, isComplete, mergeResults, planCells, resultForPolicy, sortCells, summarize, toReport,
+  RESULT_SCHEMA, cellResult, groupCells, isComplete, mergeResults, planCells, resultForPolicy, sortCells, summarize,
 } from './run.js';
 
 const smokeDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'test', 'fixtures', 'smoke-benchmark');
@@ -71,7 +71,7 @@ test('a complete result is summarised per policy; a shard or a short result is n
   assert.equal(tasks.m0[0].value, 1);
 });
 
-test('a result splits per policy and becomes the report shape', () => {
+test('a result splits per policy, one repo each', () => {
   const two = fakeResult({ expectedCells: 2 });
   two.policies.push({ ...two.policies[0], key: 'm1', id: 'org/other', label: 'org/other' });
   two.cells.push({ ...two.cells[0], policyKey: 'm1' });
@@ -81,14 +81,6 @@ test('a result splits per policy and becomes the report shape', () => {
   assert.equal(one.expectedCells, 1);
   assert.deepEqual(Object.keys(one.tasks), ['m1']);
 
-  const report = toReport(two);
-  assert.deepEqual(report.policies.map((p) => [p.id, p.label]), [['m0', 'org/model'], ['m1', 'org/other']]);
-  assert.deepEqual(report.tests.map((t) => t.file), ['a/x']);
-  assert.ok(report.tests[0].sequence.commands.length);
-  assert.deepEqual(report.results.map((r) => [r.policyId, r.testFile]), [['m0', 'a/x'], ['m1', 'a/x']]);
-
-  const repeated = fakeResult({ cells: [0, 1].map((repeat) => ({ ...fakeResult().cells[0], cellId: `a/x#${repeat}`, repeat })) });
-  assert.deepEqual(toReport(repeated).tests.map((t) => [t.file, t.name]), [['a/x #0', 'x #0'], ['a/x #1', 'x #1']]);
 });
 
 test('merge needs every shard of the same run exactly once', () => {

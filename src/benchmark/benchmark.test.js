@@ -8,7 +8,6 @@ import { ROW_FEATURES, rowToSequence, sequenceToRow, validateTestRow } from './t
 import { buildEvalYaml, compatibilityProblems, expandCells, parseBenchmark, selectTests } from './settings.js';
 import { computeTasks, summarizeTests } from './summary.js';
 import { BENCHMARK_PROTOCOL } from './protocol.js';
-import { isPushCategory } from '../simulation/benchmarkReport.js';
 import { goalOutcome } from '../simulation/metrics.js';
 
 const FIXTURE = new URL('../../test/fixtures/smoke-benchmark/', import.meta.url).pathname;
@@ -105,11 +104,6 @@ test('row validation catches bad rows', () => {
   assert.ok(validateTestRow(row('loco/a', { events: [push(0.5, 100)] })).some((e) => e.includes('at least 1 s')));
   assert.ok(validateTestRow(row('loco/a', { events: [push(1.9, 100)] })).some((e) => e.includes('before the test does')));
   assert.deepEqual(validateTestRow(row('loco/a', { events: [push(1.85, 100)] })), []);
-});
-
-test('push categories, old and new naming', () => {
-  for (const cat of ['push_standing', 'push_walking', 'push/standing', 'push']) assert.ok(isPushCategory(cat), cat);
-  for (const cat of ['locomotion', 'pushover', 'general']) assert.ok(!isPushCategory(cat), cat);
 });
 
 test('benchmark validation lists every problem at once', () => {

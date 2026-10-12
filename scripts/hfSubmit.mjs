@@ -11,7 +11,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildBenchmarkReportHtml } from '../src/simulation/benchmarkReport.js';
-import { RESULT_SCHEMA, resultForPolicy, toReport } from '../src/benchmark/run.js';
+import { RESULT_SCHEMA, resultForPolicy } from '../src/benchmark/run.js';
 import { formatOutcomes, formatTasks, uploadBlockers } from './benchmarkRun.mjs';
 import { commitFiles, readRepoText } from './hfCommit.mjs';
 import { buildEvalResultEntries, evalLogsDir, evalResultsPath, mergeEvalResults } from './hfEvalResults.mjs';
@@ -34,7 +34,7 @@ function policyFiles(run, policy, existing) {
   return [
     { path: evalResultsPath(run.benchmark.id), content: mergeEvalResults(existing, entries) },
     { path: `${logsDir}/result.json`, content: JSON.stringify(policyResult) },
-    { path: `${logsDir}/report.html`, content: buildBenchmarkReportHtml(toReport(policyResult)) },
+    { path: `${logsDir}/report.html`, content: buildBenchmarkReportHtml(policyResult) },
   ];
 }
 
