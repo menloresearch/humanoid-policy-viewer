@@ -92,14 +92,29 @@ export function writeRows(dir, rows, { configs = [] } = {}) {
   }
 }
 
+/**
+ * The card's license fields for benchmark.yaml's `license:`. Either a file in the
+ * benchmark folder (the card says `license: other` and links it) or one of the
+ * Hub's license ids (https://huggingface.co/docs/hub/repositories-licenses, which
+ * the Hub checks when the card is committed). Unset leaves the card without one.
+ */
+export function licenseFields(dir, license, benchmarkName) {
+  if (license === undefined) return {};
+  if (!license.includes('/') && existsSync(join(dir, license)) && statSync(join(dir, license)).isFile()) {
+    return { license: 'other', license_name: `${benchmarkName}-license`, license_link: license };
+  }
+  if (/^[a-z0-9][a-z0-9.+-]*$/.test(license)) return { license };
+  throw new Error(`benchmark.yaml license "${license}" is neither a file in ${dir} nor a Hugging Face license id such as bsd-3-clause, apache-2.0, mit or cc-by-4.0`);
+}
+
 /** Dataset card front matter: one Hub config per test category, all in split "test". */
-export function cardFrontMatter(rows, { license = 'bsd-3-clause', prettyName }) {
+export function cardFrontMatter(rows, { license = {}, tags = [], prettyName }) {
   const configs = [...new Set(rows.map((row) => row.config))].sort();
   return {
-    license,
+    ...license,
     pretty_name: prettyName,
     task_categories: ['robotics'],
-    tags: ['benchmark', 'humanoid', 'locomotion', 'humanoid-policy-viewer'],
+    tags: [...new Set(['humanoid-policy-viewer', ...tags])],
     // Declared column types for every config (see ROW_FEATURES).
     dataset_info: [ALL_CONFIG, ...configs].map((config) => ({ config_name: config, features: rowFeaturesYaml() })),
     // "all" (the default) holds every test; tasks spanning categories score it.
@@ -143,6 +158,13 @@ export function hubFiles({ dir, benchmark, rows, rawBenchmark }, { previousEvalY
   const readme = existsSync(readmePath) ? readFileSync(readmePath, 'utf8') : `\n# ${name}\n`;
   return [
     { path: 'eval.yaml', content: `# Generated from benchmark.yaml by \`npm run hf publish\`; do not edit by hand.\n${stringifyYaml(evalYaml)}` },
-    { path: 'README.md', content: withFrontMatter(readme, cardFrontMatter(rows, { prettyName: name })) },
+    {
+      path: 'README.md',
+      content: withFrontMatter(readme, cardFrontMatter(rows, {
+        license: licenseFields(dir, rawBenchmark.license, benchmark.name),
+        tags: rawBenchmark.tags,
+        prettyName: name,
+      })),
+    },
   ];
 }

@@ -42,7 +42,7 @@ function hubIo(io = {}) {
  * its prose (title, description), its version and harness.tested_commit.
  */
 export function scoredContentHash(rawBenchmark, rows) {
-  const { title, description, version, reference_policies: referencePolicies, ...rest } = rawBenchmark;
+  const { title, description, version, reference_policies: referencePolicies, license, tags, ...rest } = rawBenchmark;
   const harness = { ...(rest.harness ?? {}) };
   delete harness.tested_commit;
   const canonical = (value) => (Array.isArray(value)
@@ -130,6 +130,7 @@ function publishCheck(dir, base) {
     }
     if (!changed && benchmark.version !== previous) warnings.push('version changed but nothing that affects scores did');
   }
+  if (rawBenchmark.license === undefined) warnings.push('benchmark.yaml has no license: the card will have none (set license: to a Hugging Face id such as bsd-3-clause, or to a license file in the folder)');
   if (benchmark.harness.tested_commit) {
     const commit = collectProvenance(appDir).hpv.commit;
     if (commit && commit !== benchmark.harness.tested_commit) {

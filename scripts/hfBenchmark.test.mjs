@@ -263,3 +263,66 @@ test('submit refuses a result on a local benchmark and says why', async () => {
   assert.match(fake.output(), /Not submitted:\n {4}- the benchmark is a local folder[^]*uncommitted changes/);
   assert.equal(fake.model('me/model').commits.size, 1);
 });
+
+async function publishedCard(fake, dir, repo) {
+  await publish(dir, { repo, create: true }, fake.io);
+  const dataset = fake.dataset(repo);
+  const files = dataset.commits.get(dataset.main);
+  return { files, card: parseYaml(files['README.md'].split('---\n')[1]) };
+}
+
+const withYaml = (edit) => workingCopy((files) => ({ ...files, 'benchmark.yaml': edit(files['benchmark.yaml']) }));
+
+test('the card is tagged humanoid-policy-viewer plus the tags in benchmark.yaml, and has the license id given there', async () => {
+  const fake = fakeHub();
+  const plain = await publishedCard(fake, DEFAULT, 'me/plain');
+  assert.deepEqual(plain.card.tags, ['humanoid-policy-viewer']);
+  assert.equal(plain.card.license, 'bsd-3-clause');
+  assert.equal(plain.card.license_link, undefined);
+
+  const tagged = await publishedCard(fake, withYaml((yaml) => yaml.replace(/^license: .*$/m, 'license: apache-2.0\ntags: [benchmark, humanoid-policy-viewer, locomotion]')), 'me/tagged');
+  assert.deepEqual(tagged.card.tags, ['humanoid-policy-viewer', 'benchmark', 'locomotion']);
+  assert.equal(tagged.card.license, 'apache-2.0');
+});
+
+test('license: can name a file in the folder, which is uploaded and linked from the card', async () => {
+  const fake = fakeHub();
+  const dir = withYaml((yaml) => yaml.replace(/^license: .*$/m, 'license: LICENSE'));
+  writeFileSync(join(dir, 'LICENSE'), 'Our own terms.\n');
+  const { files, card } = await publishedCard(fake, dir, 'me/filed');
+  assert.equal(card.license, 'other');
+  assert.equal(card.license_name, 'default-license');
+  assert.equal(card.license_link, 'LICENSE');
+  assert.equal(files.LICENSE, 'Our own terms.\n');
+
+  // A license id next to a LICENSE file keeps the id and uploads the file too.
+  const both = withYaml((yaml) => yaml);
+  writeFileSync(join(both, 'LICENSE'), 'BSD text.\n');
+  const preset = await publishedCard(fake, both, 'me/preset');
+  assert.equal(preset.card.license, 'bsd-3-clause');
+  assert.equal(preset.files.LICENSE, 'BSD text.\n');
+});
+
+test('no license leaves it off the card with a warning; one that is neither a file nor an id is refused', async () => {
+  const fake = fakeHub();
+  const warnings = [];
+  const warn = console.warn;
+  console.warn = (line) => warnings.push(line);
+  let unset;
+  try {
+    unset = await publishedCard(fake, withYaml((yaml) => yaml.replace(/^license: .*\n/m, '')), 'me/unlicensed');
+  } finally {
+    console.warn = warn;
+  }
+  assert.equal(unset.card.license, undefined);
+  assert.ok(warnings.some((line) => /has no license/.test(line)));
+
+  await assert.rejects(
+    publish(withYaml((yaml) => yaml.replace(/^license: .*$/m, 'license: Not A License')), { repo: 'me/bad', create: true }, fake.io),
+    /license "Not A License" is neither a file in .* nor a Hugging Face license id/,
+  );
+  await assert.rejects(
+    publish(withYaml((yaml) => yaml.replace(/^license: .*$/m, 'license: 3\ntags: nope')), { repo: 'me/bad2', create: true }, fake.io),
+    /license must be[^]*tags must be a list of strings/,
+  );
+});

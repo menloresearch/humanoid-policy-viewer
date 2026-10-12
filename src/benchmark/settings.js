@@ -86,6 +86,8 @@ export function parseBenchmark(raw) {
   if (!Number.isInteger(raw.version) || raw.version < 1) errors.push('version must be an integer >= 1');
   if (!isPlainObject(raw.harness) || !Number.isInteger(raw.harness.protocol)) errors.push('harness.protocol (integer) is required');
   if (!isPlainObject(raw.requires)) errors.push('requires is required');
+  if (raw.license !== undefined && (typeof raw.license !== 'string' || !raw.license)) errors.push('license must be a Hugging Face license id or the name of a file in the benchmark folder');
+  if (raw.tags !== undefined && (!Array.isArray(raw.tags) || raw.tags.some((tag) => typeof tag !== 'string'))) errors.push('tags must be a list of strings');
 
   const defaults = { ...BENCHMARK_DEFAULTS, ...(raw.defaults ?? {}) };
   defaults.randomize = { ...(raw.defaults?.randomize ?? {}) };

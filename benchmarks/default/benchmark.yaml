@@ -4,6 +4,7 @@ name: default
 title: default
 description: A few basic tests to check that the policy is running properly.
 version: 1                      # bump whenever a change can move a score
+license: bsd-3-clause           # a Hugging Face license id, or a license file in this folder (e.g. LICENSE)
 harness:
   repo: https://github.com/menloresearch/humanoid-policy-viewer
   protocol: 1

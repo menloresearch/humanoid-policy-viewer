@@ -15,6 +15,7 @@ export const DATASET_META_FILE = '.hf-dataset.json';
 export const BENCHMARK_FILES = [
   /^benchmark\.yaml$/, /^[A-Z_]+\.md$/, /^data\/[^/]+\/test\.jsonl$/, /^calibration\/[^/]+\.json$/,
   /^tools\/[^/]+\.(mjs|js|py)$/, // optional scripts that generate the tests, kept for reviewers
+  /^(LICEN[CS]E|COPYING)(\.[A-Za-z0-9]+)?$/, // a license file benchmark.yaml's `license:` can point at
 ];
 
 // Everything `hf publish` uploads, so a pulled copy publishes back unchanged; never large data files.

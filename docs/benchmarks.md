@@ -11,13 +11,15 @@ benchmark.yaml             what runs, how often, how it is scored, which numbers
 data/<config>/test.jsonl   one test per line; one dataset config per category (locomotion, push_walking, ...)
 README.md                  optional notes; becomes the dataset card
 METHODOLOGY.md             optional: why the tests are what they are
+LICENSE                    optional: your own license text, if benchmark.yaml's license: points at it
 calibration/               optional: calibration records
 tools/                     optional: scripts that generate the tests (published, for reviewers)
 ```
 
 That is all a benchmark needs locally. Publishing adds the Hugging Face files, built from `benchmark.yaml` and never
 kept in the working copy: `eval.yaml` (the Hub benchmark registration, one task per leaderboard) and the card's
-front matter (a default `all` config with every test, one config per category, the declared column types, tags). A task scoped to one
+front matter (a default `all` config with every test, one config per category, the declared column types, the
+`humanoid-policy-viewer` tag plus `benchmark.yaml`'s `tags`, and its `license`). A task scoped to one
 category points at that config; any other task points at `all`, so `all` is not a valid category name. `npm run hf publish <dir> dry-run` shows them.
 
 ## A test (one row)
@@ -93,6 +95,8 @@ What a spec builds is part of `BENCHMARK_PROTOCOL`.
 name: asimov-locomotion
 title: Asimov Locomotion Benchmark
 version: 1                         # bump when anything that can change a score changes
+license: bsd-3-clause              # a Hugging Face license id, or a file in this folder (license: LICENSE)
+tags: [humanoid, locomotion]       # added to the card after humanoid-policy-viewer
 harness:
   repo: https://github.com/menloresearch/humanoid-policy-viewer
   protocol: 1                      # the viewer's BENCHMARK_PROTOCOL this benchmark was validated with
@@ -113,6 +117,12 @@ tasks:                             # leaderboard numbers; ids get _v<version> ap
   - { id: push_walking_survival_rate, metric: survival_rate@1, scope: { config: push_walking } }
 reference_policies: [menloresearch/asimov1-loco]   # used by `npm run hf baseline`
 ```
+
+`license` goes on the dataset card. Use one of the Hub's
+[license ids](https://huggingface.co/docs/hub/repositories-licenses) (`bsd-3-clause`, `apache-2.0`, `mit`,
+`cc-by-4.0`, ...), or name a file in the benchmark folder (`LICENSE`, `LICENSE.md`, `COPYING`, ...): it is uploaded
+and the card says `license: other`, linking to it. Without one, `hf publish` warns and the card has no license.
+`license` and `tags` only change the card, so they never need a version bump.
 
 The simulation is deterministic, so `repeats > 1` only makes sense with something randomised; the runner refuses
 otherwise. A scope narrows a task to `config`, `id` and/or `tag` (a test's tags);
