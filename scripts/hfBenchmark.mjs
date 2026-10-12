@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { compatibilityProblems } from '../src/benchmark/settings.js';
 import { collectProvenance } from './benchmarkProvenance.mjs';
 import { classifyTarget } from './benchmarkTargets.mjs';
+import { explainAuthError, requireToken } from './hfAuth.mjs';
 import { commitFiles, hubCredentials } from './hfCommit.mjs';
 import { BENCHMARK_FILES, ensureDataset, fetchDatasetInfo, hubSettings } from './hfDataset.mjs';
 import { checkTests } from '../src/benchmark/check.js';
@@ -168,7 +169,7 @@ export async function diff(dir, { repo, base: rev } = {}, io) {
   io = hubIo(io);
   const name = datasetName('diff', dir, repo);
   const base = await resolveBase(name, rev, io);
-  if (!base) throw new Error(`datasets/${name} has no benchmark on the Hub yet (or it is private and HF_TOKEN is not set); nothing to compare with`);
+  if (!base) throw new Error(`datasets/${name} has no benchmark on the Hub yet (or it is private and you are not logged in); nothing to compare with`);
   const text = changesText(base, loadBenchmarkDir(dir));
   io.log(text);
   return text;
@@ -223,20 +224,25 @@ function publishableFiles(dir) {
 
 /** Tags a dataset commit: `hf release`, and `hf publish` after a direct commit. */
 async function tagDataset({ id, sha, tag, message }, io) {
+  requireToken(io.env, `Tagging datasets/${id}`);
   const { accessToken, hubUrl } = hubCredentials(io.env);
-  if (!accessToken) throw new Error('Tagging needs a Hugging Face token (HF_TOKEN or hf auth login)');
   const response = await io.fetchImpl(`${hubUrl}/api/datasets/${id}/tag/${sha}`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ tag, message }),
   });
-  if (!response.ok) throw new Error(`Tagging failed (${response.status}): ${await response.text()}`);
+  if (!response.ok) {
+    const error = Object.assign(new Error(`Tagging failed (${response.status}): ${await response.text()}`), { statusCode: response.status });
+    throw explainAuthError(error, io.env, `Tagging datasets/${id}`);
+  }
 }
 
 export async function publish(dir, { repo, base: rev, pr = false, create = false, dryRun = false } = {}, io) {
   io = hubIo(io);
   const { log } = io;
   const name = datasetName('publish', dir, repo);
+  // Before any Hub work, so someone who is not logged in finds out first (dry-run needs no token).
+  if (!dryRun) requireToken(io.env, `Publishing datasets/${name}`);
   const base = await resolveBase(name, rev, io);
   if (rev && base) {
     // Publishing on top of anything but main would hide what was published since.
@@ -270,9 +276,13 @@ export async function publish(dir, { repo, base: rev, pr = false, create = false
   if (create) {
     const { createRepo, repoExists } = io.hub ?? await import('@huggingface/hub');
     const { accessToken, hubUrl } = hubCredentials(io.env);
-    if (!(await repoExists({ repo: { type: 'dataset', name }, accessToken, hubUrl }))) {
-      await createRepo({ repo: { type: 'dataset', name }, private: true, accessToken, hubUrl });
-      log(`Created PRIVATE dataset datasets/${name}`);
+    try {
+      if (!(await repoExists({ repo: { type: 'dataset', name }, accessToken, hubUrl }))) {
+        await createRepo({ repo: { type: 'dataset', name }, private: true, accessToken, hubUrl });
+        log(`Created PRIVATE dataset datasets/${name}`);
+      }
+    } catch (error) {
+      throw explainAuthError(error, io.env, `Creating datasets/${name}`);
     }
   }
   const result = await commitFiles({

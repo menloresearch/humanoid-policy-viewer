@@ -58,7 +58,9 @@ For benchmark results:
 Write options as key=value and flags as plain words, without "--".
 
 Environment:
-  HF_TOKEN             access token, needed for private repos and for writing
+  HF_TOKEN             access token, needed for private repos and for writing; without it, the token
+                       \`hf auth login\` saved (HF_TOKEN_PATH, else HF_HOME/token, else
+                       ~/.cache/huggingface/token). Make one at https://huggingface.co/settings/tokens
   HF_ENDPOINT          alternative Hub endpoint (default: https://huggingface.co)
   HPV_CACHE_DIR        where downloads are kept (default: ~/.cache/humanoid-policy-viewer)`;
 

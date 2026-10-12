@@ -188,6 +188,25 @@ test('dry-run publish of a new dataset lists the files and eval.yaml and writes 
   assert.deepEqual(fake.dataset('me/new').tags, { v1: result.commit });
 });
 
+test('publish says how to log in before touching the Hub when there is no token', async () => {
+  const fake = fakeHub();
+  const touched = [];
+  const io = { ...fake.io, env: { HF_ENDPOINT: 'https://fake.hub' }, fetchImpl: async (url) => { touched.push(url); throw new Error('no Hub call expected'); } };
+  await assert.rejects(publish(DEFAULT, { repo: 'me/new', create: true }, io), /Publishing datasets\/me\/new needs a Hugging Face token, and you are not logged in[^]*export HF_TOKEN=hf_[^]*hf auth login/);
+  assert.deepEqual(touched, []);
+  assert.equal(fake.repos.size, 0);
+  // dry-run still works without a token.
+  await publish(DEFAULT, { repo: 'me/new', dryRun: true }, { ...fake.io, env: { HF_ENDPOINT: 'https://fake.hub' } });
+  assert.match(fake.output(), /dry-run: would write/);
+});
+
+test('a token the Hub rejects while creating a dataset is explained', async () => {
+  const fake = fakeHub();
+  const rejecting = async () => { throw Object.assign(new Error('Invalid username or password.'), { statusCode: 401 }); };
+  const io = { ...fake.io, hub: { ...fake.io.hub, repoExists: rejecting } };
+  await assert.rejects(publish(DEFAULT, { repo: 'me/new', create: true }, io), /Creating datasets\/me\/new failed: Hugging Face rejected your token \(from HF_TOKEN\)[^]*settings\/tokens/);
+});
+
 function resultRun(overrides = {}) {
   const raw = parseYaml(readFileSync(join(DEFAULT, 'benchmark.yaml'), 'utf8'));
   const row = JSON.parse(readFileSync(join(DEFAULT, 'data/locomotion/test.jsonl'), 'utf8').split('\n')[0]);

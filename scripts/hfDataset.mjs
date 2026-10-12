@@ -5,7 +5,8 @@
 
 import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
-import { defaultCacheDir, downloadFile } from './hfPolicy.mjs';
+import { hubToken } from './hfAuth.mjs';
+import { defaultCacheDir, downloadFile, notFoundHint } from './hfPolicy.mjs';
 
 export const DATASET_META_FILE = '.hf-dataset.json';
 
@@ -24,7 +25,7 @@ export function datasetFilesToFetch(files) {
 export function hubSettings(env = process.env) {
   return {
     endpoint: (env.HF_ENDPOINT || 'https://huggingface.co').replace(/\/+$/, ''),
-    token: env.HF_TOKEN || env.HUGGING_FACE_HUB_TOKEN || null,
+    token: hubToken(env).token,
   };
 }
 
@@ -33,7 +34,7 @@ export async function fetchDatasetInfo(id, revision, { endpoint, token, fetchImp
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
   if (response.status === 401 || response.status === 404) {
-    const error = new Error(`Hugging Face dataset ${id}@${revision} was not found, or it is private (set HF_TOKEN to use a private dataset)`);
+    const error = new Error(`Hugging Face dataset ${id}@${revision} ${notFoundHint(token)}`);
     throw Object.assign(error, { status: response.status });
   }
   if (!response.ok) throw new Error(`Hugging Face API returned ${response.status} for dataset ${id}@${revision}`);

@@ -233,7 +233,7 @@ community result.
 | `HPV_BENCHMARK_RESULTS_DIR` | `benchmark_results/` | where results are saved |
 | `HPV_POLICY_LIBRARY_DIR`, `HPV_POLICY_ROOTS` | `policies/` + the Hub cache | the policy library ([Policy library](policy-library.md)) |
 | `HPV_CACHE_DIR` | `~/.cache/humanoid-policy-viewer` | downloads |
-| `HF_TOKEN`, `HF_ENDPOINT` | — | Hub access |
+| `HF_TOKEN`, `HF_ENDPOINT` | — | Hub access; without `HF_TOKEN`, the token `hf auth login` saved (`scripts/hfAuth.mjs`) |
 
 ## Migration from the old names
 

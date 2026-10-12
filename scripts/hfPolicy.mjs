@@ -9,6 +9,7 @@ import { dirname, join, resolve, sep } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { policyFileCandidates } from '../src/simulation/envPolicyConfig.js';
+import { hubToken } from './hfAuth.mjs';
 
 export const HF_POLICY_ROOT = 'hf';
 export const HF_META_FILE = '.hf-meta.json';
@@ -51,13 +52,19 @@ function readMeta(policyDir) {
   try { return JSON.parse(readFileSync(join(policyDir, HF_META_FILE), 'utf8')); } catch { return null; }
 }
 
+// The Hub answers 401 (not 404) for a repo that is missing or private, and for any repo when the token is bad.
+export function notFoundHint(token) {
+  return token
+    ? 'was not found, or your Hugging Face token cannot read it (private, or the token is expired: log in again with hf auth login or a new HF_TOKEN)'
+    : 'was not found, or it is private (log in with hf auth login, or set HF_TOKEN)';
+}
+
 async function fetchRepoInfo(repo, revision, { endpoint, token, fetchImpl }) {
   const response = await fetchImpl(`${endpoint}/api/models/${repo}/revision/${encodeURIComponent(revision)}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
-  // The Hub answers 401 (not 404) for a repo that is missing or private.
   if (response.status === 401 || response.status === 404) {
-    throw new Error(`Hugging Face repo ${repo}@${revision} was not found, or it is private (set HF_TOKEN to use a private repo)`);
+    throw new Error(`Hugging Face repo ${repo}@${revision} ${notFoundHint(token)}`);
   }
   if (!response.ok) throw new Error(`Hugging Face API returned ${response.status} for ${repo}@${revision}`);
   const info = await response.json();
@@ -89,7 +96,7 @@ export async function ensurePolicy(repo, {
   log = () => {},
 } = {}) {
   const endpoint = (env.HF_ENDPOINT || 'https://huggingface.co').replace(/\/+$/, '');
-  const token = env.HF_TOKEN || env.HUGGING_FACE_HUB_TOKEN || null;
+  const { token } = hubToken(env);
   const layout = (id) => {
     const dirName = id.replace('/', '__');
     return { dirName, policyDir: join(cacheDir, HF_POLICY_ROOT, dirName) };

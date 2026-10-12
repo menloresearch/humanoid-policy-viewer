@@ -75,8 +75,8 @@ For each policy, `submit` writes, in one commit to its model repo, `.eval_result
 task; re-runs replace their own task ids and keep the rest) and `eval_logs/<dataset>/v<version>/{result.json,report.html}`
 (that policy's part of the result, and the source each entry links to). If you own the model repo's namespace (your
 user or one of your orgs) it is committed to `main`; otherwise, or with `pr`, or if a direct commit is refused, it
-is opened as a pull request, which the Hub shows as a community result until merged. It needs a token:
-`hf auth login` or `HF_TOKEN`.
+is opened as a pull request, which the Hub shows as a community result until merged. It needs a write token:
+`export HF_TOKEN=hf_...`, or `hf auth login` (the Hugging Face CLI, `pip install -U huggingface_hub`).
 
 Each entry's `notes` records `hpv@<commit> protocol=<n> benchmark=<name> v<version> asimov-1@<commit> policy@<commit>`.
 

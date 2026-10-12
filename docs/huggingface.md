@@ -26,7 +26,7 @@ Options are plain words, with no `--`:
 | `benchmark=<dir \| datasets/org/name[@rev]>` | The benchmark the viewer opens (default `./benchmarks/default`) |
 | `port=<n>` | Dev server port (default 3000, or the next free one) |
 | `no-open` | Do not open a browser window; open the printed link instead, which selects the policy (the bare server URL runs the bundled example) |
-| `HF_TOKEN` | Access token, for private repos |
+| `HF_TOKEN` | Access token, for private repos and for writing (make one at https://huggingface.co/settings/tokens). Without it, the token `hf auth login` saved is used (`HF_TOKEN_PATH`, else `$HF_HOME/token`, else `~/.cache/huggingface/token`) |
 | `HF_ENDPOINT` | Alternative Hub endpoint (default `https://huggingface.co`) |
 | `HPV_CACHE_DIR` | Download cache (default `~/.cache/humanoid-policy-viewer`) |
 
