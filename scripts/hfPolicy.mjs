@@ -14,25 +14,6 @@ export const HF_POLICY_ROOT = 'hf';
 export const HF_META_FILE = '.hf-meta.json';
 const REPO_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
-export const USAGE = `Usage: npm run hf <org/name | folder | file.onnx> [-- options]
-
-Downloads a policy from Hugging Face (policy .onnx + env.yaml) and opens the
-viewer with it selected. Example: npm run hf Menlo/asimov1-locomotion-0818
-
-A folder or .onnx file on disk is run in place instead, with no download. The
-folder needs the same files as a Hub repo: the .onnx and env.yaml (or
-params/env.yaml) next to it. Example: npm run hf ./my-policy
-
-Options (npm needs the "--" before these):
-  --revision <ref>     branch, tag or commit of a Hub repo (default: main)
-  --port <n>           dev server port (default: 3000, or the next free one)
-  --no-open            do not open a browser window
-
-Environment:
-  HF_TOKEN             access token, needed for private repos
-  HF_ENDPOINT          alternative Hub endpoint (default: https://huggingface.co)
-  HPV_CACHE_DIR        where downloads are kept (default: ~/.cache/humanoid-policy-viewer)`;
-
 export function normalizeRepoId(input) {
   const id = String(input ?? '')
     .trim()
@@ -43,28 +24,6 @@ export function normalizeRepoId(input) {
     throw new Error(`"${input}" is not a Hugging Face repo id (expected <org>/<name>, e.g. Menlo/asimov1-locomotion-0818)`);
   }
   return id;
-}
-
-export function parseArgs(argv) {
-  const args = { policy: null, revision: 'main', port: null, open: true, help: false };
-  for (let i = 0; i < argv.length; i++) {
-    const [flag, inline] = argv[i].startsWith('--') ? argv[i].split(/=(.*)/s) : [argv[i]];
-    const value = () => {
-      const v = inline ?? argv[++i];
-      if (v === undefined || v.startsWith('--')) throw new Error(`${flag} needs a value`);
-      return v;
-    };
-    if (flag === '--policy') args.policy = value();
-    else if (flag === '--revision') args.revision = value();
-    else if (flag === '--port') {
-      args.port = Number(value());
-      if (!Number.isInteger(args.port) || args.port < 1 || args.port > 65535) throw new Error('--port must be 1-65535');
-    } else if (flag === '--no-open') args.open = false;
-    else if (flag === '--help' || flag === '-h') args.help = true;
-    else if (!flag.startsWith('-') && args.policy === null) args.policy = flag;
-    else throw new Error(`Unknown argument: ${argv[i]}`);
-  }
-  return args;
 }
 
 export function defaultCacheDir(env = process.env) {

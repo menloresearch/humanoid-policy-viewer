@@ -1,13 +1,11 @@
-#!/usr/bin/env node
-// npm run suite <command> ...
-//
-// Tooling for a benchmark (the tests + benchmark.yaml that `npm run
-// benchmark` runs). The Hugging Face dataset is the only copy of the tests:
-// authors pull a working copy, edit it (by hand or in the viewer with
-// `npm run dev benchmark=<dir>`), check it here, and publish it back as a commit
-// or a pull request on the dataset. Hub dataset PRs have no CI, so a reviewer
-// re-runs `baseline` on `pull <id>@refs/pr/<n>`.
-// Run with no arguments for the usage text.
+// The Hugging Face side of a benchmark (the tests + benchmark.yaml that `npm
+// run benchmark` runs), behind `npm run hf pull|diff|baseline|publish|release`
+// (scripts/hf.mjs). The dataset is the only shared copy of the tests: authors
+// pull a working copy, edit it (by hand or in the viewer with `npm run dev
+// benchmark=<dir>`), and publish it back as a commit or a pull request on the
+// dataset. Hub dataset PRs have no CI, so a reviewer re-runs `baseline` on
+// `pull <id>@refs/pr/<n>`.
+// It imports npm packages, so scripts/hf.mjs loads it after setup().
 
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -15,38 +13,15 @@ import { cpSync, existsSync, readdirSync, readFileSync, rmSync, statSync, writeF
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compatibilityProblems } from '../src/benchmark/settings.js';
-import { commandedEnd, goalProblems } from '../src/benchmark/terrainCheck.js';
-import { rowToSequence } from '../src/benchmark/testRow.js';
 import { collectProvenance } from './benchmarkProvenance.mjs';
 import { classifyTarget } from './benchmarkTargets.mjs';
-import { parseWords, swallowedNpmFlags } from './cliArgs.mjs';
 import { commitFiles, hubCredentials } from './hfCommit.mjs';
 import { ensureDataset } from './hfDataset.mjs';
 import { checkTests } from './benchmarkCheck.mjs';
 import { hubFiles, loadBenchmarkDir, readYamlFile } from './benchmarkDir.mjs';
-import { initBenchmark } from './benchmarkInit.mjs';
-
-export { initBenchmark };
 
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const BASE_FILE = '.hpv-benchmark.json';
-
-const USAGE = `Usage: npm run suite <command> ...
-
-  init <dir>                               new benchmark: a copy of benchmarks/default (three example tests)
-  pull <dataset>[@rev|@refs/pr/<n>] <dir>  working copy of a Hub dataset (e.g. datasets/org/bench@refs/pr/3)
-  diff <dir>                               what changed since the pulled revision
-  baseline <dir> [policy=<policy>...]      run reference policies on the working copy and on the pulled
-                                           revision; writes <dir>/baseline.md
-  publish <dir> [repo=<org/name>] [pr] [create] [dry-run]
-                                           check, build eval.yaml + the dataset card, then commit (owner) or
-                                           open a pull request; "create" makes a new PRIVATE dataset repo
-  release <dataset> rev=<commit>           tag a merged revision v<version> and print the default-suite.json change
-  path-end <dir> [<test id>...]            where each test's commands end the path (x, y in m, 2 decimals)
-                                           and whether its end zone contains / is crossed by the path; JSON
-                                           lines, for picking a goal by hand or from a script
-
-Edit tests in the viewer with: npm run dev benchmark=<dir>   (or by hand: data/<config>/test.jsonl)`;
 
 function sha256(text) {
   return createHash('sha256').update(text).digest('hex');
@@ -139,7 +114,7 @@ function describeRowChange(a, b) {
   return keys.join(', ');
 }
 
-async function diff(dir) {
+export async function diff(dir) {
   const previous = await baseRows(dir);
   if (!previous) throw new Error(`${dir} was not pulled from the Hub (no ${BASE_FILE}); nothing to compare with`);
   const current = loadBenchmarkDir(dir);
@@ -169,7 +144,7 @@ function runBenchmarkProcess(args, outDir) {
   return JSON.parse(readFileSync(join(outDir, 'result.json'), 'utf8'));
 }
 
-async function baseline(dir, policies) {
+export async function baseline(dir, policies) {
   const loaded = loadBenchmarkDir(dir);
   const reference = policies.length ? policies : (loaded.rawBenchmark.reference_policies ?? []);
   if (!reference.length) throw new Error('No policies: add reference_policies to benchmark.yaml or pass policy=<policy>');
@@ -211,7 +186,7 @@ function publishableFiles(dir) {
   return files.sort();
 }
 
-async function publish(dir, { repo, pr, create, dryRun }) {
+export async function publish(dir, { repo, pr, create, dryRun }) {
   const loaded = publishCheck(dir);
   const base = readBase(dir);
   const name = repo ?? base?.id;
@@ -223,8 +198,8 @@ async function publish(dir, { repo, pr, create, dryRun }) {
     ...hubFiles(loaded, { previousEvalYaml }),
   ];
   const diffText = base && base.id === name ? await diff(dir).catch((error) => `(diff failed: ${error.message})`) : '(new dataset)';
-  const baselineText = existsSync(join(dir, 'baseline.md')) ? readFileSync(join(dir, 'baseline.md'), 'utf8') : '(no baseline run: npm run suite baseline <dir>)';
-  const description = `Published with \`npm run suite publish\` from humanoid-policy-viewer ${collectProvenance(appDir).hpv.commit ?? ''}.\n\n### Changes\n\`\`\`\n${diffText}\n\`\`\`\n\n### Baseline\n${baselineText}\n\nReviewers: \`npm run suite pull datasets/${name}@refs/pr/<n> <dir>\`, then \`npm run suite baseline <dir>\`.`;
+  const baselineText = existsSync(join(dir, 'baseline.md')) ? readFileSync(join(dir, 'baseline.md'), 'utf8') : '(no baseline run: npm run hf baseline <dir>)';
+  const description = `Published with \`npm run hf publish\` from humanoid-policy-viewer ${collectProvenance(appDir).hpv.commit ?? ''}.\n\n### Changes\n\`\`\`\n${diffText}\n\`\`\`\n\n### Baseline\n${baselineText}\n\nReviewers: \`npm run hf pull datasets/${name}@refs/pr/<n> <dir>\`, then \`npm run hf baseline <dir>\`.`;
   if (dryRun) {
     console.log(`dry-run: would write ${files.length} files to datasets/${name}${pr ? ' as a pull request' : ''}:\n  ${files.map((f) => f.path).join('\n  ')}`);
     console.log(`\n--- eval.yaml (generated) ---\n${files.find((f) => f.path === 'eval.yaml').content}`);
@@ -249,10 +224,10 @@ async function publish(dir, { repo, pr, create, dryRun }) {
     log: console.log,
   });
   console.log(`Published (${result.mode === 'pr' ? 'pull request' : 'commit'}): ${result.url}`);
-  if (result.mode !== 'pr') console.log(`When ready: npm run suite release datasets/${name} rev=${result.commit}`);
+  if (result.mode !== 'pr') console.log(`When ready: npm run hf release datasets/${name} rev=${result.commit}`);
 }
 
-async function release(target, rev) {
+export async function release(target, rev) {
   if (!target || !rev) throw new Error('release needs <dataset> rev=<commit>');
   const parsed = classifyTarget(target.startsWith('datasets/') || target.includes('/datasets/') ? target : `datasets/${target}`);
   const dataset = await ensureDataset(parsed.id, { revision: rev });
@@ -268,54 +243,4 @@ async function release(target, rev) {
   if (!response.ok) throw new Error(`Tagging failed (${response.status}): ${await response.text()}`);
   console.log(`Tagged datasets/${dataset.id}@${dataset.sha.slice(0, 7)} as ${tag}.`);
   console.log(`Now point the viewer at it in src/benchmark/default-suite.json:\n  "dataset": "${dataset.id}", "revision": "${tag}"`);
-}
-
-/** One JSON line per test: where its commands end the path, and how its end zone relates to it. */
-function pathEnd(dir, ids) {
-  const { rows } = loadBenchmarkDir(dir);
-  const unknown = ids.filter((id) => !rows.some((row) => row.id === id));
-  if (unknown.length) throw new Error(`Unknown test id(s): ${unknown.join(', ')}`);
-  for (const row of rows.filter((r) => !ids.length || ids.includes(r.id))) {
-    const sequence = rowToSequence(row);
-    const end = commandedEnd(sequence);
-    const goal = row.goal;
-    console.log(JSON.stringify({
-      id: row.id,
-      path_end: end,
-      goal,
-      goal_contains_end: goal ? (end.x - goal.x) ** 2 + (end.y - goal.y) ** 2 <= goal.radius_m ** 2 : null,
-      path_enters_goal: goal ? goalProblems(sequence).length === 0 : null,
-    }));
-  }
-}
-
-async function main() {
-  const keys = ['policy', 'repo', 'rev'];
-  const flags = ['pr', 'create', 'dry-run', 'help'];
-  const swallowed = swallowedNpmFlags(process.env, [...keys, ...flags.filter((f) => f !== 'help')]);
-  if (swallowed.length) throw new Error(`npm kept ${swallowed.map((f) => `--${f}`).join(', ')} for itself; write them without dashes.`);
-  const { positionals, options, flags: set } = parseWords(process.argv.slice(2), { keys, flags, repeatable: ['policy'] });
-  const [command, a, b] = positionals;
-  switch (command) {
-    case 'init': {
-      if (!a) throw new Error('init needs <dir>');
-      return initBenchmark(resolve(a));
-    }
-    case 'pull': return pull(a, b && resolve(b));
-    case 'diff': return diff(resolve(a ?? ''));
-    case 'baseline': return baseline(resolve(a ?? ''), options.policy ?? []);
-    case 'publish': return publish(resolve(a ?? ''), { repo: options.repo, pr: set.has('pr'), create: set.has('create'), dryRun: set.has('dry-run') });
-    case 'release': return release(a, options.rev);
-    case 'path-end': return pathEnd(resolve(a ?? ''), positionals.slice(2));
-    default:
-      console.log(USAGE);
-      if (command && command !== 'help') process.exitCode = 2;
-  }
-}
-
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  main().catch((error) => {
-    console.error(`\n${error.message}`);
-    process.exitCode = 1;
-  });
 }

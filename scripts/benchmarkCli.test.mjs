@@ -4,17 +4,17 @@ import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
-import { parseWords, swallowedNpmFlags } from './cliArgs.mjs';
+import { parsePort, parseWords, rejectSwallowedNpmFlags, swallowedNpmFlags } from './cliArgs.mjs';
 import { classifyTarget } from './benchmarkTargets.mjs';
 import { MAX_ROBOTS, buildJobs, groupCells, mergeResults, parseShard, shardJobs, takeNextJob, uploadBlockers, RESULT_SCHEMA } from './benchmarkRun.mjs';
 import { buildEvalResultEntries, evalResultsPath, mergeEvalResults } from './hfEvalResults.mjs';
 import { commitFiles, decideCommitMode } from './hfCommit.mjs';
 import { datasetFilesToFetch } from './hfDataset.mjs';
 import { mergeEvalTasks } from './benchmarkDir.mjs';
-import { scoredContentHash } from './suite.mjs';
+import { scoredContentHash } from './hfBenchmark.mjs';
 
 test('words, key=value options and flags', () => {
-  const parsed = parseWords(['org/a', 'benchmark=../s', 'policy=b/c', 'policy=d/e', 'pr', '--jobs=3', '--dry-run'], {
+  const parsed = parseWords(['org/a', 'benchmark=../s', 'policy=b/c', 'policy=d/e', 'pr', 'jobs=3', 'dry-run'], {
     keys: ['benchmark', 'policy', 'jobs'], flags: ['pr', 'dry-run'], repeatable: ['policy'],
   });
   assert.deepEqual(parsed.positionals, ['org/a']);
@@ -25,6 +25,21 @@ test('words, key=value options and flags', () => {
   // A path containing "=" is a positional, not an option.
   assert.deepEqual(parseWords(['./a=b/model'], { keys: [] }).positionals, ['./a=b/model']);
   assert.deepEqual(swallowedNpmFlags({ npm_config_pr: 'true', npm_config_no_upload: '' }, ['pr', 'no-upload', 'watch']), ['pr', 'no-upload']);
+});
+
+test('a "--" word is refused with the words form to write instead', () => {
+  const spec = { keys: ['jobs'], flags: ['pr'], hints: { revision: 'write the revision as org/name@rev' } };
+  assert.throws(() => parseWords(['--jobs=3'], spec), /"--jobs=3": no dashes; write jobs=3/);
+  assert.throws(() => parseWords(['--jobs', '3'], spec), /write jobs=<value>/);
+  assert.throws(() => parseWords(['--pr'], spec), /no dashes; write pr\./);
+  assert.throws(() => parseWords(['--revision', 'x'], spec), /write the revision as org\/name@rev/);
+  assert.throws(() => parseWords(['--nope'], spec), /key=value .*options: jobs=.*flags: pr/);
+  assert.throws(() => rejectSwallowedNpmFlags({ npm_config_revision: 'x' }, spec), /npm kept --revision .*org\/name@rev/);
+  assert.throws(() => rejectSwallowedNpmFlags({ npm_config_jobs: '2' }, spec), /write jobs=<value>/);
+  rejectSwallowedNpmFlags({}, spec);
+  assert.equal(parsePort(undefined), undefined);
+  assert.equal(parsePort('4000'), 4000);
+  assert.throws(() => parsePort('0'), /1-65535/);
 });
 
 test('targets: policies, benchmarks, revisions and local paths', () => {

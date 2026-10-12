@@ -3,11 +3,11 @@
 // command player, no terrain course may overlap the spawn area, the
 // benchmark's selection must work, and a few likely mistakes
 // are flagged. `npm run benchmark` runs this before starting the browser and
-// `npm run suite publish` before uploading.
+// `npm run hf publish` before uploading.
 
 import { commandSequencer, setActiveCommandLimits } from '../src/simulation/commandSequencer.js';
 import { expandCells, selectTests } from '../src/benchmark/settings.js';
-import { goalProblems, terrainProblems } from '../src/benchmark/terrainCheck.js';
+import { commandedEnd, goalProblems, terrainProblems } from '../src/benchmark/terrainCheck.js';
 import { rowToSequence } from '../src/benchmark/testRow.js';
 
 /** Returns { errors, warnings }; errors mean the benchmark cannot run as written. */
@@ -48,4 +48,25 @@ export function assertTestsRunnable(loaded, { log = console.warn } = {}) {
   for (const warning of warnings) log(`Warning: ${warning}`);
   if (errors.length) throw new Error(`The benchmark has errors:\n${errors.map((e) => `  - ${e}`).join('\n')}`);
   return warnings;
+}
+
+/**
+ * For `npm run benchmark path-end`: per test (all, or those in `ids`), where its
+ * commands end the path and how its end zone relates to it.
+ */
+export function pathEnds(rows, ids = []) {
+  const unknown = ids.filter((id) => !rows.some((row) => row.id === id));
+  if (unknown.length) throw new Error(`Unknown test id(s): ${unknown.join(', ')}`);
+  return rows.filter((r) => !ids.length || ids.includes(r.id)).map((row) => {
+    const sequence = rowToSequence(row);
+    const end = commandedEnd(sequence);
+    const goal = row.goal;
+    return {
+      id: row.id,
+      path_end: end,
+      goal,
+      goal_contains_end: goal ? (end.x - goal.x) ** 2 + (end.y - goal.y) ** 2 <= goal.radius_m ** 2 : null,
+      path_enters_goal: goal ? goalProblems(sequence).length === 0 : null,
+    };
+  });
 }

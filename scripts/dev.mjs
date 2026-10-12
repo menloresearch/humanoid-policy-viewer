@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// npm run dev [benchmark=<benchmark dir | datasets/<org>/<name>[@rev]>] [policy=<org>/<name>[@rev]...]
+// npm run dev [<org>/<name>[@rev]...] [benchmark=<benchmark dir | datasets/<org>/<name>[@rev]>]
 //             [port=<n>]
 //
 // Starts the viewer's dev server on every interface (scripts/startViewer.mjs).
@@ -7,58 +7,61 @@
 // benchmark folder (see scripts/benchmarkDir.mjs and docs/benchmark-datasets.md):
 // benchmark=<dir>, or by default the tracked example benchmark ./benchmarks/default.
 // A Hugging Face dataset is pulled on first use into ./benchmarks/<org>__<name>
-// (gitignored), an ordinary working copy (edit it, `npm run suite diff` /
+// (gitignored), an ordinary working copy (edit it, `npm run hf diff` /
 // `publish` it); later runs reuse it as is. That folder is where the app opens
 // first; its "New benchmark" button adds more under ./benchmarks/ and the app
 // switches between them.
 //
 // Policies: the policy list shows ./policies and every Hugging Face policy already
-// downloaded (by `npm run hf` or policy=), labelled by repo id. policy=<org>/<name>
-// downloads one first if it is not cached (repeatable). If HPV_POLICY_LIBRARY_DIR
-// or HPV_POLICY_ROOTS is set, that library is used as is instead.
+// downloaded (by `npm run hf` or this command), labelled by repo id. Each
+// <org>/<name> word downloads that policy first if it is not cached. If
+// HPV_POLICY_LIBRARY_DIR or HPV_POLICY_ROOTS is set, that library is used as is instead.
 //
 // Nothing here may import an npm dependency before setup() has installed them.
 
-import { normalizeRepoId } from './hfPolicy.mjs';
+import { classifyTarget, describeTarget } from './benchmarkTargets.mjs';
+import { parsePort, parseWords, rejectSwallowedNpmFlags } from './cliArgs.mjs';
 import { setup } from './setup.mjs';
 
-const USAGE = 'Usage: npm run dev [benchmark=<dir | datasets/<org>/<name>[@rev]>] [policy=<org>/<name>[@rev]...] [port=<n>]';
+const USAGE = 'Usage: npm run dev [<org>/<name>[@rev]...] [benchmark=<dir | datasets/<org>/<name>[@rev]>] [port=<n>]';
 
 function fail(message) {
   console.error(message);
   process.exit(2);
 }
 
-let benchmark = null;
-let port;
-const policies = [];
-for (const word of process.argv.slice(2)) {
-  const [, key, value] = /^(?:--)?(benchmark|policy|port)=(.+)$/.exec(word) ?? [];
-  if (key === 'policy') {
-    try {
-      normalizeRepoId(value.split('@')[0]);
-    } catch (error) {
-      fail(error.message);
-    }
-    policies.push(value);
-  } else if (key === 'benchmark') {
-    benchmark = value;
-  } else if (key === 'port') {
-    port = Number(value);
-    if (!Number.isInteger(port) || port < 1 || port > 65535) fail('port must be 1-65535');
-  } else {
-    fail(`Unknown argument: ${word}\n${USAGE}`);
-  }
+/** The words of `npm run dev`: { policies, benchmark, port }. */
+function devArgs(argv, env = process.env) {
+  const spec = { keys: ['benchmark', 'port', 'policy'], flags: ['help'], repeatable: ['policy'] };
+  rejectSwallowedNpmFlags(env, spec);
+  const { positionals, options, flags } = parseWords(argv, spec);
+  if (flags.has('help')) return { help: true };
+  if (options.policy) throw new Error(`Write policies as plain words: npm run dev ${options.policy.join(' ')}`);
+  const policies = positionals.map((word) => {
+    const target = classifyTarget(word);
+    if (target.kind === 'benchmark') throw new Error(`${word} is a benchmark; write benchmark=${word}`);
+    if (target.source === 'local') throw new Error(`${word} is on disk: put it under ./policies (listed already) or run npm run hf ${word}`);
+    return describeTarget(target);
+  });
+  return { policies, benchmark: options.benchmark ?? null, port: parsePort(options.port) };
 }
-for (const name of ['benchmark', 'policy', 'port']) {
-  if (process.env[`npm_config_${name}`]) fail(`npm kept --${name} for itself; write ${name}=<value> (no dashes).`);
+
+let args;
+try {
+  args = devArgs(process.argv.slice(2));
+} catch (error) {
+  fail(`${error.message}\n${USAGE}`);
+}
+if (args.help) {
+  console.log(USAGE);
+  process.exit(0);
 }
 
 setup();
 const { startViewer } = await import('./startViewer.mjs');
 let viewer;
 try {
-  viewer = await startViewer({ benchmark, policies, host: true, port });
+  viewer = await startViewer({ benchmark: args.benchmark, policies: args.policies, host: true, port: args.port });
 } catch (error) {
   fail(error.message);
 }

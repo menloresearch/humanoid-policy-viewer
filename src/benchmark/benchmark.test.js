@@ -237,7 +237,7 @@ test('the tracked default benchmark is valid', async () => {
 });
 
 test('benchmark init copies the default benchmark', async () => {
-  const { initBenchmark } = await import('../../scripts/suite.mjs');
+  const { initBenchmark } = await import('../../scripts/benchmarkInit.mjs');
   const { loadBenchmarkDir } = await import('../../scripts/benchmarkDir.mjs');
   const dir = join(mkdtempSync(join(tmpdir(), 'hpv-init-')), 'my-bench');
   initBenchmark(dir, { log: () => {} });

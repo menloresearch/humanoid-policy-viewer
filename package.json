@@ -6,13 +6,12 @@
   "license": "BSD-3-Clause",
   "scripts": {
     "dev": "node scripts/dev.mjs",
-    "hf": "node scripts/run-hf-model.mjs",
-    "build": "vite build",
-    "preview": "vite preview",
+    "hf": "node scripts/hf.mjs",
     "benchmark": "node scripts/run-benchmark.mjs",
     "benchmark:golden": "node scripts/check-golden.mjs",
-    "suite": "node scripts/suite.mjs",
-    "test": "node --test \"src/**/*.test.js\" \"scripts/**/*.test.mjs\""
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node scripts/test.mjs"
   },
   "dependencies": {
     "@fontsource/roboto": "5.2.5",

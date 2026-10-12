@@ -22,7 +22,7 @@ import { classifyTarget } from './benchmarkTargets.mjs';
 import { HF_POLICY_ROOT, defaultCacheDir, ensurePolicy, normalizeRepoId } from './hfPolicy.mjs';
 import { checkPolicyDir, readReferenceJointNames } from './policyChecks.mjs';
 import { DEFAULT_POLICY_ROOT } from './policyLibraryConfig.mjs';
-import { pull, pulledFrom } from './suite.mjs';
+import { pull, pulledFrom } from './hfBenchmark.mjs';
 
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -73,7 +73,7 @@ async function resolveBenchmark(word, log) {
     await hubWorkingCopy(target, dir, log);
   }
   if (!existsSync(join(dir, BENCHMARK_FILE))) {
-    throw new Error(`${dir} has no benchmark.yaml. Create a benchmark with \`npm run suite init ${dir}\` or pull one with \`npm run suite pull <dataset> ${dir}\`.`);
+    throw new Error(`${dir} has no benchmark.yaml. Create a benchmark with \`npm run benchmark init ${dir}\` or pull one with \`npm run hf pull <dataset> ${dir}\`.`);
   }
   return dir;
 }
@@ -99,7 +99,7 @@ async function hubWorkingCopy(target, dir, log) {
   if (target.revision && target.revision !== base.revision) {
     log(`  You asked for @${target.revision}; delete that folder to pull it instead (your edits there would be lost).`);
   }
-  log(`  See what you changed: npm run suite diff ${dir}`);
+  log(`  See what you changed: npm run hf diff ${dir}`);
 }
 
 /** Downloads one Hugging Face policy into the cache. */

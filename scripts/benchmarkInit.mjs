@@ -1,8 +1,8 @@
 // Creates a new benchmark folder (scripts/benchmarkDir.mjs) as a copy of the
-// tracked ./benchmarks/default: `npm run suite init` and the viewer's "New
-// benchmark" button. Kept apart from suite.mjs (a CLI with a shebang and the
-// Hub tooling) because the dev server's vite.config.mjs imports it, and Vite
-// bundles that config.
+// tracked ./benchmarks/default: `npm run benchmark init` and the viewer's "New
+// benchmark" button. Kept apart from run-benchmark.mjs and the Hub tooling
+// (hfBenchmark.mjs) because the dev server's vite.config.mjs imports it, and
+// Vite bundles that config.
 
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';

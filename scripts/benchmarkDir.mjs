@@ -142,7 +142,7 @@ export function hubFiles({ dir, benchmark, rows, rawBenchmark }, { previousEvalY
   const readmePath = join(dir, 'README.md');
   const readme = existsSync(readmePath) ? readFileSync(readmePath, 'utf8') : `\n# ${name}\n`;
   return [
-    { path: 'eval.yaml', content: `# Generated from benchmark.yaml by \`npm run suite publish\`; do not edit by hand.\n${stringifyYaml(evalYaml)}` },
+    { path: 'eval.yaml', content: `# Generated from benchmark.yaml by \`npm run hf publish\`; do not edit by hand.\n${stringifyYaml(evalYaml)}` },
     { path: 'README.md', content: withFrontMatter(readme, cardFrontMatter(rows, { prettyName: name })) },
   ];
 }

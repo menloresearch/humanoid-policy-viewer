@@ -3,22 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { ensurePolicy, normalizeRepoId, parseArgs, selectFiles } from './hfPolicy.mjs';
-
-test('parseArgs accepts --policy forms, a bare positional, and options', () => {
-  assert.equal(parseArgs(['--policy', 'Menlo/x']).policy, 'Menlo/x');
-  assert.equal(parseArgs(['--policy=Menlo/x']).policy, 'Menlo/x');
-  assert.equal(parseArgs(['Menlo/x']).policy, 'Menlo/x');
-  const args = parseArgs(['Menlo/x', '--revision=v1', '--port', '4000', '--no-open']);
-  assert.deepEqual([args.revision, args.port, args.open], ['v1', 4000, false]);
-});
-
-test('parseArgs rejects unknown flags, missing values and bad ports', () => {
-  assert.throws(() => parseArgs(['--nope']), /Unknown argument/);
-  assert.throws(() => parseArgs(['--policy']), /needs a value/);
-  assert.throws(() => parseArgs(['--policy', '--no-open']), /needs a value/);
-  assert.throws(() => parseArgs(['--port', 'abc']), /--port/);
-});
+import { ensurePolicy, normalizeRepoId, selectFiles } from './hfPolicy.mjs';
 
 test('normalizeRepoId accepts ids and Hub URLs, rejects anything else', () => {
   assert.equal(normalizeRepoId('Menlo/asimov1-locomotion-0818'), 'Menlo/asimov1-locomotion-0818');

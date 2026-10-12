@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // npm run benchmark <policy...> [benchmark] [options]
 // npm run benchmark merge <dir...> [upload] [pr] [dry-run]
+// npm run benchmark init <dir> | path-end <dir> [<test id>...]
 //
 // Benchmarks policies against a benchmark (a Hugging Face benchmark
 // dataset or a local folder; see scripts/benchmarkDir.mjs) in headless
@@ -22,14 +23,15 @@ import {
 } from './benchmarkRun.mjs';
 import { classifyTarget, describeTarget } from './benchmarkTargets.mjs';
 import { checkPolicyDir, readReferenceJointNames } from './policyChecks.mjs';
-import { parseWords, swallowedNpmFlags } from './cliArgs.mjs';
+import { parseWords, rejectSwallowedNpmFlags } from './cliArgs.mjs';
 import { commitFiles, readRepoText } from './hfCommit.mjs';
 import { ensureDataset } from './hfDataset.mjs';
 import { buildEvalResultEntries, evalLogsDir, evalResultsPath, mergeEvalResults } from './hfEvalResults.mjs';
 import { ensurePolicy } from './hfPolicy.mjs';
 import { findLocalPolicy } from './localPolicy.mjs';
-import { assertTestsRunnable } from './benchmarkCheck.mjs';
+import { assertTestsRunnable, pathEnds } from './benchmarkCheck.mjs';
 import { loadBenchmarkDir } from './benchmarkDir.mjs';
+import { initBenchmark } from './benchmarkInit.mjs';
 
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -39,6 +41,14 @@ const FLAGS = ['pr', 'dry-run', 'no-upload', 'upload', 'force', 'watch', 'verbos
 const USAGE = `Usage:
   npm run benchmark <policy...> [<benchmark>] [key=value...] [flags...]
   npm run benchmark merge <result dir...> [upload] [pr] [dry-run]
+  npm run benchmark init <dir>
+  npm run benchmark path-end <dir> [<test id>...]
+
+  merge                combine the out dirs of a sharded run (shard=)
+  init                 new benchmark: a copy of benchmarks/default (three example tests)
+  path-end             where each test's commands end the path (x, y in m, 2 decimals) and
+                       whether its end zone contains / is crossed by the path; JSON lines,
+                       for picking a goal by hand or from a script
 
 A policy is a Hugging Face model repo (org/name, org/name@rev or its URL) or a local
 folder / .onnx file. A benchmark is a Hub dataset (datasets/org/name[@rev] or
@@ -372,18 +382,29 @@ async function mergeCommand(args) {
   return ok && merged.cells.every((cell) => !cell.error);
 }
 
+function initCommand({ positionals }) {
+  if (!positionals[1]) throw new Error('init needs <dir>');
+  initBenchmark(resolve(positionals[1]));
+  return true;
+}
+
+function pathEndCommand({ positionals }) {
+  if (!positionals[1]) throw new Error('path-end needs <dir>');
+  const { rows } = loadBenchmarkDir(resolve(positionals[1]));
+  for (const line of pathEnds(rows, positionals.slice(2))) console.log(JSON.stringify(line));
+  return true;
+}
+
+const COMMANDS = { merge: mergeCommand, init: initCommand, 'path-end': pathEndCommand };
+
 async function main() {
-  // npm answers --help itself; every other flag, --dry-run and --force included, it strips and runs the script anyway.
-  const swallowed = swallowedNpmFlags(process.env, [...KEYS, ...FLAGS.filter((f) => f !== 'help')]);
-  if (swallowed.length) {
-    throw new Error(`npm kept ${swallowed.map((f) => `--${f}`).join(', ')} for itself. Write ${swallowed.map((f) => (KEYS.includes(f) ? `${f}=<value>` : f)).join(', ')} instead (no dashes).`);
-  }
+  rejectSwallowedNpmFlags(process.env, { keys: KEYS, flags: FLAGS });
   const args = parseWords(process.argv.slice(2), { keys: KEYS, flags: FLAGS, repeatable: ['policy'] });
   if (args.flags.has('help') || (!args.positionals.length && !args.options.policy)) {
     console.log(USAGE);
     return args.flags.has('help');
   }
-  return args.positionals[0] === 'merge' ? mergeCommand(args) : runBenchmarkCommand(args);
+  return (COMMANDS[args.positionals[0]] ?? runBenchmarkCommand)(args);
 }
 
 main().then((ok) => {
