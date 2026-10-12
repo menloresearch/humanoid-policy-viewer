@@ -78,7 +78,8 @@ const STARTER_ROWS = [
     description: 'Stand, walk forward at 0.6 m/s for 11 s, stop.',
     duration: 12,
     commands: [{ t: 0, vx: 0, vy: 0, wz: 0 }, { t: 0.3, vx: 0.6, vy: 0, wz: 0 }, { t: 11.5, vx: 0, vy: 0, wz: 0 }],
-    goal: { x: 6, y: 0, radius_m: 1 },
+    // Centred on where the commands end (0.6 m/s for 11.2 s); wide enough for the sideways drift of a straight walk.
+    goal: { x: 6.72, y: 0, radius_m: 2 },
     metrics_opt_in: ['gait_symmetry'],
   }),
   starterRow({
