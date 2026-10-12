@@ -1,5 +1,5 @@
 // Seeded randomness for benchmark repeats. A cell's seed comes only from the
-// suite seed, the test id and the repeat index, never from run order, so the
+// benchmark seed, the test id and the repeat index, never from run order, so the
 // same cell gives the same numbers on any page, machine or shard.
 
 /** 32-bit FNV-1a hash of the given parts. */
@@ -13,8 +13,8 @@ export function hashSeed(...parts) {
   return hash >>> 0;
 }
 
-export function cellSeed(suiteSeed, testId, repeat) {
-  return hashSeed(suiteSeed, testId, repeat);
+export function cellSeed(benchmarkSeed, testId, repeat) {
+  return hashSeed(benchmarkSeed, testId, repeat);
 }
 
 /** mulberry32: a small, fast generator returning floats in [0, 1). */

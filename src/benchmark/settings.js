@@ -1,10 +1,10 @@
-// A benchmark suite (suite.yaml at the root of a Hugging Face benchmark dataset)
-// says which tests run, how often, with what randomisation, and which numbers
-// become leaderboard tasks. The tests themselves are dataset rows (testRow.js).
-// How repeats and tests combine is part of each metric's definition (summary.js),
-// not a suite setting. Example:
+// A benchmark's settings (benchmark.yaml at the root of the benchmark folder, or
+// of its Hugging Face dataset) say which tests run, how often, with what
+// randomisation, and which numbers become leaderboard tasks. The tests themselves
+// are rows of data/<config>/test.jsonl (testRow.js). How repeats and tests
+// combine is part of each metric's definition (summary.js), not a setting. Example:
 //
-//   suite: asimov-locomotion
+//   name: asimov-locomotion
 //   version: 1
 //   harness: { repo: https://github.com/menloresearch/humanoid-policy-viewer, protocol: 1, tested_commit: <sha> }
 //   requires: { robot: { name: asimov-1 }, policy_interface: velocity-command }
@@ -20,7 +20,7 @@
 //     - { id: survival_rate, metric: survival_rate@1 }
 //     - { id: push_walking_survival_rate, metric: survival_rate@1, scope: { config: push_walking } }
 //
-// Leaderboard task ids get the suite version appended (survival_rate_v1), so a
+// Leaderboard task ids get the benchmark version appended (survival_rate_v1), so a
 // new version starts new leaderboards instead of mixing incomparable numbers.
 
 import { BENCHMARK_PROTOCOL, POLICY_INTERFACES, RANDOMIZERS, ROBOTS, TEST_KINDS } from './protocol.js';
@@ -29,14 +29,14 @@ import { METRICS, latestMetricVersion } from './summary.js';
 import { ALL_CONFIG } from './testRow.js';
 
 const TASK_ID_RE = /^[a-z][a-z0-9_]*$/;
-// What a setting is when suite.yaml leaves it out.
-export const SUITE_DEFAULTS = Object.freeze({
+// What a setting is when benchmark.yaml leaves it out.
+export const BENCHMARK_DEFAULTS = Object.freeze({
   repeats: 1,
   seed: 0,
   randomize: {},
   timeout_s: 600,
 });
-const SETTING_KEYS = Object.keys(SUITE_DEFAULTS);
+const SETTING_KEYS = Object.keys(BENCHMARK_DEFAULTS);
 const SCOPE_KEYS = ['config', 'id', 'tag'];
 
 const isPlainObject = (value) => !!value && typeof value === 'object' && !Array.isArray(value);
@@ -76,18 +76,18 @@ export function randomizes(randomize) {
 }
 
 /**
- * Validates a parsed suite.yaml and fills in defaults. Throws one Error listing
+ * Validates a parsed benchmark.yaml and fills in defaults. Throws one Error listing
  * every problem, so an author fixes them all in one pass.
  */
-export function parseSuite(raw) {
+export function parseBenchmark(raw) {
   const errors = [];
-  if (!isPlainObject(raw)) throw new Error('suite.yaml must be a mapping');
-  if (typeof raw.suite !== 'string' || !raw.suite) errors.push('suite (name) is required');
+  if (!isPlainObject(raw)) throw new Error('benchmark.yaml must be a mapping');
+  if (typeof raw.name !== 'string' || !raw.name) errors.push('name is required');
   if (!Number.isInteger(raw.version) || raw.version < 1) errors.push('version must be an integer >= 1');
   if (!isPlainObject(raw.harness) || !Number.isInteger(raw.harness.protocol)) errors.push('harness.protocol (integer) is required');
   if (!isPlainObject(raw.requires)) errors.push('requires is required');
 
-  const defaults = { ...SUITE_DEFAULTS, ...(raw.defaults ?? {}) };
+  const defaults = { ...BENCHMARK_DEFAULTS, ...(raw.defaults ?? {}) };
   defaults.randomize = { ...(raw.defaults?.randomize ?? {}) };
   checkSettings(defaults, 'defaults', errors);
 
@@ -111,7 +111,7 @@ export function parseSuite(raw) {
     }
     if (seen.has(task.id)) errors.push(`tasks[${i}].id "${task.id}" is used twice`);
     seen.add(task.id);
-    if (/_v\d+$/.test(task.id)) errors.push(`tasks[${i}].id must not end in _v<n>; the suite version is appended for you`);
+    if (/_v\d+$/.test(task.id)) errors.push(`tasks[${i}].id must not end in _v<n>; the benchmark version is appended for you`);
     if (!METRICS[task.metric]) {
       const latest = typeof task.metric === 'string' && !task.metric.includes('@') ? latestMetricVersion(task.metric) : null;
       errors.push(latest
@@ -125,7 +125,7 @@ export function parseSuite(raw) {
     }
   });
 
-  if (errors.length) throw new Error(`Invalid suite.yaml:\n${errors.map((e) => `  - ${e}`).join('\n')}`);
+  if (errors.length) throw new Error(`Invalid benchmark.yaml:\n${errors.map((e) => `  - ${e}`).join('\n')}`);
   return {
     ...raw,
     defaults,
@@ -134,16 +134,16 @@ export function parseSuite(raw) {
   };
 }
 
-/** Why this checkout cannot run the suite as published (empty = it can). */
-export function compatibilityProblems(suite, { protocol = BENCHMARK_PROTOCOL } = {}) {
+/** Why this checkout cannot run the benchmark as published (empty = it can). */
+export function compatibilityProblems(benchmark, { protocol = BENCHMARK_PROTOCOL } = {}) {
   const problems = [];
-  if (suite.harness.protocol !== protocol) {
-    const commit = suite.harness.tested_commit ? ` (it was validated on viewer commit ${suite.harness.tested_commit})` : '';
-    problems.push(`the suite needs benchmark protocol ${suite.harness.protocol}, this viewer implements ${protocol}${commit}`);
+  if (benchmark.harness.protocol !== protocol) {
+    const commit = benchmark.harness.tested_commit ? ` (it was validated on viewer commit ${benchmark.harness.tested_commit})` : '';
+    problems.push(`the benchmark needs protocol${benchmark.harness.protocol}, this viewer implements ${protocol}${commit}`);
   }
-  const robot = suite.requires?.robot?.name ?? suite.requires?.robot;
+  const robot = benchmark.requires?.robot?.name ?? benchmark.requires?.robot;
   if (robot && !ROBOTS.includes(robot)) problems.push(`robot "${robot}" is not supported (supported: ${ROBOTS.join(', ')})`);
-  const policyInterface = suite.requires?.policy_interface;
+  const policyInterface = benchmark.requires?.policy_interface;
   if (policyInterface && !POLICY_INTERFACES.includes(policyInterface)) {
     problems.push(`policy interface "${policyInterface}" is not supported (supported: ${POLICY_INTERFACES.join(', ')})`);
   }
@@ -161,26 +161,26 @@ function describeSelector(selector) {
 }
 
 /**
- * Resolves the suite's test selectors against the dataset rows, in suite order,
- * and merges settings: suite defaults, then every selector matching the row
+ * Resolves the benchmark's test selectors against its rows, in settings order,
+ * and merges settings: the defaults, then every selector matching the row
  * (later ones win). Throws when a selector matches nothing, unless `requireMatches` is false
  * (re-selecting over a run's subset of the dataset).
  */
-export function selectTests(suite, rows, { requireMatches = true } = {}) {
+export function selectTests(benchmark, rows, { requireMatches = true } = {}) {
   const byId = new Map();
   const problems = [];
-  suite.tests.forEach((selector, i) => {
+  benchmark.tests.forEach((selector, i) => {
     const hits = rows.filter((row) => matches(selector, row));
-    if (!hits.length && requireMatches) problems.push(`tests[${i}] (${describeSelector(selector)}) matches no test in the dataset`);
+    if (!hits.length && requireMatches) problems.push(`tests[${i}] (${describeSelector(selector)}) matches no test in the benchmark`);
     for (const row of hits) {
       const { id, config, all, ...overrides } = selector;
       const previous = byId.get(row.id);
       byId.set(row.id, {
         row,
         settings: {
-          ...(previous?.settings ?? suite.defaults),
+          ...(previous?.settings ?? benchmark.defaults),
           ...overrides,
-          randomize: { ...(previous?.settings ?? suite.defaults).randomize, ...(overrides.randomize ?? {}) },
+          randomize: { ...(previous?.settings ?? benchmark.defaults).randomize, ...(overrides.randomize ?? {}) },
         },
       });
     }
@@ -192,7 +192,7 @@ export function selectTests(suite, rows, { requireMatches = true } = {}) {
       problems.push(`${row.id}: repeats is ${settings.repeats} but nothing is randomised, so every repeat would be identical`);
     }
   }
-  if (problems.length) throw new Error(`Cannot run the suite:\n${problems.map((p) => `  - ${p}`).join('\n')}`);
+  if (problems.length) throw new Error(`Cannot run the benchmark:\n${problems.map((p) => `  - ${p}`).join('\n')}`);
   return [...byId.values()];
 }
 
@@ -226,20 +226,20 @@ export function expandCells(selected, { only = null, repeats = null } = {}) {
   return cells;
 }
 
-export function versionedTaskId(suite, task) {
-  return `${task.id}_v${suite.version}`;
+export function versionedTaskId(benchmark, task) {
+  return `${task.id}_v${benchmark.version}`;
 }
 
-/** The Hugging Face eval.yaml for this suite; generated, never hand-edited. */
-export function buildEvalYaml(suite, { name, description }) {
+/** The Hugging Face eval.yaml for this benchmark; generated, never hand-edited. */
+export function buildEvalYaml(benchmark, { name, description }) {
   return {
     name,
     description,
     evaluation_framework: 'humanoid-policy-viewer',
     // A task scoped to one category scores that dataset config; any other task
     // (several categories, or a tag cutting across them) scores "all".
-    tasks: suite.tasks.map((task) => ({
-      id: versionedTaskId(suite, task),
+    tasks: benchmark.tasks.map((task) => ({
+      id: versionedTaskId(benchmark, task),
       config: typeof task.scope.config === 'string' ? task.scope.config : ALL_CONFIG,
       split: 'test',
     })),

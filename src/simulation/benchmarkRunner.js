@@ -195,7 +195,7 @@ export const MAX_ROBOTS = 5;
  *
  * `randomization` is null (fixed behaviour: midpoint action delay, no noise)
  * or `{ seed, randomize: { action_delay, initial_joint_noise_rad } }` from the
- * suite; the same seed always gives the same run.
+ * benchmark; the same seed always gives the same run.
  * `realtime` paces ticks to wall-clock time, for watching a run.
  * `timeoutMs` is a wall-clock budget; a cell over it stops early with an error.
  */
@@ -355,7 +355,7 @@ export async function runBenchmark({ demo, component, policies, tests, onProgres
     for (let policyIndex = 0; policyIndex < policyList.length; policyIndex++) {
       const policy = policyList[policyIndex];
 
-      // A checkpoint whose observation layout doesn't match the base config
+      // A policy whose observation layout doesn't match the base config
       // fails here; record it and keep sweeping the remaining policies.
       try {
         await demo.stopMainLoop();

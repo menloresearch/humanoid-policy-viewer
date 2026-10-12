@@ -1,10 +1,10 @@
 // Turns per-cell results (one per policy x test x repeat) into
 //   1. per-test summaries: every metric's value for each repeat and their mean
-//   2. leaderboard task values: one number per suite task (plus its uncertainty),
+//   2. leaderboard task values: one number per benchmark task (plus its uncertainty),
 //      which is what goes into a model repo's .eval_results/ file.
-// The raw per-cell metrics stay in run.json; nothing here is lossy for them.
+// The raw per-cell metrics stay in result.json; nothing here is lossy for them.
 //
-// Metrics are versioned on their own ("survival_rate@1"): a suite task names
+// Metrics are versioned on their own ("survival_rate@1"): a benchmark task names
 // the exact version it scores with, so adding a metric never changes an
 // existing number, and changing what a metric means is a new version (and new
 // leaderboards) rather than a silent edit. Never change a published version;
@@ -71,7 +71,7 @@ export function reachedGoal(cell, row) {
 /** Stayed upright for the whole test but never entered its end zone. */
 const missedGoal = (cell, row) => fallTime(cell) === null && !reachedGoal(cell, row);
 
-// Every metric a suite task may name, by "<name>@<version>".
+// Every metric a benchmark task may name, by "<name>@<version>".
 //   perCell(cell, row) -> number   the value of one (test, repeat)
 //   range                          bounds of the value: smooths the spread, clips the interval
 export const METRICS = {
@@ -167,13 +167,13 @@ export function combineTests(tests, key) {
   };
 }
 
-/** One value per suite task for one policy; tasks with nothing to measure get value null. */
-export function computeTasks(suite, perTest) {
-  return suite.tasks.map((task) => {
+/** One value per benchmark task for one policy; tasks with nothing to measure get value null. */
+export function computeTasks(benchmark, perTest) {
+  return benchmark.tasks.map((task) => {
     const metric = METRICS[task.metric];
     const result = combineTests(scopedTests(perTest, task.scope), task.metric);
     return {
-      taskId: `${task.id}_v${suite.version}`,
+      taskId: `${task.id}_v${benchmark.version}`,
       metric: task.metric,
       higherIsBetter: metric.higherIsBetter,
       value: round(result?.value ?? null),

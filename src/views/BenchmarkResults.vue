@@ -26,7 +26,7 @@
           size="small"
           class="mr-2"
           prepend-icon="mdi-file-download-outline"
-          title="Download this run as a self-contained HTML report"
+          title="Download this result as a self-contained HTML report"
           @click="downloadReport"
         >HTML</v-btn>
         <v-btn-toggle v-model="viewMode" density="compact" mandatory variant="outlined" divided>
@@ -41,7 +41,7 @@
       <v-icon size="64" color="grey">mdi-chart-box-outline</v-icon>
       <div class="text-h6 mt-2">No benchmark results loaded</div>
       <div v-if="runItems.length" class="text-body-2 text-medium-emphasis">
-        Pick one of the {{ runItems.length }} saved run(s) above, or run a new benchmark from the viewer.
+        Pick one of the {{ runItems.length }} saved result(s) above, or run a new benchmark from the viewer.
       </div>
       <div v-else class="text-body-2 text-medium-emphasis">Run a benchmark from the viewer to see comparisons here.</div>
       <v-alert v-if="runError" type="error" density="compact" class="mt-3">{{ runError }}</v-alert>
@@ -148,7 +148,7 @@
             </div>
           </div>
           <v-alert v-else type="info" density="compact" class="mb-4">
-            The test JSON was not stored with this run. Runs recorded from now on embed it.
+            The test JSON was not stored with this result. Results recorded from now on embed it.
           </v-alert>
           <div v-if="inputEvents.length" class="chart-row mb-4">
             <div class="chart-cell wide">
@@ -376,8 +376,8 @@
 
 <script>
 import { appState, closeResults, setBenchmarkResults } from '@/state/appState.js';
-import { listBenchmarks, loadBenchmark } from '@/state/benchmarkStore.js';
-import { loadSequenceFile } from '@/state/sequenceStore.js';
+import { listResults, loadResult } from '@/state/resultStore.js';
+import { loadTest } from '@/state/testStore.js';
 import { resolveLimits } from '@/simulation/commandSequencer.js';
 import {
   downloadBenchmarkReport, categoryOf, isPushCategory, maxForceSurvived, computeCategoryRollup, isUpright, missedGoalText
@@ -426,7 +426,7 @@ export default {
   data() {
     return {
       // Aggregate first: the fall summary and per-policy comparison answer
-      // "which checkpoint is better" before drilling into a single test.
+      // "which policy is better" before drilling into a single test.
       viewMode: 'aggregate',
       selectedTestFile: null,
       topDownIndex: 0,
@@ -455,7 +455,7 @@ export default {
     inputSequenceNote() {
       const test = this.tests.find((t) => t.file === this.selectedTestFile);
       if (test?.sequence?.commands?.length) return '';
-      return this.inputSequence ? ' (current file on disk — not stored with this run)' : '';
+      return this.inputSequence ? ' (current file on disk — not stored with this result)' : '';
     },
     inputEvents() {
       return (this.inputSequence?.events || []).filter((e) => e?.type === 'push');
@@ -499,9 +499,9 @@ export default {
         }
       };
     },
-    /** Saved runs under benchmark_runs/, newest first, as select items. */
+    /** Saved results under benchmark_results/, newest first, as select items. */
     runItems() {
-      return appState.benchmarkRuns.map((run) => {
+      return appState.savedResults.map((run) => {
         const when = run.generatedAt ? new Date(run.generatedAt).toLocaleString() : run.file;
         const shape = run.policyCount != null && run.testCount != null
           ? ` — ${run.policyCount}p × ${run.testCount}t`
@@ -744,8 +744,8 @@ export default {
   },
   async mounted() {
     await this.refreshRuns();
-    if (!appState.benchmarkResults && appState.benchmarkRuns.length) {
-      await this.selectRun(appState.benchmarkRuns[0].file);
+    if (!appState.benchmarkResults && appState.savedResults.length) {
+      await this.selectRun(appState.savedResults[0].file);
     }
     this.ensureSelection();
   },
@@ -753,10 +753,10 @@ export default {
     closeResults,
     async refreshRuns() {
       try {
-        appState.benchmarkRuns = await listBenchmarks();
+        appState.savedResults = await listResults();
       } catch (e) {
         // Static host / no dev endpoint: only the in-memory run is available.
-        appState.benchmarkRuns = [];
+        appState.savedResults = [];
       }
     },
     async selectRun(file) {
@@ -764,7 +764,7 @@ export default {
       this.loadingRun = true;
       this.runError = '';
       try {
-        const run = await loadBenchmark(file);
+        const run = await loadResult(file);
         setBenchmarkResults(run, file);
         // A different run has different tests/policies; restart the views.
         this.selectedTestFile = null;
@@ -793,7 +793,7 @@ export default {
       if (test?.sequence?.commands?.length) return;
       if (this.fetchedSequences[file] !== undefined) return;
       try {
-        this.fetchedSequences[file] = await loadSequenceFile(file);
+        this.fetchedSequences[file] = await loadTest(file);
       } catch {
         this.fetchedSequences[file] = null;
       }
@@ -839,7 +839,7 @@ export default {
     /** The command limits in force for the selected test, per axis. */
     limitsFor(axis) {
       // useActive: false — this is a comparison/report view, not tied to
-      // whatever checkpoint happens to be loaded live in the 3D viewer.
+      // whatever policy happens to be loaded live in the 3D viewer.
       const limits = resolveLimits(this.inputSequence || {}, { useActive: false });
       return limits[axis] || null;
     },
@@ -931,7 +931,7 @@ export default {
     passedCount(policyId) {
       return this.tests.filter((t) => this.fallCell(policyId, t.file).cls === 'upright').length;
     },
-    /** Trailing file name of a checkpoint label — full text stays in a tooltip. */
+    /** Trailing file name of a policy label — full text stays in a tooltip. */
     shortLabel(policyId) {
       const label = this.labelFor(policyId);
       return String(label).split('/').pop();
@@ -1122,7 +1122,7 @@ export default {
   gap: 4px 6px;
   margin-bottom: 8px;
 }
-/* Checkpoint paths are a single unbreakable token, so they need an explicit
+/* Policy paths are a single unbreakable token, so they need an explicit
    break opportunity — otherwise the name overflows its card instead of
    wrapping. The swatch keeps its size while the name takes the remainder. */
 .kpi-head .swatch { flex: 0 0 auto; margin-top: 4px; }
@@ -1187,7 +1187,7 @@ export default {
 }
 
 .cmp-table .swatch { margin-right: 6px; }
-/* Long checkpoint paths wrap inside the cell rather than stretching the table. */
+/* Long policy paths wrap inside the cell rather than stretching the table. */
 .cmp-table .policy-cell {
   white-space: normal;
   overflow-wrap: anywhere;

@@ -1,8 +1,8 @@
-// Standalone HTML report for a completed benchmark run.
+// Standalone HTML report for a saved benchmark result.
 //
 // Everything is inlined — charts are hand-drawn SVG, no CDN and no runtime JS —
 // so the downloaded file renders identically offline and can be attached to a
-// review or checked in next to a checkpoint. The numbers here are derived the
+// review or checked in next to a policy. The numbers here are derived the
 // same way as BenchmarkResults.vue so the two never disagree.
 
 import { COMMAND_LIMITS } from './commandSequencer.js';
@@ -200,7 +200,7 @@ function steppedCommand(commands, axis, duration) {
 /** The command profile a test JSON declares, plus its push events. */
 function inputTrajectoryCharts(sequence) {
   if (!sequence || !Array.isArray(sequence.commands) || !sequence.commands.length) {
-    return '<p class="muted">The test JSON was not stored with this run, so its command profile '
+    return '<p class="muted">The test JSON was not stored with this result, so its command profile '
       + 'cannot be shown. Runs recorded from now on embed it.</p>';
   }
   const duration = Number(sequence.duration) || 0;
@@ -546,7 +546,7 @@ code { background: #eef2f6; border-radius: 3px; padding: 1px 5px; font-size: 12p
 .tab-group-label:first-child { border-left: none; margin-left: 0 }
 `;
 
-/** Build the full standalone HTML document for a benchmark run. */
+/** Build the full standalone HTML document for a benchmark result. */
 export function buildBenchmarkReportHtml(run) {
   if (!run || !Array.isArray(run.results)) {
     throw new Error('No benchmark results to report');
@@ -805,7 +805,7 @@ export function buildBenchmarkReportHtml(run) {
       + errorNotes
       + '<h3>Test input — commanded trajectory</h3>'
       + (test.sequenceRecoveredFromDisk
-        ? '<p class="explain">Recovered from the test file on disk — it was not stored with this run, so it may have been edited since.</p>'
+        ? '<p class="explain">Recovered from the test file on disk — it was not stored with this result, so it may have been edited since.</p>'
         : '')
       + inputTrajectoryCharts(test.sequence)
       + kpiTable
@@ -818,7 +818,7 @@ export function buildBenchmarkReportHtml(run) {
       + '</div>';
   }).join('');
 
-  // Tests are already sorted by file path (see listSequenceEntries), so a
+  // Tests are already sorted by file path (see listTests), so a
   // folder's tests are already contiguous — this just adds a visible label
   // each time the category changes, rather than re-sorting or re-grouping.
   let lastTabCategory = null;

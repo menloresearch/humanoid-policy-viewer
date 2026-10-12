@@ -175,13 +175,13 @@
 
             <!-- Benchmarks and their tests: double-click a benchmark to run it,
                  double-click a test to play it live, pencil to edit it. -->
-            <SequenceBrowser
-              ref="sequenceBrowser"
+            <BenchmarkBrowser
+              ref="benchmarkBrowser"
               class="mt-1"
               :running="benchmark.running"
-              @play="playSequenceFile"
-              @edit="editSequenceFile"
-              @new="newSequenceInEditor"
+              @play="playTest"
+              @edit="editTest"
+              @new="newTestInEditor"
               @run="requestBenchmark"
             />
 
@@ -238,8 +238,8 @@
               @click="requestBenchmark"
             >Run Benchmark ({{ benchmarkSelectionCount }})</v-btn>
 
-            <v-alert v-if="modelCatalogError" type="warning" density="compact" class="my-1">
-              {{ modelCatalogError }} — only the built-in policy is available.
+            <v-alert v-if="policyCatalogError" type="warning" density="compact" class="my-1">
+              {{ policyCatalogError }} — only the built-in policy is available.
             </v-alert>
             <v-alert v-if="benchmark.error" type="error" density="compact" class="my-1">{{ benchmark.error }}</v-alert>
             <template v-if="benchmark.running">
@@ -267,11 +267,11 @@
             >View Results</v-btn>
             <template v-if="savedRunCount && !benchmark.running">
               <div class="text-caption text-medium-emphasis mt-2">
-                Saved runs ({{ savedRunCount }}) — open one on the results page for its charts and HTML export
+                Saved results ({{ savedRunCount }}) — open one on the results page for its charts and HTML export
               </div>
               <div class="saved-runs">
                 <div
-                  v-for="run in appState.benchmarkRuns"
+                  v-for="run in appState.savedResults"
                   :key="run.file"
                   class="saved-run d-flex align-center ga-1"
                   :class="{ current: run.file === appState.benchmarkResultsFile }"
@@ -283,7 +283,7 @@
                     icon
                     size="x-small"
                     variant="text"
-                    title="Delete this run"
+                    title="Delete this result"
                     @click="askDeleteRun(run)"
                   >
                     <v-icon size="14">mdi-delete-outline</v-icon>
@@ -338,15 +338,15 @@
             </div>
           </details>
 
-          <!-- Deleting a saved run removes the file from disk; confirm first -->
+          <!-- Deleting a saved result removes the file from disk; confirm first -->
           <v-dialog v-model="showDeleteRunConfirm" max-width="420">
             <v-card>
-              <v-card-title class="text-subtitle-1">Delete this run?</v-card-title>
+              <v-card-title class="text-subtitle-1">Delete this result?</v-card-title>
               <v-card-text class="text-body-2">
                 <div class="mono-path">{{ pendingDeleteRun?.file }}</div>
                 <div class="mt-1">{{ pendingDeleteRun ? runLabel(pendingDeleteRun) : '' }}</div>
                 <div class="text-caption text-medium-emphasis mt-2">
-                  The file is removed from benchmark_runs/ and can't be recovered from the app.
+                  The file is removed from benchmark_results/ and can't be recovered from the app.
                   Download its HTML report first if you want to keep it.
                 </div>
               </v-card-text>
@@ -362,7 +362,7 @@
           <v-dialog v-model="showBenchmarkConfirm" max-width="460">
             <v-card>
               <v-card-title class="text-subtitle-1">
-                Run {{ pendingSuiteTitle || 'benchmark' }}?
+                Run {{ pendingBenchmarkTitle || 'benchmark' }}?
               </v-card-title>
               <v-card-text class="text-body-2">
                 <div>
@@ -899,16 +899,17 @@ import { runBenchmark, runBenchmarkGroup, waitForPolicyReady, estimateBenchmarkS
 import { loadTestScene } from '@/simulation/terrainScene.js';
 import { appState, openEditor, newBlankSequence, openResults, setBenchmarkResults } from '@/state/appState.js';
 import { demoRef } from '@/state/demoRef.js';
-import { loadSequenceFile, saveSequenceFile } from '@/state/sequenceStore.js';
+import { loadTest, saveTest } from '@/state/testStore.js';
 import { STATIC } from '@/state/viewerMode.js';
+import { listPolicies } from '@/state/policyStore.js';
 import {
-  listModels, saveBenchmark, benchmarkFilename, listBenchmarks, loadBenchmark, deleteBenchmark
-} from '@/state/benchmarkStore.js';
-import SequenceBrowser from '@/components/SequenceBrowser.vue';
+  saveResult, resultFilename, listResults, loadResult, deleteResult
+} from '@/state/resultStore.js';
+import BenchmarkBrowser from '@/components/BenchmarkBrowser.vue';
 import loadMujoco from 'mujoco-js';
 
-// Reference policy config, reused as the template by every catalog checkpoint:
-// observation recipe, joint order, policy_hz. Wherever a checkpoint's training
+// Reference policy config, reused as the template by every catalog policy:
+// observation recipe, joint order, policy_hz. Wherever a policy's training
 // env.yaml records a setting (gains, action scale, default pose, delay, command
 // and torque limits) it overrides this file. See docs/policy-config.md.
 const REFERENCE_POLICY_CONFIG = './examples/checkpoints/asimov/reference_policy_config.json';
@@ -921,7 +922,7 @@ const PANEL_MAX_WIDTH = 760;
 
 export default {
   name: 'DemoPage',
-  components: { SequenceBrowser },
+  components: { BenchmarkBrowser },
   data: () => ({
     STATIC,
     state: 0, // 0: loading, 1: running, -1: JS error, -2: wasm unsupported
@@ -944,21 +945,21 @@ export default {
     builtinPolicies: [
       {
         value: 'asimov-reference',
-        title: 'Asimov (bundled example, model Aug 18)',
-        description: 'Bundled example policy (78-dim obs, delayed PD actuators): runs without a model library. Its env.yaml overrides the reference config.',
+        title: 'Asimov (bundled example, policy Aug 18)',
+        description: 'Bundled example policy (78-dim obs, delayed PD actuators): runs without a policy library. Its env.yaml overrides the reference config.',
         policyPath: REFERENCE_POLICY_CONFIG,
         scenePath: 'asimov-1/sim-model/xmls/asimov_1.xml',
         supportsVelocityCommands: true
       }
     ],
-    modelCatalog: [],
-    modelCatalogError: '',
+    policyCatalog: [],
+    policyCatalogError: '',
     benchmarkPolicies: [],
     benchmark: { running: false, done: 0, total: 0, label: '', error: '' },
     showBenchmarkConfirm: false,
     pendingTests: [],
     pendingPolicies: [],
-    pendingSuiteTitle: '',
+    pendingBenchmarkTitle: '',
     benchmarkRealtime: false, // play each test at wall-clock speed to watch the run
     benchmarkEstimateSeconds: 0,
     resultsLoading: false,
@@ -975,7 +976,7 @@ export default {
     // UI slider bounds — the defaults here match this file's original
     // hand-tuned ranges (not COMMAND_LIMITS, which is a looser reference, see
     // commandSequencer.js) and are only overridden per-axis when the loaded
-    // checkpoint's own env.yaml declares a command_limits range.
+    // policy's own env.yaml declares a command_limits range.
     cmdLimits: { vx: [-1.0, 1.5], vy: [-0.6, 0.6], wz: [-0.8, 0.8] },
     interruptMask: false,
     drFriction: 1.0,
@@ -1021,7 +1022,7 @@ export default {
     seqLoop: false,
     playbackError: '',
     playbackWarning: '',
-    currentSequenceFile: null, // on-disk file the loaded sequence came from
+    currentTestFile: null, // on-disk file the loaded test came from
     minimapError: '0.00',
     telemetry: {
       vx: '0.00', vy: '0.00', vz: '0.00',
@@ -1146,15 +1147,15 @@ export default {
       }
       return groups;
     },
-    // Checkpoints discovered in the model library reuse the
+    // Policies discovered in the policy library reuse the
     // base observation config and load joint control values from env.yaml.
     catalogPolicies() {
-      return this.modelCatalog.map((model) => ({
-        value: `ckpt:${model.path}`,
-        title: model.label ?? model.path,
-        description: `Checkpoint ${model.path} (reference config: ${REFERENCE_POLICY_CONFIG.split('/').pop()})`,
+      return this.policyCatalog.map((entry) => ({
+        value: `lib:${entry.path}`,
+        title: entry.label ?? entry.path,
+        description: `Policy ${entry.path} (reference config: ${REFERENCE_POLICY_CONFIG.split('/').pop()})`,
         policyPath: REFERENCE_POLICY_CONFIG,
-        onnxPath: model.url,
+        onnxPath: entry.url,
         supportsVelocityCommands: true
       }));
     },
@@ -1171,10 +1172,10 @@ export default {
       return this.policies.find((policy) => policy.value === this.currentPolicy) ?? null;
     },
     hasBenchmarkRun() {
-      return !!appState.benchmarkResults || appState.benchmarkRuns.length > 0;
+      return !!appState.benchmarkResults || appState.savedResults.length > 0;
     },
     savedRunCount() {
-      return appState.benchmarkRuns.length;
+      return appState.savedResults.length;
     },
     benchmarkSelectionCount() {
       return appState.benchmarkSelection.length;
@@ -1201,7 +1202,7 @@ export default {
       return `${this.simStepHz.toFixed(1)} Hz`;
     },
     // Capability flag, not an identity check: any policy driven by velocity
-    // commands (the built-in baseline and every catalog checkpoint) gets the
+    // commands (the built-in baseline and every catalog policy) gets the
     // command sliders, playback and benchmark UI.
     isVelocityCommandPolicy() {
       return this.selectedPolicy?.supportsVelocityCommands === true;
@@ -1224,11 +1225,11 @@ export default {
     editorPage(page) {
       if (page === 'viewer') {
         // Returning from the editor: restore prior pause state and pick up any
-        // sequences saved on disk while editing.
+        // tests saved on disk while editing.
         if (this.demo?.params) {
           this.demo.params.paused = this._pausedBeforeEditor ?? false;
         }
-        this.$refs.sequenceBrowser?.refresh();
+        this.$refs.benchmarkBrowser?.refresh();
       }
     }
   },
@@ -1331,8 +1332,8 @@ export default {
         this.startTrackingPoll();
         this.startTelemetryPoll();
         this.startUIPoll();
-        this.fetchModelCatalog();
-        this.refreshBenchmarkRuns();
+        this.fetchPolicyCatalog();
+        this.refreshSavedResults();
         this.renderScale = this.demo.renderScale ?? this.renderScale;
         const matchingPolicy = this.policies.find(
           (policy) => policy.policyPath === this.demo.currentPolicyPath
@@ -1349,19 +1350,19 @@ export default {
         console.error(error);
       }
     },
-    // `?policy=ckpt:<model path>` (set by `npm run hf`) starts on that catalog checkpoint.
+    // `?policy=lib:<library path>` (set by `npm run hf`) starts on that catalog policy.
     async selectPolicyFromUrl() {
       const requested = new URLSearchParams(window.location.search).get('policy');
       if (!requested) return;
-      await this.fetchModelCatalog();
+      await this.fetchPolicyCatalog();
       if (!this.policies.some((policy) => policy.value === requested)) {
-        this.policyLoadError = `Policy "${requested}" is not in the model library`;
+        this.policyLoadError = `Policy "${requested}" is not in the policy library`;
         return;
       }
       this.currentPolicy = requested;
       await this.onPolicyChange(requested);
     },
-    /** Slider bounds for the currently loaded checkpoint, falling back to this file's original hand-tuned defaults. */
+    /** Slider bounds for the currently loaded policy, falling back to this file's original hand-tuned defaults. */
     syncCommandLimits() {
       const overrides = this.demo?.currentPolicyConfig?.command_limits;
       this.cmdLimits = {
@@ -1718,9 +1719,9 @@ export default {
       try {
         const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '');
         const file = `recording_${stamp}.json`;
-        await saveSequenceFile(file, recording);
-        this.currentSequenceFile = file;
-        this.$refs.sequenceBrowser?.refresh();
+        await saveTest(file, recording);
+        this.currentTestFile = file;
+        this.$refs.benchmarkBrowser?.refresh();
         this.playbackWarning = `Recording saved to ${file}`;
       } catch (e) {
         // Persistence unavailable (e.g. static host) — recording is still in
@@ -1736,23 +1737,23 @@ export default {
       // momentum/impulse charts.
       openEditor(
         commandSequencer.sequence,
-        this.currentSequenceFile ?? null,
+        this.currentTestFile ?? null,
         this.demo?.model?.body_subtreemass?.[this.demo?.pelvis_body_id],
         this.demo?.listBodyNames?.()
       );
     },
 
-    // ---- Sequence browser (folder manager) --------------------------------
+    // ---- Benchmark browser (folder manager) --------------------------------
     /** Double-click in the browser: load a test on disk and play it live. */
-    async playSequenceFile(file) {
+    async playTest(file) {
       this.playbackError = '';
       this.playbackWarning = '';
       try {
-        const parsed = await loadSequenceFile(file);
+        const parsed = await loadTest(file);
         // A terrain test plays on its course, any other test on the default scene.
         await loadTestScene(this.demo, parsed.terrain);
         const { warning } = commandSequencer.loadSequence(parsed, file.replace(/\.json$/i, ''));
-        this.currentSequenceFile = file;
+        this.currentTestFile = file;
         this.playbackWarning = warning;
         this.syncSlidersFromCommandState();
         commandSequencer.bindSim(this.demo);
@@ -1763,34 +1764,34 @@ export default {
       }
     },
     /** Pencil in the browser: open that test in the trajectory editor. */
-    async editSequenceFile(file) {
+    async editTest(file) {
       this.playbackError = '';
       try {
-        const parsed = await loadSequenceFile(file);
+        const parsed = await loadTest(file);
         this._pausedBeforeEditor = this.demo?.params?.paused ?? false;
         if (this.demo?.params) this.demo.params.paused = true;
-        this.currentSequenceFile = file;
+        this.currentTestFile = file;
         openEditor(parsed, file, this.demo?.model?.body_subtreemass?.[this.demo?.pelvis_body_id], this.demo?.listBodyNames?.());
       } catch (e) {
         this.playbackError = `Failed to load ${file}: ${e.message}`;
       }
     },
-    newSequenceInEditor() {
+    newTestInEditor() {
       this._pausedBeforeEditor = this.demo?.params?.paused ?? false;
       if (this.demo?.params) this.demo.params.paused = true;
-      this.currentSequenceFile = null;
+      this.currentTestFile = null;
       newBlankSequence();
       openEditor(null, null, this.demo?.model?.body_subtreemass?.[this.demo?.pelvis_body_id], this.demo?.listBodyNames?.());
     },
 
     // ---- Benchmark --------------------------------------------------------
-    async fetchModelCatalog() {
-      this.modelCatalogError = '';
+    async fetchPolicyCatalog() {
+      this.policyCatalogError = '';
       try {
-        this.modelCatalog = await listModels();
+        this.policyCatalog = await listPolicies();
       } catch (e) {
-        this.modelCatalog = [];
-        this.modelCatalogError = e?.message || 'Could not load the model catalog';
+        this.policyCatalog = [];
+        this.policyCatalogError = e?.message || 'Could not load the policy catalog';
       }
     },
     /**
@@ -1805,7 +1806,7 @@ export default {
     selectAllPolicies(all) {
       this.benchmarkPolicies = all ? this.policyItems.map((item) => item.value) : [];
     },
-    /** Last two path segments — the part that actually distinguishes a checkpoint. */
+    /** Last two path segments — the part that actually distinguishes a policy. */
     policyShort(title) {
       const parts = String(title).split('/');
       return parts.length > 2 ? parts.slice(-2).join('/') : String(title);
@@ -1839,15 +1840,15 @@ export default {
       try {
         tests = await Promise.all(
           files.map(async (file) => {
-            const sequence = await loadSequenceFile(file);
+            const sequence = await loadTest(file);
             // Do NOT pre-resolve sequence.limits here: this test list is built
             // once, before any policy in this run has been loaded, and shared
             // across every policy the run benchmarks. commandSequencer.
             // loadSequence() resolves limits itself, per test, right after each
             // policy's reloadPolicy() — that's the only point where "the
-            // active checkpoint's trained command range" is actually correct;
+            // active policy's trained command range" is actually correct;
             // baking it in here would freeze every policy in a multi-policy
-            // run to whichever checkpoint happened to be loaded live when the
+            // run to whichever policy happened to be loaded live when the
             // benchmark was started.
             return {
               file,
@@ -1864,7 +1865,7 @@ export default {
 
       this.pendingTests = tests;
       this.pendingPolicies = policies;
-      this.pendingSuiteTitle = this.$refs.sequenceBrowser?.currentSuiteTitle() || '';
+      this.pendingBenchmarkTitle = this.$refs.benchmarkBrowser?.currentBenchmarkTitle() || '';
       this.benchmarkEstimateSeconds = estimateBenchmarkSeconds(policies.length, tests);
       this.showBenchmarkConfirm = true;
     },
@@ -1904,10 +1905,10 @@ export default {
         });
         setBenchmarkResults(results, null);
         try {
-          const file = benchmarkFilename();
-          await saveBenchmark(file, results);
+          const file = resultFilename();
+          await saveResult(file, results);
           setBenchmarkResults(results, file);
-          await this.refreshBenchmarkRuns();
+          await this.refreshSavedResults();
         } catch (e) {
           // Static host / no dev endpoint: results still live in memory.
           console.warn('Could not persist benchmark results:', e.message);
@@ -1933,7 +1934,7 @@ export default {
      * driving this page via Playwright). Mirrors requestBenchmark()'s
      * policy/test resolution but skips the confirm dialog and returns the
      * results object directly, so a driver script can pull it straight out of
-     * page.evaluate() without depending on the /api/benchmarks dev endpoint.
+     * page.evaluate() without depending on the /api/results dev endpoint.
      */
     async runHeadlessBenchmark(policyValues, testFiles) {
       if (!this.demo) throw new Error('Demo not ready yet');
@@ -1960,8 +1961,8 @@ export default {
 
       let files = Array.isArray(testFiles) && testFiles.length ? testFiles : null;
       if (!files) {
-        const response = await fetch('/api/sequences');
-        if (!response.ok) throw new Error('Could not list benchmark tests from /api/sequences');
+        const response = await fetch('/api/tests');
+        if (!response.ok) throw new Error('Could not list benchmark tests from /api/tests');
         const body = await response.json();
         files = (body.files || []).map((entry) => entry.file);
       }
@@ -1969,7 +1970,7 @@ export default {
 
       const tests = await Promise.all(
         files.map(async (file) => {
-          const sequence = await loadSequenceFile(file);
+          const sequence = await loadTest(file);
           // See requestBenchmark()'s comment above: limits must resolve
           // per-policy inside commandSequencer.loadSequence(), not once here
           // for the whole (possibly multi-policy) run.
@@ -2005,7 +2006,7 @@ export default {
     /**
      * Headless entry point for `npm run benchmark` (scripts/run-benchmark.mjs):
      * runs one benchmark cell (one test, one repeat) for a policy given by its
-     * ONNX URL, so it needs no model catalog. A group of one; see
+     * ONNX URL, so it needs no policy catalog. A group of one; see
      * runBenchmarkGroupHeadless. `cell` = { sequence, seed, randomize, realtime, timeoutMs }.
      */
     async runBenchmarkCellHeadless(policy, cell) {
@@ -2019,7 +2020,7 @@ export default {
      * Headless entry point for `npm run benchmark`: runs several repeats of one
      * test at once, as that many robots in one scene (runBenchmarkGroup), for a
      * policy given by its ONNX URL. Each browser page keeps the last policy
-     * loaded, which lets the driver send a model's jobs to the same page.
+     * loaded, which lets the driver send a policy's jobs to the same page.
      * `group` = { sequence, cells: [{ seed, randomize }], realtime, timeoutMs };
      * returns { results: [one per cell, in order] }, or { policyLoadError, error }.
      * A real-time (watched) run keeps drawing; a headless one stops the draw loop.
@@ -2058,12 +2059,12 @@ export default {
       });
       return { results };
     },
-    async refreshBenchmarkRuns() {
+    async refreshSavedResults() {
       try {
-        appState.benchmarkRuns = await listBenchmarks();
+        appState.savedResults = await listResults();
       } catch (e) {
         // No dev endpoint (static host): in-memory results still work.
-        appState.benchmarkRuns = [];
+        appState.savedResults = [];
       }
     },
     /**
@@ -2073,11 +2074,11 @@ export default {
      */
     async ensureResultsLoaded() {
       if (appState.benchmarkResults) return appState.benchmarkResults;
-      const newest = appState.benchmarkRuns[0];
+      const newest = appState.savedResults[0];
       if (!newest) return null;
       this.resultsLoading = true;
       try {
-        const run = await loadBenchmark(newest.file);
+        const run = await loadResult(newest.file);
         setBenchmarkResults(run, newest.file);
         return run;
       } catch (e) {
@@ -2107,12 +2108,12 @@ export default {
       this.deletingRun = true;
       this.runDeleteError = '';
       try {
-        await deleteBenchmark(run.file);
+        await deleteResult(run.file);
         // Drop it from view too if it was the run currently loaded.
         if (appState.benchmarkResultsFile === run.file) {
           setBenchmarkResults(null, null);
         }
-        await this.refreshBenchmarkRuns();
+        await this.refreshSavedResults();
         this.showDeleteRunConfirm = false;
         this.pendingDeleteRun = null;
       } catch (e) {

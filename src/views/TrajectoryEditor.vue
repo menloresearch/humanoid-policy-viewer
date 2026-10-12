@@ -6,10 +6,10 @@
     </v-app-bar>
 
     <div class="editor-body">
-      <!-- Saved sequences sidebar -->
+      <!-- Saved tests sidebar -->
       <div class="editor-sidebar">
         <div class="d-flex align-center justify-space-between mb-2">
-          <span class="text-subtitle-2">Saved sequences</span>
+          <span class="text-subtitle-2">Saved tests</span>
           <v-btn size="small" variant="tonal" prepend-icon="mdi-plus" @click="createNew">New</v-btn>
         </div>
         <v-alert v-if="listError" type="warning" density="compact" class="mb-2">{{ listError }}</v-alert>
@@ -29,7 +29,7 @@
               </template>
             </v-list-item>
           </template>
-          <v-list-item v-if="savedList.length === 0" title="No saved sequences" class="text-disabled"></v-list-item>
+          <v-list-item v-if="savedList.length === 0" title="No saved tests" class="text-disabled"></v-list-item>
         </v-list>
       </div>
 
@@ -224,7 +224,7 @@ import KeypointChart from '@/components/KeypointChart.vue';
 import PushLane from '@/components/PushLane.vue';
 import TerrainPreview from '@/components/TerrainPreview.vue';
 import { appState, closeEditor, newBlankSequence, defaultLimits, MAX_DURATION } from '@/state/appState.js';
-import { listSequences, loadSequenceFile, saveSequenceFile, deleteSequenceFile, slugify } from '@/state/sequenceStore.js';
+import { listTests, loadTest, saveTest, deleteTest, slugify } from '@/state/testStore.js';
 import { STATIC } from '@/state/viewerMode.js';
 import { commandSequencer } from '@/simulation/commandSequencer.js';
 import { ALL_CONFIG, GOAL_MIN_RADIUS_M, OPT_IN_METRICS, PUSH_END_MARGIN_S, validateGoal } from '@/benchmark/testRow.js';
@@ -304,12 +304,12 @@ export default {
       }
     },
     categories() {
-      return [...new Set(this.savedList.map((item) => item.folder).filter((f) => f && f !== 'default'))].sort();
+      return [...new Set(this.savedList.map((item) => item.config).filter((f) => f && f !== 'default'))].sort();
     },
     savedGroups() {
       const groups = new Map();
       for (const item of this.savedList) {
-        const category = item.folder || '(none)';
+        const category = item.config || '(none)';
         if (!groups.has(category)) groups.set(category, []);
         groups.get(category).push(item);
       }
@@ -421,7 +421,7 @@ export default {
         if (Number.isFinite(f) && f > 0) this.working.footFriction = Math.round(f * 1000) / 1000;
       }
     },
-    // The test's opted-in metrics; older sequences only carry the gaitSymmetry flag.
+    // The test's opted-in metrics; older tests only carry the gaitSymmetry flag.
     metricsOptIn() {
       return this.working?.metricsOptIn ?? (this.working?.gaitSymmetry === true ? ['gait_symmetry'] : []);
     },
@@ -439,7 +439,7 @@ export default {
     },
     async refreshList() {
       try {
-        this.savedList = await listSequences();
+        this.savedList = await listTests();
         this.listError = '';
       } catch (e) {
         this.listError = `Persistence API unavailable: ${e.message}`;
@@ -649,7 +649,7 @@ export default {
     },
     async openSaved(fileName) {
       try {
-        const seq = await loadSequenceFile(fileName);
+        const seq = await loadTest(fileName);
         appState.editorSequence = { ...JSON.parse(JSON.stringify(seq)), _savedLimits: !!seq.limits };
         appState.editorFile = fileName;
         this.file = fileName;
@@ -729,7 +729,7 @@ export default {
       let fileName = this.file.trim();
       if (!/\.json$/i.test(fileName)) fileName += '.json';
       try {
-        await saveSequenceFile(fileName, this.buildClean());
+        await saveTest(fileName, this.buildClean());
         appState.editorFile = fileName;
         this.file = fileName;
         await this.refreshList();
@@ -740,7 +740,7 @@ export default {
     },
     async removeSaved(fileName) {
       try {
-        await deleteSequenceFile(fileName);
+        await deleteTest(fileName);
         if (this.file === fileName) appState.editorFile = null;
         await this.refreshList();
         this.setStatus(`Deleted ${fileName}`);

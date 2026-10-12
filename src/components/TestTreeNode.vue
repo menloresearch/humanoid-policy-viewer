@@ -11,7 +11,7 @@
       <span class="badge count">{{ node.count }}</span>
     </div>
     <div v-show="open">
-      <SequenceNode
+      <TestTreeNode
         v-for="child in node.folders"
         :key="'d:' + child.path"
         :node="child"
@@ -22,7 +22,7 @@
         @edit="$emit('edit', $event)"
         @delete="$emit('delete', $event)"
       />
-      <SequenceFileRow
+      <TestListItem
         v-for="f in node.files"
         :key="'f:' + f.file"
         :file="f"
@@ -38,13 +38,13 @@
 </template>
 
 <script>
-import SequenceFileRow from './SequenceFileRow.vue';
+import TestListItem from './TestListItem.vue';
 
-// A folder in the sequence tree. Recurses on itself via `name` (Vue resolves a
+// A folder in the test tree. Recurses on itself via `name` (Vue resolves a
 // component's own name inside its template).
 export default {
-  name: 'SequenceNode',
-  components: { SequenceFileRow },
+  name: 'TestTreeNode',
+  components: { TestListItem },
   props: {
     node: { type: Object, required: true },
     depth: { type: Number, default: 0 },

@@ -1,6 +1,6 @@
 // Checks a policy's ONNX input and output sizes against what the viewer feeds
 // it and expects back. The output must match the robot's motor count. The input
-// must match the observation recipe built for this checkpoint, which comes from
+// must match the observation recipe built for this policy, which comes from
 // its env.yaml when that records one (so extra terms such as a gait clock, or a
 // stacked history, are fine), and from the reference config otherwise. A policy
 // that does not fit fails with a clear message, instead of an ONNX shape error
@@ -19,7 +19,7 @@ function lastDim(metadata) {
 /**
  * Returns a list of problems (empty when the policy fits). `inputMetadata` and
  * `outputMetadata` are an ONNX Runtime session's; sizes it cannot report are
- * not checked. `recipeError` is set when the checkpoint's env.yaml records
+ * not checked. `recipeError` is set when the policy's env.yaml records
  * observations the viewer cannot compute; the input size is not compared then,
  * since the recipe it would be compared with is not the policy's.
  * `controlErrors` lists where env.yaml drove the robot differently than the

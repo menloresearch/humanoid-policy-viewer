@@ -32,11 +32,11 @@
 </template>
 
 <script>
-// One test file in the sequence browser's tree. Split into its own SFC (rather
+// One test file in the benchmark browser's tree. Split into its own SFC (rather
 // than an inline `template:` option) because this app ships the runtime-only
 // Vue build, which cannot compile template strings at runtime.
 export default {
-  name: 'SequenceFileRow',
+  name: 'TestListItem',
   props: {
     file: { type: Object, required: true },
     depth: { type: Number, default: 0 },

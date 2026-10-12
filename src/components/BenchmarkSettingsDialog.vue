@@ -3,19 +3,19 @@
     <v-card>
       <v-card-title class="text-subtitle-1 d-flex align-center">
         <v-icon size="18" class="mr-2">mdi-cog-outline</v-icon>
-        {{ suiteTitle || 'Benchmark' }} settings
-        <span class="text-caption text-medium-emphasis ml-2">suite.yaml</span>
+        {{ benchmarkTitle || 'Benchmark' }} settings
+        <span class="text-caption text-medium-emphasis ml-2">benchmark.yaml</span>
       </v-card-title>
       <v-tabs v-model="tab" density="compact" class="px-4">
         <v-tab value="form" :disabled="!form">Settings</v-tab>
-        <v-tab value="yaml">suite.yaml</v-tab>
+        <v-tab value="yaml">benchmark.yaml</v-tab>
       </v-tabs>
 
       <v-card-text class="pt-3">
         <v-progress-linear v-if="loading" indeterminate class="mb-3" />
         <v-alert v-if="error" type="error" density="compact" class="mb-3 pre-line">{{ error }}</v-alert>
         <v-alert v-if="!error && fileErrors.length" type="error" density="compact" class="mb-3">
-          suite.yaml has problems; <code>npm run benchmark</code> refuses it until they are fixed:
+          benchmark.yaml has problems; <code>npm run benchmark</code> refuses it until they are fixed:
           <ul class="ml-4"><li v-for="p in fileErrors" :key="p">{{ p }}</li></ul>
         </v-alert>
         <v-alert v-if="warnings.length" type="warning" density="compact" class="mb-3">
@@ -107,7 +107,7 @@
                   v-model.number="entry.repeats" label="Repeats" type="number" min="1" placeholder="default"
                   density="compact" variant="outlined" hide-details style="max-width: 110px"
                 />
-                <span v-if="extraKeys(entry).length" class="text-caption text-medium-emphasis" title="Edit these in the suite.yaml tab">
+                <span v-if="extraKeys(entry).length" class="text-caption text-medium-emphasis" title="Edit these in the benchmark.yaml tab">
                   + {{ extraKeys(entry).join(', ') }}
                 </span>
                 <v-btn icon size="x-small" variant="text" title="Remove" @click="form.tests.splice(i, 1)">
@@ -140,7 +140,7 @@
                     density="compact" variant="outlined" hide-details style="max-width: 120px"
                   />
                 </template>
-                <span v-else class="text-caption text-medium-emphasis" title="Edit this scope in the suite.yaml tab">
+                <span v-else class="text-caption text-medium-emphasis" title="Edit this scope in the benchmark.yaml tab">
                   scope: {{ JSON.stringify(task.scope) }}
                 </span>
                 <v-btn icon size="x-small" variant="text" title="Remove" @click="form.tasks.splice(i, 1)">
@@ -178,7 +178,7 @@
 <script>
 import { RANDOMIZERS } from '@/benchmark/protocol.js';
 import { METRICS } from '@/benchmark/summary.js';
-import { loadSuiteSettings, saveSuiteSettings } from '@/state/sequenceStore.js';
+import { loadBenchmarkSettings, saveBenchmarkSettings } from '@/state/testStore.js';
 
 const SELECTOR_KEYS = ['all', 'config', 'id'];
 const copy = (value) => JSON.parse(JSON.stringify(value));
@@ -201,14 +201,14 @@ function withoutBlanks(entry) {
 // A task's scope in the form always has config and tag, so the fields can bind to them.
 const formTask = (task) => ({ ...task, scope: { config: '', tag: '', ...(task.scope ?? {}) } });
 
-// Edits a benchmark's suite.yaml (through the dev server's /api/suite): the
+// Edits a benchmark's benchmark.yaml (through the dev server's /api/benchmark): the
 // common settings as a form, or the whole file as text.
 export default {
-  name: 'SuiteSettingsDialog',
+  name: 'BenchmarkSettingsDialog',
   props: {
     modelValue: { type: Boolean, default: false },
-    suite: { type: String, default: null }, // benchmark key; null = the server's default
-    suiteTitle: { type: String, default: '' }
+    benchmark: { type: String, default: null }, // benchmark key; null = the server's default
+    benchmarkTitle: { type: String, default: '' }
   },
   emits: ['update:modelValue', 'saved'],
   data() {
@@ -220,7 +220,7 @@ export default {
       fileErrors: [],
       warnings: [],
       savedNote: '',
-      text: '', // suite.yaml as loaded or last saved
+      text: '', // benchmark.yaml as loaded or last saved
       draftText: '',
       form: null,
       original: null,
@@ -263,10 +263,10 @@ export default {
       this.error = '';
       this.savedNote = '';
       try {
-        this.show(await loadSuiteSettings(this.suite));
+        this.show(await loadBenchmarkSettings(this.benchmark));
         this.tab = this.form ? 'form' : 'yaml';
       } catch (e) {
-        this.error = e?.message || 'Could not read suite.yaml';
+        this.error = e?.message || 'Could not read benchmark.yaml';
       } finally {
         this.loading = false;
       }
@@ -290,13 +290,13 @@ export default {
       this.error = '';
       try {
         const edit = this.tab === 'yaml' ? { text: this.draftText } : { fields: this.prepared(this.form) };
-        const result = await saveSuiteSettings(this.suite, edit, this.text);
+        const result = await saveBenchmarkSettings(this.benchmark, edit, this.text);
         this.show(result);
         this.$emit('saved');
         if (this.warnings.length) this.savedNote = 'Saved. ';
         else this.$emit('update:modelValue', false);
       } catch (e) {
-        this.error = e?.message || 'Could not save suite.yaml';
+        this.error = e?.message || 'Could not save benchmark.yaml';
       } finally {
         this.saving = false;
       }

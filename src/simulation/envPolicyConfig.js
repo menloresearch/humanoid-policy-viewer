@@ -2,11 +2,11 @@
 // joint position actions. The files contain Python-specific YAML tags, so
 // traversing the relevant indented blocks avoids interpreting those tags.
 
-// Isaac Lab/mjlab exports commonly place a checkpoint's config files (env.yaml,
-// agent.yaml, tracking_policy.json, ...) under params/, but some checkpoints
-// keep them at the model root instead. Every caller that resolves one of these
-// per-checkpoint files checks params/<name> before falling back to <name>.
-export function checkpointFileCandidates(filename) {
+// Isaac Lab/mjlab exports commonly place a policy's config files (env.yaml,
+// agent.yaml, tracking_policy.json, ...) under params/, but some policies
+// keep them at the policy root instead. Every caller that resolves one of these
+// per-policy files checks params/<name> before falling back to <name>.
+export function policyFileCandidates(filename) {
   return [`params/${filename}`, filename];
 }
 
@@ -178,7 +178,7 @@ function delayForJoints(actuators, jointNames, matchOneActuator) {
   return { delay_min_lag: lo, delay_max_lag: hi };
 }
 
-// The command range a checkpoint was actually trained against (the RL command
+// The command range a policy was actually trained against (the RL command
 // curriculum, not an actuator/gain setting) — Isaac Lab keeps it at
 // commands.twist.ranges.{lin_vel_x,lin_vel_y,ang_vel_z}, each a 2-number
 // tuple. Returns null (not an error) when this env.yaml has no such section
@@ -434,31 +434,31 @@ export function parseEnvPolicySettings(yaml, jointNames) {
   };
 }
 
-// Folder holding a checkpoint's training files: <root>/<model> for a
-// /model-library/ path (the ONNX may sit deeper), or <root> itself when the ONNX
+// Folder holding a policy's training files: <root>/<policy> for a
+// /policy-library/ path (the ONNX may sit deeper), or <root> itself when the ONNX
 // sits directly in it (as with a folder run by `npm run hf <folder>`); otherwise
-// the folder the ONNX itself is in (e.g. a checkpoint bundled under examples/).
-function checkpointDirUrl(onnxPath) {
+// the folder the ONNX itself is in (e.g. a policy bundled under examples/).
+function policyDirUrl(onnxPath) {
   if (!onnxPath) return null;
-  if (onnxPath.startsWith('/model-library/')) {
-    const parts = onnxPath.slice('/model-library/'.length).split('/');
+  if (onnxPath.startsWith('/policy-library/')) {
+    const parts = onnxPath.slice('/policy-library/'.length).split('/');
     if (parts.length < 2) return null;
-    return `/model-library/${parts.slice(0, parts.length === 2 ? 1 : 2).join('/')}`;
+    return `/policy-library/${parts.slice(0, parts.length === 2 ? 1 : 2).join('/')}`;
   }
   const slash = onnxPath.lastIndexOf('/');
   return slash < 0 ? null : onnxPath.slice(0, slash);
 }
 
-// A checkpoint may ship its own tracking_policy.json (params/ or model root) to
+// A policy may ship its own tracking_policy.json (params/ or policy root) to
 // override parts of the shared base policy config. Recurrent policies do not
 // need one: their state is read off the ONNX graph (policyState.js). Returns
-// the parsed JSON, or null when the checkpoint has none (the common case: the
+// the parsed JSON, or null when the policy has none (the common case: the
 // base config applies as-is).
-export async function loadCheckpointPolicyConfig(onnxPath) {
-  const modelUrl = checkpointDirUrl(onnxPath);
-  if (!modelUrl) return null;
-  for (const filename of checkpointFileCandidates('tracking_policy.json')) {
-    const url = `${modelUrl}/${filename}`;
+export async function loadOwnPolicyConfig(onnxPath) {
+  const policyUrl = policyDirUrl(onnxPath);
+  if (!policyUrl) return null;
+  for (const filename of policyFileCandidates('tracking_policy.json')) {
+    const url = `${policyUrl}/${filename}`;
     const response = await fetch(url);
     if (response.status === 404) continue;
     if (!response.ok) throw new Error(`Failed to load ${url}: ${response.status}`);
@@ -470,10 +470,10 @@ export async function loadCheckpointPolicyConfig(onnxPath) {
 }
 
 export async function loadEnvPolicySettings(onnxPath, jointNames) {
-  const modelUrl = checkpointDirUrl(onnxPath);
-  if (!modelUrl) return null;
-  for (const filename of checkpointFileCandidates('env.yaml')) {
-    const url = `${modelUrl}/${filename}`;
+  const policyUrl = policyDirUrl(onnxPath);
+  if (!policyUrl) return null;
+  for (const filename of policyFileCandidates('env.yaml')) {
+    const url = `${policyUrl}/${filename}`;
     const response = await fetch(url);
     if (response.status === 404) continue;
     if (!response.ok) throw new Error(`Failed to load ${url}: ${response.status}`);
@@ -481,18 +481,18 @@ export async function loadEnvPolicySettings(onnxPath, jointNames) {
     if (response.headers.get('content-type')?.includes('text/html')) continue;
     return parseEnvPolicySettings(await response.text(), jointNames);
   }
-  // This checkpoint ships no env.yaml at all — the caller (mujocoUtils.js
+  // This policy ships no env.yaml at all — the caller (mujocoUtils.js
   // reloadPolicy) will silently keep whatever
   // stiffness/damping/action_scale/default_joint_pos were already in the
   // reference config. That's the exact shared-gains bug this file
-  // exists to prevent (every checkpoint scored with the same gains), so it's not allowed to
+  // exists to prevent (every policy scored with the same gains), so it's not allowed to
   // pass without a trace even though we still return null rather than throw
-  // — throwing here would make an otherwise-loadable checkpoint (e.g. one
+  // — throwing here would make an otherwise-loadable policy (e.g. one
   // still mid-export) unviewable in the interactive demo.
   // A bundled policy (e.g. upstream's tracking policies) legitimately has no
-  // training env.yaml; only a model-library checkpoint is expected to.
-  if (onnxPath.startsWith('/model-library/')) {
-    console.warn(`[envPolicyConfig] no env.yaml found for ${modelUrl} (checked params/env.yaml and env.yaml) — falling back to the reference config's gains for this checkpoint`);
+  // training env.yaml; only a policy-library policy is expected to.
+  if (onnxPath.startsWith('/policy-library/')) {
+    console.warn(`[envPolicyConfig] no env.yaml found for ${policyUrl} (checked params/env.yaml and env.yaml) — falling back to the reference config's gains for this policy`);
   }
   return null;
 }

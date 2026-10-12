@@ -1,5 +1,5 @@
 // What this checkout of the viewer can run as a benchmark, and which version of
-// the scoring it implements. A benchmark suite (suite.yaml in a Hugging Face
+// the scoring it implements. A benchmark (benchmark.yaml in a benchmark folder or Hugging Face
 // dataset) names the protocol it was validated against; the runner refuses to
 // produce shareable results for a different one.
 //
@@ -11,7 +11,7 @@
 // does not bump the protocol, but editing a published metric version does.
 // Docs, UI and refactors that leave every number unchanged do not bump it.
 // `npm run benchmark:golden` catches an accidental change: it compares a smoke
-// run with test/fixtures/smoke-suite/golden.json.
+// run with test/fixtures/smoke-benchmark/golden.json.
 
 export const BENCHMARK_PROTOCOL = 1;
 
@@ -27,7 +27,7 @@ export const POLICY_INTERFACES = ['velocity-command'];
 
 export const ROBOTS = ['asimov-1'];
 
-// Randomisation a suite may switch on for its repeats; each value lists what
+// Randomisation a benchmark may switch on for its repeats; each value lists what
 // the key accepts. Applied by MuJoCoDemo.setBenchmarkRandomization().
 export const RANDOMIZERS = {
   action_delay: ['midpoint', 'env_range'],
