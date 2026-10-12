@@ -13,14 +13,15 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmdirSync, symlinkSyn
 import { availableParallelism, tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { compatibilityProblems, expandCells, selectTests } from '../src/benchmark/settings.js';
+import { compatibilityProblems } from '../src/benchmark/settings.js';
+import {
+  MAX_ROBOTS, RESULT_SCHEMA, buildJobs, cellResult, isComplete, mergeResults, planCells, sortCells, summarize, toReport,
+} from '../src/benchmark/run.js';
 import { rowToSequence } from '../src/benchmark/testRow.js';
 import { buildBenchmarkReportHtml } from '../src/simulation/benchmarkReport.js';
 import { runJobs } from './benchmarkBrowser.mjs';
 import { collectProvenance, policyFileHashes } from './benchmarkProvenance.mjs';
-import {
-  MAX_ROBOTS, RESULT_SCHEMA, buildJobs, formatOutcomes, formatTasks, isComplete, mergeResults, parseShard, shardJobs, submitHint, summarizeRun, toReportRun,
-} from './benchmarkRun.mjs';
+import { formatOutcomes, formatTasks, parseShard, shardJobs, submitHint } from './benchmarkRun.mjs';
 import { classifyTarget, describeTarget } from './benchmarkTargets.mjs';
 import { checkPolicyDir, readReferenceJointNames } from './policyChecks.mjs';
 import { parseWords, rejectSwallowedNpmFlags } from './cliArgs.mjs';
@@ -153,7 +154,7 @@ function linkLibrary(policies) {
 function writeOutputs(outDir, run) {
   mkdirSync(outDir, { recursive: true });
   writeFileSync(join(outDir, 'result.json'), JSON.stringify(run));
-  writeFileSync(join(outDir, 'report.html'), buildBenchmarkReportHtml(toReportRun(run)));
+  writeFileSync(join(outDir, 'report.html'), buildBenchmarkReportHtml(toReport(run)));
 }
 
 /** Each policy's scores, then whether the result can be submitted to the Hub. */
@@ -194,8 +195,7 @@ async function runBenchmarkCommand(args) {
   }
   // Every test must load before any browser starts, so a broken test fails in a second, not mid-run.
   assertTestsRunnable(loaded);
-  const selected = selectTests(loaded.benchmark, loaded.rows);
-  const cells = expandCells(selected, { only, repeats });
+  const { cells, tests } = planCells(loaded.benchmark, loaded.rows, { only, repeats });
 
   const policies = [];
   for (const [index, target] of policyTargets.entries()) policies.push(await resolvePolicy(target, index, log));
@@ -206,7 +206,6 @@ async function runBenchmarkCommand(args) {
   const jobs = shardJobs(allJobs, shard);
   const cellCount = (list) => list.reduce((sum, job) => sum + job.cells.length, 0);
   const runCells = cellCount(jobs);
-  const tests = selected.map(({ row }) => row).filter((row) => cells.some((cell) => cell.testId === row.id));
   const provenance = collectProvenance(appDir);
   if (provenance.hpv.dirty) console.warn('Warning: this viewer checkout has uncommitted changes; the results will be local-only.');
 
@@ -240,22 +239,7 @@ async function runBenchmarkCommand(args) {
       verbose: flags.has('verbose'),
       log,
       onResult: (job, cell, result) => {
-        results.push({
-          policyKey: job.policyKey,
-          cellId: cell.cellId,
-          testId: cell.testId,
-          repeat: cell.repeat,
-          seed: cell.seed,
-          frames: result.frames ?? 0,
-          expectedFrames: result.expectedFrames ?? null,
-          error: result.error ?? null,
-          warning: result.warning ?? null,
-          clampedCommands: result.clampedCommands ?? 0,
-          appliedCommands: result.appliedCommands ?? null,
-          actionDelayLag: result.actionDelayLag ?? null,
-          wallMs: result.wallMs,
-          metrics: result.metrics ?? null,
-        });
+        results.push(cellResult(job.policyKey, cell, result, result.wallMs));
         const status = result.error ? `ERROR ${result.error}`
           : result.metrics?.fell?.fell ? `fell at ${result.metrics.fell.time}s`
           : result.metrics?.goal && !result.metrics.goal.reached ? `upright, missed end zone by ${result.metrics.goal.miss_m ?? '?'} m`
@@ -282,9 +266,9 @@ async function runBenchmarkCommand(args) {
     policies: policies.map(({ policyDir, ...rest }) => rest),
     tests,
     expectedCells: cellCount(allJobs),
-    cells: results.sort((a, b) => a.policyKey.localeCompare(b.policyKey) || a.cellId.localeCompare(b.cellId)),
+    cells: sortCells(results),
   };
-  Object.assign(run, isComplete(run) ? summarizeRun(run) : {});
+  Object.assign(run, isComplete(run) ? summarize(run) : {});
   writeOutputs(outDir, run);
   console.log(`\nWrote ${join(outDir, 'result.json')} and report.html (${run.wallSeconds}s)`);
 

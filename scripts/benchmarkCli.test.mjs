@@ -6,7 +6,8 @@ import { join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { parsePort, parseWords, rejectSwallowedNpmFlags, swallowedNpmFlags } from './cliArgs.mjs';
 import { classifyTarget } from './benchmarkTargets.mjs';
-import { MAX_ROBOTS, buildJobs, groupCells, mergeResults, parseShard, shardJobs, submitHint, takeNextJob, uploadBlockers, RESULT_SCHEMA } from './benchmarkRun.mjs';
+import { MAX_ROBOTS, buildJobs, groupCells, takeNextJob, RESULT_SCHEMA } from '../src/benchmark/run.js';
+import { parseShard, shardJobs, submitHint, uploadBlockers } from './benchmarkRun.mjs';
 import { buildEvalResultEntries, evalResultsPath, mergeEvalResults } from './hfEvalResults.mjs';
 import { commitFiles, decideCommitMode } from './hfCommit.mjs';
 import { datasetFilesToFetch } from './hfDataset.mjs';
@@ -152,20 +153,6 @@ test('the end of a run says how to submit it, or why it cannot be', () => {
   const mixed = fakeRun();
   mixed.policies.push({ ...mixed.policies[0], key: 'm1', id: 'local:p', label: 'p', source: 'local' });
   assert.match(submitHint(mixed, 'out').join('\n'), /^Submit to the Hub with.*\nNot submittable:\n {2}- p: the policy is a local folder/);
-});
-
-test('merge needs every shard of the same run exactly once', () => {
-  const base = fakeRun({ expectedCells: 2, tests: fakeRun().tests });
-  const s1 = { ...base, shard: { index: 1, count: 2 }, cells: [{ ...base.cells[0], cellId: 'a/x#0' }] };
-  const s2 = { ...base, shard: { index: 2, count: 2 }, cells: [{ ...base.cells[0], cellId: 'a/x#1', repeat: 1 }] };
-  const merged = mergeResults([s1, s2]);
-  assert.equal(merged.cells.length, 2);
-  assert.equal(merged.shard, null);
-  assert.ok(merged.tasks.m0);
-  assert.throws(() => mergeResults([s1]), /shards 1\.\.2|cells/);
-  assert.throws(() => mergeResults([s1, s1]), /more than one input/);
-  const other = { ...s2, provenance: { ...s2.provenance, hpv: { ...s2.provenance.hpv, commit: 'f'.repeat(40) } } };
-  assert.throws(() => mergeResults([s1, other]), /different run/);
 });
 
 test('eval results: entries per task, re-runs replace only their own tasks', () => {

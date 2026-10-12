@@ -8,7 +8,7 @@
 // load from its cache. Before, every shard started its own dev server, and four
 // at once on an 8-core machine missed the page-ready deadline.
 
-import { takeNextJob } from './benchmarkRun.mjs';
+import { takeNextJob } from '../src/benchmark/run.js';
 
 const PAGE_READY_TIMEOUT_MS = 180_000;
 

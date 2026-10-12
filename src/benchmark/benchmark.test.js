@@ -64,7 +64,7 @@ test('a new category is just a new id prefix', () => {
 });
 
 test('a terrain test keeps its course through the editor and is checked before a run', async () => {
-  const { checkTests } = await import('../../scripts/benchmarkCheck.mjs');
+  const { checkTests } = await import('./check.js');
   const { defaultTerrain } = await import('../simulation/terrainGen.js');
   const stairs = defaultTerrain('stairs');
   const onStairs = row('loco/stairs', { terrain: stairs });
@@ -229,7 +229,7 @@ test('eval.yaml tasks carry the version and their dataset config', () => {
 
 test('the tracked default benchmark is valid', async () => {
   const { loadBenchmarkDir, defaultBenchmarkDir } = await import('../../scripts/benchmarkDir.mjs');
-  const { checkTests } = await import('../../scripts/benchmarkCheck.mjs');
+  const { checkTests } = await import('./check.js');
   const loaded = loadBenchmarkDir(defaultBenchmarkDir(new URL('../../', import.meta.url).pathname));
   assert.equal(loaded.benchmark.name, 'default');
   assert.deepEqual(compatibilityProblems(loaded.benchmark), []);
@@ -265,7 +265,7 @@ test('benchmark init copies the default benchmark', async () => {
 });
 
 test('checkTests: player errors stop a run, unselected tests are flagged', async () => {
-  const { checkTests } = await import('../../scripts/benchmarkCheck.mjs');
+  const { checkTests } = await import('./check.js');
   const s = benchmark({ tests: [{ config: 'loco' }] });
   const late = push(1, 100);
   late.dir = [0, 0];

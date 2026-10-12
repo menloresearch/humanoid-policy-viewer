@@ -19,7 +19,7 @@ import { collectProvenance } from './benchmarkProvenance.mjs';
 import { classifyTarget } from './benchmarkTargets.mjs';
 import { commitFiles, hubCredentials } from './hfCommit.mjs';
 import { BENCHMARK_FILES, ensureDataset, fetchDatasetInfo, hubSettings } from './hfDataset.mjs';
-import { checkTests } from './benchmarkCheck.mjs';
+import { checkTests } from '../src/benchmark/check.js';
 import { hubFiles, loadBenchmarkDir, readYamlFile } from './benchmarkDir.mjs';
 
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');

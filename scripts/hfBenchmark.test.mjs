@@ -11,7 +11,7 @@ import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
 import { publish } from './hfBenchmark.mjs';
-import { RESULT_SCHEMA, summarizeRun } from './benchmarkRun.mjs';
+import { RESULT_SCHEMA, summarize } from '../src/benchmark/run.js';
 import { submit } from './hfSubmit.mjs';
 
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -207,7 +207,7 @@ function resultRun(overrides = {}) {
     cells: [{ policyKey: 'm0', cellId: `${row.id}#0`, testId: row.id, repeat: 0, seed: 0, frames: 10, error: null, metrics: { fell: { fell: false }, survival_time: row.duration } }],
     ...overrides,
   };
-  return Object.assign(run, summarizeRun(run));
+  return Object.assign(run, summarize(run));
 }
 
 function writeResult(run) {

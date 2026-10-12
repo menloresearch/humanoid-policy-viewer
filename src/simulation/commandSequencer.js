@@ -25,6 +25,10 @@ export function setActiveCommandLimits(limits) {
   activeCommandLimits = limits && typeof limits === 'object' ? limits : null;
 }
 
+export function getActiveCommandLimits() {
+  return activeCommandLimits;
+}
+
 // Resolve per-sequence command limits. A sequence may carry its own
 // `limits: { vx:[min,max], vy:[...], wz:[...] }`, which always wins. Falling
 // back to the currently active policy's trained command range only makes
