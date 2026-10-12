@@ -93,7 +93,7 @@ same everywhere: the `asimov-1` submodule.
 | [Policy config](docs/policy-config.md) | What `reference_policy_config.json` and a policy's `env.yaml` each control, and which wins |
 | [Policy library](docs/policy-library.md) | Serving policies from outside `public/` (`HPV_POLICY_*` variables) |
 | [Benchmarking](docs/benchmarking.md) | `npm run benchmark`: running a benchmark, what gets uploaded, versions, parallelism |
-| [Benchmark datasets](docs/benchmark-datasets.md) | The benchmark format on the Hub, and `npm run suite` for creating, changing and releasing one |
+| [Benchmark datasets](docs/benchmark-datasets.md) | The benchmark format on the Hub, and the `npm run hf` / `npm run benchmark` commands for creating, changing and releasing one |
 | [Adding a robot](docs/adding-a-robot.md) | Bringing your own MJCF, policy and motion clips |
 | [Architecture](docs/architecture.md) | How the app, server and commands fit together; words; old → new names (target design, in progress) |
 | [Scenes](public/examples/scenes/README.md) | The `asimov-1` submodule and how actuators are added at load |
@@ -106,7 +106,7 @@ same everywhere: the `asimov-1` submodule.
 - `src/simulation/policyRunner.js` - ONNX inference wrapper and observation pipeline
 - `public/examples/scenes/` - MJCF files + meshes staged into MuJoCo's MEMFS; the Asimov robot is the `asimov-1/` git submodule
 - `public/examples/checkpoints/` - policy config JSON, bundled ONNX files, and motion clips
-- `scripts/` - `npm run hf`, `npm run benchmark`, `npm run suite`, and dev-server helpers
+- `scripts/` - `npm run hf`, `npm run benchmark`, `npm run dev`, and dev-server helpers
 - `src/benchmark/` - benchmark protocol, test-row and benchmark settings formats, scoring
 - `benchmarks/` - local benchmarks: `default/` (tracked; what `npm run dev` opens and what new benchmarks are copied from), and, gitignored, pulled Hub datasets and benchmarks made with the app's **New benchmark**
 - `benchmark_results/` - (gitignored) saved benchmark results

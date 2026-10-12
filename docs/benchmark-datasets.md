@@ -16,7 +16,7 @@ tools/                     optional: scripts that generate the tests (published,
 That is all a benchmark needs locally. Publishing adds the Hugging Face files, built from `benchmark.yaml` and never
 kept in the working copy: `eval.yaml` (the Hub benchmark registration, one task per leaderboard) and the card's
 front matter (a default `all` config with every test, one config per category, the declared column types, tags). A task scoped to one
-category points at that config; any other task points at `all`, so `all` is not a valid category name. `npm run suite publish <dir> dry-run` shows them.
+category points at that config; any other task points at `all`, so `all` is not a valid category name. `npm run hf publish <dir> dry-run` shows them.
 
 ## A test (one row)
 
@@ -46,7 +46,7 @@ shows "fell at T s", one that stayed upright but never got there shows "missed e
 report), and each run records `metrics.goal` (`reached`, `miss_m`). `x` and `y` have at most 2 decimals (1 cm). In the
 editor's Environment tab, drag the zone in the top view (hold Shift to move along one axis); it snaps to the end of
 the commanded path (the ✕), as does **Snap to path end**. From a script or an agent:
-`npm run suite path-end <dir> [<test id>...]` prints one JSON line per test with `path_end` (where the velocity
+`npm run benchmark path-end <dir> [<test id>...]` prints one JSON line per test with `path_end` (where the velocity
 commands, integrated exactly, leave the robot), its `goal`, and whether the path enters it; the checks before a run
 warn when the commanded path never enters a test's end zone. `metrics_opt_in: ["gait_symmetry"]` turns on
 the gait symmetry metric (straight, steady walking only). The full schema is in `src/benchmark/testRow.js`.
@@ -109,7 +109,7 @@ tasks:                             # leaderboard numbers; ids get _v<version> ap
   - { id: survival_rate, metric: survival_rate@1 }
   - { id: survival_time, metric: survival_time@1 }
   - { id: push_walking_survival_rate, metric: survival_rate@1, scope: { config: push_walking } }
-reference_policies: [menloresearch/asimov1-loco]   # used by `npm run suite baseline`
+reference_policies: [menloresearch/asimov1-loco]   # used by `npm run hf baseline`
 ```
 
 The simulation is deterministic, so `repeats > 1` only makes sense with something randomised; the runner refuses
@@ -126,7 +126,7 @@ Keys left out of `defaults` take these values:
 | `randomize.action_delay` | `midpoint` (the middle of the policy's range) | `midpoint`, or `env_range` (drawn per repeat from the range in the policy's `env.yaml`) |
 | `randomize.initial_joint_noise_rad` | 0 (none) | a number >= 0 |
 
-`npm run suite init` (and a new benchmark in the viewer) starts from `repeats: 5`, `seed: 0`,
+`npm run benchmark init` (and a new benchmark in the viewer) starts from `repeats: 5`, `seed: 0`,
 `randomize: { action_delay: env_range, initial_joint_noise_rad: 0.02 }`, `timeout_s: 600`, `tests: [{ all: true }]`,
 the tasks `survival_rate` and `survival_time`, `version: 1` and `requires: { robot: asimov-1, policy_interface:
 velocity-command }`. A test entry can override `repeats`; a later entry wins over an earlier one.
@@ -166,11 +166,11 @@ leaderboard yet; each can become a metric when it is trustworthy.
 ## Workflow
 
 ```bash
-npm run suite pull datasets/<org>/<name> ./bench   # working copy (+ .hpv-benchmark.json)
-npm run dev benchmark=./bench      # edit tests in the trajectory editor (or edit data/*/test.jsonl)
-npm run suite diff ./bench         # what changed since the pulled revision, and whether scores can move
-npm run suite baseline ./bench     # run reference policies on the old and new benchmark -> ./bench/baseline.md
-npm run suite publish ./bench pr   # commit (owners) or pull request; description = diff + baseline
+npm run hf pull datasets/<org>/<name> ./bench   # working copy (+ .hpv-benchmark.json)
+npm run dev benchmark=./bench                   # edit tests in the trajectory editor (or edit data/*/test.jsonl)
+npm run hf diff ./bench                         # what changed since the pulled revision, and whether scores can move
+npm run hf baseline ./bench                     # run reference policies on the old and new benchmark -> ./bench/baseline.md
+npm run hf publish ./bench pr                   # commit (owners) or pull request; description = diff + baseline
 ```
 
 `npm run dev benchmark=datasets/<org>/<name>[@rev]` does the pull for you: the first time it pulls the dataset into
@@ -182,11 +182,11 @@ in the command player, the benchmark's selection works, and it warns about tests
 the same checks plus "a change that can move a score needs a new `version`".
 
 Hub dataset pull requests have no CI, so the reviewer reproduces the checks:
-`npm run suite pull datasets/<id>@refs/pr/<n> ./review`, then `baseline`. After merging, a
+`npm run hf pull datasets/<id>@refs/pr/<n> ./review`, then `baseline`. After merging, a
 maintainer tags the release and points the viewer at it:
 
 ```bash
-npm run suite release datasets/<org>/<name> rev=<merged commit>   # tags v<version>
+npm run hf release datasets/<org>/<name> rev=<merged commit>   # tags v<version>
 # then, in this repo: src/benchmark/default-suite.json -> "revision": "v<version>"
 ```
 
@@ -203,23 +203,23 @@ with the old protocol are then refused for upload until they are re-validated: s
 Everything happens locally until `publish`:
 
 ```bash
-npm run suite init ./new-bench          # a copy of ./benchmarks/default: benchmark.yaml + three example tests
-npm run dev benchmark=./new-bench       # add tests; type a new Category in the editor to start a category
-npm run benchmark <policy> ./new-bench   # real runs, results stay local
-npm run suite publish ./new-bench repo=<org>/<name> dry-run    # what would be uploaded
-npm run suite publish ./new-bench repo=<org>/<name> create     # creates a PRIVATE dataset repo first
+npm run benchmark init ./new-bench                         # a copy of ./benchmarks/default: benchmark.yaml + three example tests
+npm run dev benchmark=./new-bench                          # add tests; type a new Category in the editor to start a category
+npm run benchmark <policy> ./new-bench                     # real runs, results stay local
+npm run hf publish ./new-bench repo=<org>/<name> dry-run   # what would be uploaded
+npm run hf publish ./new-bench repo=<org>/<name> create    # creates a PRIVATE dataset repo first
 ```
 
 Plain `npm run dev` uses `./benchmarks/default`, the example benchmark kept in this repo for trying things out: a
 forward walk, a 1 m radius circle walk, and one test with four 100 N chest pushes (front, back, left, right).
-`npm run suite init` starts every new benchmark as a copy of it.
+`npm run benchmark init` starts every new benchmark as a copy of it.
 
 Or start in the viewer: the **Tests & Benchmark** panel lists every benchmark the dev server knows (the one
 `npm run dev` opened and each folder under `./benchmarks/`). **New benchmark** asks for a
 folder name and an optional title and creates an empty `./benchmarks/<name>/` (gitignored) (`HPV_BENCHMARKS_DIR` moves that
 folder); **Add test** inside an open benchmark opens the editor, and Save writes into that benchmark. Click a
-benchmark to open it, double-click it to run its tests. The folder is the same working copy `npm run suite init` makes, so
-`npm run benchmark <policy> ./benchmarks/<name>` and `publish` work on it as above.
+benchmark to open it, double-click it to run its tests. The folder is the same working copy `npm run benchmark init` makes, so
+`npm run benchmark <policy> ./benchmarks/<name>` and `npm run hf publish` work on it as above.
 
 #### Editing `benchmark.yaml` in the viewer
 

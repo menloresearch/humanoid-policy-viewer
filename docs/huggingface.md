@@ -17,14 +17,15 @@ needs `git` and `bash` for the latter). Then it downloads the repo's `.onnx`,
 `env.yaml` and `agent.yaml`, [checks them](#checks), starts the dev server and
 opens the viewer with that policy selected.
 
-Options go after a `--`, because npm keeps any flag written before it for
-itself: `npm run hf Menlo/asimov1-locomotion-0818 -- --no-open`.
+Options are plain words, with no `--`:
+`npm run hf Menlo/asimov1-locomotion-0818@main port=4000 no-open`.
 
 | Option / variable | Meaning |
 |---|---|
-| `--revision <ref>` | Branch, tag or commit of a Hub repo (default `main`) |
-| `--port <n>` | Dev server port (default 3000, or the next free one) |
-| `--no-open` | Do not open a browser window; open the printed link instead, which selects the policy (the bare server URL runs the bundled example) |
+| `<policy>@<ref>` | Branch, tag or commit of a Hub repo (default `main`) |
+| `benchmark=<dir \| datasets/org/name[@rev]>` | The benchmark the viewer opens (default `./benchmarks/default`) |
+| `port=<n>` | Dev server port (default 3000, or the next free one) |
+| `no-open` | Do not open a browser window; open the printed link instead, which selects the policy (the bare server URL runs the bundled example) |
 | `HF_TOKEN` | Access token, for private repos |
 | `HF_ENDPOINT` | Alternative Hub endpoint (default `https://huggingface.co`) |
 | `HPV_CACHE_DIR` | Download cache (default `~/.cache/humanoid-policy-viewer`) |
@@ -188,7 +189,7 @@ offline, the cached copy is used. Delete the folder to clear it.
 
 ## How it works
 
-`npm run hf` (`scripts/run-hf-model.mjs`, download logic in `scripts/hfPolicy.mjs`,
+`npm run hf <policy>` (`scripts/hf.mjs`, download logic in `scripts/hfPolicy.mjs`,
 local folders in `scripts/localPolicy.mjs`, checks in `scripts/policyChecks.mjs`)
 treats the cache as a
 [policy library](policy-library.md), so the download is served under

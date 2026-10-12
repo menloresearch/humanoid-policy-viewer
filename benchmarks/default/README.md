@@ -22,7 +22,7 @@ leaderboard.
 ## Change it
 
 ```
-npm run suite pull datasets/<this dataset> ./bench && npm run dev benchmark=./bench    # edit
-npm run suite baseline ./bench
-npm run suite publish ./bench pr
+npm run hf pull datasets/<this dataset> ./bench && npm run dev benchmark=./bench    # edit
+npm run hf baseline ./bench
+npm run hf publish ./bench pr
 ```
