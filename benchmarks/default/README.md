@@ -10,12 +10,13 @@ become leaderboard tasks.
 ## Run it
 
 ```
-git clone https://github.com/menloresearch/humanoid-policy-viewer && cd humanoid-policy-viewer && npm ci
-npm run benchmark <your-org>/<your-policy> datasets/<this dataset>
+git clone https://github.com/menloresearch/humanoid-policy-viewer && cd humanoid-policy-viewer && npm install
+npm run benchmark <your-org>/<your-policy> datasets/<this dataset>@v1
+npm run hf submit benchmark_results/<timestamp>
 ```
 
-Results go to the model repo's `.eval_results/` (directly if you own it, otherwise as a pull request) and
-show up on this benchmark's leaderboards. Results are tied to the viewer commit and protocol that produced them;
+The run stays on your machine. `npm run hf submit` adds its results to the model repo's `.eval_results/`
+(directly if you own it, otherwise as a pull request), and they show up on this benchmark's leaderboards. Results are tied to the viewer commit and protocol that produced them;
 task ids end in the benchmark version (`_v1`), so numbers from different benchmark versions never share a
 leaderboard.
 

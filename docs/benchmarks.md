@@ -1,8 +1,10 @@
-# Benchmark datasets
+# Benchmarks
 
-A benchmark lives in a Hugging Face **dataset** repo, registered as a Hub benchmark through its
-`eval.yaml`. The dataset is the only copy of the tests; this repo holds the code that runs them (and a tiny
-fixture, `test/fixtures/smoke-benchmark/`, for its own tests).
+A **benchmark** is a folder: a `benchmark.yaml` (what runs, how often, how it is scored) and its **tests**. You work
+on one locally, under `./benchmarks/` or anywhere else, and publish it to a Hugging Face **dataset** repo, registered
+as a Hub benchmark through its `eval.yaml`. The published dataset is the copy everyone runs and the leaderboards
+refer to; this repo holds the code that runs benchmarks, the example `benchmarks/default/`, and a tiny fixture,
+`test/fixtures/smoke-benchmark/`, for its own tests.
 
 ```
 benchmark.yaml             what runs, how often, how it is scored, which numbers are leaderboards
@@ -246,8 +248,8 @@ The gear on a benchmark's row in **Tests & Benchmark** opens **Benchmark setting
   (repeats, seed, timeout, randomisation, tests or tasks), the dialog offers **Bump to N+1**: task ids end in `_v<version>`, so old and
   new numbers never share a leaderboard.
 
-These settings drive `npm run benchmark` only. The viewer's own Run plays each test once, without repeats or
-randomisation ([Benchmarking](benchmarking.md#speed-parallelism-and-determinism)).
+These settings drive both `npm run benchmark` and the app's **Run Benchmark**
+([Benchmarking](benchmarking.md#in-the-app)).
 
 In the editor a test is saved as **Category / Test name** (the test id `<category>/<name>`). A new category
 gets its own `data/<category>/test.jsonl` (and, once published, its own dataset config). Deleting a category's last test removes it. A category only runs if `benchmark.yaml` selects it (the

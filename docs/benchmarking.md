@@ -1,8 +1,9 @@
 # Benchmarking
 
 A **benchmark** runs a policy through a set of test scenarios (velocity commands, timed pushes, slippery
-floors) and scores it. A benchmark is published as a [Hugging Face benchmark dataset](benchmark-datasets.md); the results go
-into the model repo's `.eval_results/` and appear on the model page and on the benchmark's leaderboards
+floors) and scores it. A benchmark is a folder ([Benchmarks](benchmarks.md)), published as a Hugging Face dataset.
+Running one is always local; `npm run hf submit` then puts the results into the model repo's `.eval_results/`, where
+they appear on the model page and on the benchmark's leaderboards
 ([Hugging Face eval results](https://huggingface.co/docs/hub/eval-results)).
 
 ```bash
@@ -51,7 +52,7 @@ The results have three layers, and only the last is squashed into single numbers
    no single overall score unless a benchmark defines one.
 
 How repeats and tests combine is part of each metric's versioned definition (see
-[benchmark-datasets.md](benchmark-datasets.md#metrics-and-repeats)).
+[Benchmarks](benchmarks.md#metrics-and-repeats)).
 
 The report tells the two ways to fail a test apart: a run that fell shows "fell at T s"; one that stayed upright but
 never entered the test's end zone (`goal`) shows "missed end zone by D m". Both score 0 on `survival_rate`, but only
@@ -111,15 +112,25 @@ side as see-through robots (fallen ones fade), each with its own seeded randomis
 `npm run benchmark <policy> <benchmark> watch` is how to see a seeded run: the benchmark's repeats, action delay and joint
 noise, several robots at once. It needs a display; on a machine without one, run headless.
 
-The in-app **Tests & Benchmark** panel runs the same code, once per test, on the benchmark open there (see
-[Benchmark datasets](benchmark-datasets.md#creating-a-new-benchmark)): double-click a benchmark to run all its tests, or
-check some tests and press **Run Benchmark**. Its confirm dialog has **Watch at real-time speed**, the in-app `watch`.
-It plays each test once, one robot, with no seeds or randomisation: it ignores the benchmark's repeats, randomisation and
-test selection (the benchmark's ⚙ **Benchmark settings** edit those for `npm run benchmark`, see
-[Benchmark datasets](benchmark-datasets.md#editing-benchmarkyaml-in-the-viewer)). It keeps its results locally; they
-cannot be submitted.
+## In the app
 
-## Saved results
+The **Tests & Benchmark** panel runs the benchmark open there (see
+[Benchmarks](benchmarks.md#creating-a-new-benchmark)) the way `npm run benchmark` does: double-click a benchmark to run
+all its tests, or check some tests and press **Run Benchmark** (like `tests=`). It plans the same cells from
+`benchmark.yaml` (its repeats, seeds and randomisation, edited with ⚙ **Benchmark settings**, see
+[Benchmarks](benchmarks.md#editing-benchmarkyaml-in-the-viewer)), runs the same checks first, and steps each group of
+repeats through the same code, the repeats walking side by side as see-through robots. The confirm dialog shows the
+plan and has **Watch at real-time speed**, the in-app `watch`; without it the simulation steps as fast as it can, with the scene still drawn.
+Starting a run stops a sequence that is playing.
 
-`benchmark_results/` (or `HPV_BENCHMARK_RESULTS_DIR`, see [Policy library](policy-library.md)) holds headless results and
-the in-app results listed at `/api/results`.
+When it finishes, the server saves `benchmark_results/<timestamp>/{result.json,report.html}`, with the same provenance
+the CLI records, and the results page opens. Its cells are the CLI's, seed for seed. The benchmark is recorded as a
+local folder, so `npm run hf submit` refuses these results; run `npm run benchmark` on a pinned Hub benchmark for
+results to submit.
+
+## Results
+
+`benchmark_results/` (or `HPV_BENCHMARK_RESULTS_DIR`, see [Policy library](policy-library.md)) holds one folder per
+result, from `npm run benchmark` and the app alike, each with its `result.json` and `report.html`. The app lists them at
+`/api/results`; its results page and `report.html` show the same thing: per policy, each test's outcome on every repeat
+(passed, fell at T s, or missed the end zone by D m), the metric means and the tasks with their 95% intervals.

@@ -4,7 +4,7 @@
 //
 // Starts the viewer's dev server on every interface (scripts/startViewer.mjs).
 // The trajectory editor and the in-app benchmark read and write the tests of a
-// benchmark folder (see scripts/benchmarkDir.mjs and docs/benchmark-datasets.md):
+// benchmark folder (see scripts/benchmarkDir.mjs and docs/benchmarks.md):
 // benchmark=<dir>, or by default the tracked example benchmark ./benchmarks/default.
 // A Hugging Face dataset is pulled on first use into ./benchmarks/<org>__<name>
 // (gitignored), an ordinary working copy (edit it, `npm run hf diff` /

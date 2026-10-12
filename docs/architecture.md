@@ -1,8 +1,7 @@
 # Architecture
 
-> **Status:** this is the target design that the `user/jiaqi/benchmark-architecture` branch is implementing,
-> phase by phase. Until that branch lands, the code still uses the names in the left-hand column of the
-> [migration table](#migration-from-the-old-names).
+> The old names were dropped without aliases; the [migration table](#migration-from-the-old-names) maps
+> each one to its replacement.
 
 The viewer is a single browser app: Vue, MuJoCo compiled to WebAssembly, and an ONNX policy run by
 onnxruntime-web. A small Node server sits beside it as a Vite plugin. It serves policies from disk, reads and
@@ -244,6 +243,7 @@ There are no aliases: an old name stops working when it is renamed.
 |---|---|
 | **Commands** | |
 | `npm run hf <model> -- --revision <rev> --port <n> --no-open` | `npm run hf <policy>@<rev> port=<n> no-open` |
+| `node scripts/run-hf-model.mjs …` (what cyclotron's `--view` runs) | `node scripts/hf.mjs …`, same words as `npm run hf` |
 | `npm run dev suite=<x> model=<m>` | `npm run dev <policy> benchmark=<x>` |
 | `npm run benchmark <model> <suite>` (uploaded when reproducible) | `npm run benchmark <policy> <benchmark>`, then `npm run hf submit <result dir>` |
 | `npm run benchmark … suite= model=` | `benchmark= policy=` |

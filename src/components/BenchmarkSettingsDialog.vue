@@ -159,7 +159,7 @@
               hide-details spellcheck="false" autocomplete="off"
             />
             <div class="text-caption text-medium-emphasis mt-1">
-              Every key is described in docs/benchmark-datasets.md. Saving checks the file the way
+              Every key is described in docs/benchmarks.md. Saving checks the file the way
               <code>npm run benchmark</code> does.
             </div>
           </v-window-item>

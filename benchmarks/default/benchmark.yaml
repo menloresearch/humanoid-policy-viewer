@@ -1,5 +1,5 @@
 # What runs and how it is scored. Tests live in data/<category>/test.jsonl, one per line.
-# Reference: humanoid-policy-viewer docs/benchmark-datasets.md
+# Reference: humanoid-policy-viewer docs/benchmarks.md
 name: default
 title: default
 description: A few basic tests to check that the policy is running properly.

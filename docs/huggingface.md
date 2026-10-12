@@ -30,6 +30,13 @@ Options are plain words, with no `--`:
 | `HF_ENDPOINT` | Alternative Hub endpoint (default `https://huggingface.co`) |
 | `HPV_CACHE_DIR` | Download cache (default `~/.cache/humanoid-policy-viewer`) |
 
+`npm run hf` is the command for everything that talks to the Hub. Besides
+viewing a policy, its verbs work on benchmark datasets (`pull`, `diff`,
+`baseline`, `publish`, `release`; see [Benchmarks](benchmarks.md#workflow)) and
+submit benchmark results to a policy's model repo (`submit`; see
+[Benchmarking](benchmarking.md#submitting-results)). It is the only command
+that uploads. `npm run hf` alone prints the usage.
+
 ## Run a policy from a folder
 
 `<policy>` can also be a folder or an `.onnx` file on disk, for example a policy

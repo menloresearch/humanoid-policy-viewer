@@ -52,7 +52,7 @@ dist
 
 # Local benchmarks: pulled Hub datasets and "New benchmark" folders. Benchmarks
 # are published as Hugging Face datasets, not kept in this repo (see
-# docs/benchmark-datasets.md); only default/, the example `npm run dev` opens
+# docs/benchmarks.md); only default/, the example `npm run dev` opens
 # and new benchmarks are copied from, is tracked.
 /benchmarks/*
 !/benchmarks/default/
