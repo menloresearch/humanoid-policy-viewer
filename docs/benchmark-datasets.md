@@ -118,6 +118,21 @@ The simulation is deterministic, so `repeats > 1` only makes sense with somethin
 otherwise. A scope narrows a task to `config`, `id` and/or `tag` (a test's tags);
 each may be a list. To score a difficulty level on its own, give it its own category.
 
+Keys left out of `defaults` take these values:
+
+| key | when left out | values |
+|---|---|---|
+| `repeats` | 1 | an integer >= 1 |
+| `seed` | 0 | any integer |
+| `timeout_s` | 600 | wall-clock seconds per cell |
+| `randomize.action_delay` | `midpoint` (the middle of the policy's range) | `midpoint`, or `env_range` (drawn per repeat from the range in the policy's `env.yaml`) |
+| `randomize.initial_joint_noise_rad` | 0 (none) | a number >= 0 |
+
+`npm run suite init` (and a new benchmark in the viewer) starts from `repeats: 5`, `seed: 0`,
+`randomize: { action_delay: env_range, initial_joint_noise_rad: 0.02 }`, `timeout_s: 600`, `tests: [{ all: true }]`,
+the tasks `survival_rate` and `survival_time`, `version: 1` and `requires: { robot: asimov-1, policy_interface:
+velocity-command }`. A test entry can override `repeats`; a later entry wins over an earlier one.
+
 ### Metrics and repeats
 
 Metrics live in `src/benchmark/summary.js` and are named with a version, `<name>@<version>`:
@@ -197,10 +212,9 @@ npm run suite publish ./new-bench repo=<org>/<name> dry-run    # what would be u
 npm run suite publish ./new-bench repo=<org>/<name> create     # creates a PRIVATE dataset repo first
 ```
 
-Plain `npm run dev` uses `./benchmark_datasets/default` (gitignored) and creates a starter benchmark there on first run
-(a `./benchmark` folder from before is moved there). The starter is the
-example benchmark for trying things out: a forward walk, a 1 m radius circle walk, and one test with four 100 N chest
-pushes (front, back, left, right).
+Plain `npm run dev` uses `./benchmark_datasets/default` (gitignored) and creates a starter benchmark there on first run.
+The starter is the example benchmark for trying things out: a forward walk, a 1 m radius circle walk, and one test
+with four 100 N chest pushes (front, back, left, right).
 
 Or start in the viewer: the **Tests & Benchmark** panel lists every benchmark the dev server knows (the one
 `npm run dev` opened and each folder under `./benchmark_datasets/`). **New benchmark** asks for a
@@ -208,6 +222,26 @@ folder name and an optional title and creates an empty `./benchmark_datasets/<na
 folder); **Add test** inside an open benchmark opens the editor, and Save writes into that benchmark. Click a
 benchmark to open it, double-click it to run its tests. The folder is the same working copy `suite init` makes, so
 `npm run benchmark <model> ./benchmark_datasets/<name>` and `publish` work on it as above.
+
+#### Editing `suite.yaml` in the viewer
+
+The gear on a benchmark's row in **Tests & Benchmark** opens **Benchmark settings** (not shown in static builds):
+
+- **Settings** tab: title, description, version, the `defaults` (repeats, seed, timeout, action delay, initial joint
+  noise), the `tests` selection (all tests, a category or one test, each with an optional repeats override) and the
+  leaderboard `tasks` (id, metric, an optional category or tag scope). A scope that is not a plain category or tag
+  is shown read-only and kept as written.
+- **suite.yaml** tab: the file itself, for anything the form does not cover (`harness`, `requires`,
+  `reference_models`). Saving here replaces the file with this text, so form changes not yet saved are dropped.
+- Saving applies the same checks as `npm run benchmark`. An invalid result is not written and every problem is
+  listed. A selector that matches no test in the dataset is a warning: the file is written and the dialog stays
+  open to show it. If the file changed on disk after the dialog loaded it, the save is refused; reopen the dialog.
+- The form changes only the keys you edit, so the file's comments and layout stay. When an edit can move a score
+  (repeats, seed, timeout, randomisation, tests or tasks), the dialog offers **Bump to N+1**: task ids end in `_v<version>`, so old and
+  new numbers never share a leaderboard.
+
+These settings drive `npm run benchmark` only. The viewer's own Run plays each test once, without repeats or
+randomisation ([Benchmarking](benchmarking.md#speed-parallelism-and-determinism)).
 
 In the editor a test is saved as **Category / Test name** (the test id `<category>/<name>`). A new category
 gets its own `data/<category>/test.jsonl` (and, once published, its own dataset config). Deleting a category's last test removes it. A category only runs if `suite.yaml` selects it (the

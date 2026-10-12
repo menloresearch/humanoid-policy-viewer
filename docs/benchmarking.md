@@ -24,6 +24,7 @@ No `--` is needed: everything is a word. `npm run benchmark` alone prints the fu
 | `suite=`, `suite-file=`, `model=` | the same, as options (`model=` may repeat) |
 | `tests=<id,id>`, `repeats=<n>` | run part of the suite (results stay local) |
 | `jobs=<n>` | browser pages in parallel (default: half the cores) |
+| `robots=<n>` | most repeats of one test a page runs at once, as robots in one scene (1-5, default 5); results do not depend on it |
 | `shard=<i>/<n>`, then `npm run benchmark merge <dirs...> [upload]` | split a run across machines |
 | `out=<dir>` | output folder (default `benchmark_runs/<timestamp>/`) |
 | `dry-run`, `no-upload`, `pr`, `force`, `watch`, `verbose` | see the usage text |
@@ -50,6 +51,10 @@ The results have three layers, and only the last is squashed into single numbers
 
 How repeats and tests combine is part of each metric's versioned definition (see
 [benchmark-datasets.md](benchmark-datasets.md#metrics-and-repeats)).
+
+The report tells the two ways to fail a test apart: a run that fell shows "fell at T s"; one that stayed upright but
+never entered the test's end zone (`goal`) shows "missed end zone by D m". Both score 0 on `survival_rate`, but only
+the fall costs `survival_time`.
 
 ## When results are uploaded
 
@@ -89,11 +94,22 @@ suite seed, the test id and the repeat index, never from run order, so `jobs=1`,
 identical cells. Each extra page costs some start-up time (loading MuJoCo and the policy), so for a short suite
 fewer pages can be faster.
 
-`watch` shows the browser and runs in real time on one page, for looking at a policy. The in-app
-**Tests & Benchmark** panel runs the same code, once per test, on the benchmark open there (see
+A test's repeats are one model with one simulation state per repeat, stepped in turn inside a page, up to
+`robots=` of them (a test with more repeats is split into groups). Each repeat keeps its own seed, so the cells are
+bit-identical to running the repeats one at a time.
+
+`watch` shows the browser and runs in real time on one page, for looking at a policy. A test's repeats walk side by
+side as see-through robots (fallen ones fade), each with its own seeded randomisation, so
+`npm run benchmark <model> <suite> watch` is how to see a seeded run: the suite's repeats, action delay and joint
+noise, several robots at once. It needs a display; on a machine without one, run headless.
+
+The in-app **Tests & Benchmark** panel runs the same code, once per test, on the benchmark open there (see
 [Benchmark datasets](benchmark-datasets.md#creating-a-new-benchmark)): double-click a benchmark to run all its tests, or
 check some tests and press **Run Benchmark**. Its confirm dialog has **Watch at real-time speed**, the in-app `watch`.
-It ignores the suite's repeats and test selection, keeps its results locally and never uploads.
+It plays each test once, one robot, with no seeds or randomisation: it ignores the suite's repeats, randomisation and
+test selection (the benchmark's ⚙ **Benchmark settings** edit those for `npm run benchmark`, see
+[Benchmark datasets](benchmark-datasets.md#editing-suiteyaml-in-the-viewer)). It keeps its results locally and never
+uploads.
 
 ## Saved runs
 

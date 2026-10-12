@@ -13,7 +13,9 @@ policy can be tried without a GPU or a training stack.
   friction, armature, gains, gravity and other physical parameters live.
 - **Score it:** `npm run benchmark <model>` runs a benchmark suite (locomotion,
   pushes, friction, long walks) published as a Hugging Face dataset, and posts
-  the results to the model's `.eval_results/` for the Hub leaderboards.
+  the results to the model's `.eval_results/` for the Hub leaderboards. Build
+  your own in the app's Tests & Benchmark panel: tests, repeats, seeds and
+  leaderboard tasks.
 - **Faithful setup:** the robot is the canonical `asimov-1` model, and each
   policy's gains, action scale and torque limits are read from its training
   `env.yaml`, so what you see matches how it was trained.
