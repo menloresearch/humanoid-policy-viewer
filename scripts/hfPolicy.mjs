@@ -3,7 +3,7 @@
 // The dev server then serves it under /policy-library/hf/<org>__<name>/ and
 // lists it in /api/policies, with no HF-specific code in the browser.
 
-import { createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { createWriteStream, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
 import { Readable } from 'node:stream';
@@ -184,8 +184,4 @@ export async function ensurePolicy(repo, {
     rmSync(staging, { recursive: true, force: true });
     throw error;
   }
-}
-
-export function sceneIsInstalled(appDir) {
-  return existsSync(join(appDir, 'public/examples/scenes/asimov-1/sim-model/xmls/asimov_1.xml'));
 }

@@ -20,20 +20,6 @@ const CHROMIUM_ARGS = [
   '--disable-backgrounding-occluded-windows',
 ];
 
-export async function startViewerServer({ appDir, libraryDir, libraryRoots }) {
-  // vite.config.mjs reads these when it loads, so they must be set first.
-  process.env.HPV_POLICY_LIBRARY_DIR = libraryDir;
-  process.env.HPV_POLICY_ROOTS = libraryRoots;
-  const { createServer } = await import('vite');
-  const server = await createServer({
-    root: appDir,
-    server: { port: 0, host: '127.0.0.1' },
-    logLevel: 'warn',
-  });
-  await server.listen();
-  return { server, url: `http://127.0.0.1:${server.httpServer.address().port}/` };
-}
-
 function withTimeout(promise, ms, message) {
   let timer;
   return Promise.race([

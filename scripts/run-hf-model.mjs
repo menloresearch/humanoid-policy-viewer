@@ -1,22 +1,16 @@
 // npm run hf <org/name | folder | file.onnx>
 // Downloads a policy from Hugging Face, or links one from disk, and starts the
 // viewer with it selected.
-// Nothing here may import an npm dependency before the install step below.
+// Nothing here may import an npm dependency before setup() has installed them.
 
-import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkPolicyDir, libraryNameWarning, readReferenceJointNames } from './policyChecks.mjs';
-import { HF_POLICY_ROOT, USAGE, ensurePolicy, normalizeRepoId, parseArgs, sceneIsInstalled } from './hfPolicy.mjs';
+import { HF_POLICY_ROOT, USAGE, ensurePolicy, normalizeRepoId, parseArgs } from './hfPolicy.mjs';
 import { isLocalPolicy, linkLocalPolicy } from './localPolicy.mjs';
+import { setup } from './setup.mjs';
 
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-
-function run(command, args) {
-  const result = spawnSync(command, args, { cwd: appDir, stdio: 'inherit' });
-  if (result.status !== 0) throw new Error(`\`${command} ${args.join(' ')}\` failed`);
-}
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
@@ -32,15 +26,7 @@ async function main() {
     for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => process.exit(130));
   }
 
-  if (!existsSync(resolve(appDir, 'node_modules/vite/package.json'))) {
-    console.log('Installing dependencies (first run only)...');
-    run('npm', ['ci']);
-  }
-
-  if (!sceneIsInstalled(appDir)) {
-    console.log('Fetching the Asimov robot model (first run only)...');
-    run('bash', ['scripts/init-asimov-1.sh']);
-  }
+  setup();
 
   const policy = local ?? await ensurePolicy(repo, { revision: args.revision, log: console.log });
   const name = local ? local.policyDir : policy.repo;
@@ -59,21 +45,14 @@ async function main() {
   if (!warnings.length) console.log('Checked env.yaml and agent.yaml: OK');
   console.log('');
 
-  // vite.config.mjs reads these when it loads, so they must be set first.
-  process.env.HPV_POLICY_LIBRARY_DIR = policy.cacheDir;
-  process.env.HPV_POLICY_ROOTS = local ? local.root : HF_POLICY_ROOT;
-
   // The bare URL opens the bundled example policy; this path selects the one just checked.
   const policyPath = `/?policy=${encodeURIComponent(policy.policyValue)}`;
-  const { createServer } = await import('vite');
-  const server = await createServer({
-    root: appDir,
-    server: {
-      ...(args.port ? { port: args.port } : {}),
-      open: args.open ? policyPath : false,
-    },
+  const { startViewer } = await import('./startViewer.mjs');
+  const { server } = await startViewer({
+    policyLibrary: { dir: policy.cacheDir, roots: [local ? local.root : HF_POLICY_ROOT] },
+    ...(args.port ? { port: args.port } : {}),
+    open: args.open ? policyPath : false,
   });
-  await server.listen();
   console.log(`\nRunning ${name}${policy.primary === 'policy.onnx' ? '' : ` (${policy.primary})`}`);
   const urls = server.resolvedUrls;
   if (!urls) {

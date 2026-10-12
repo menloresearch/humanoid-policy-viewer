@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { compatibilityProblems, expandCells, selectTests } from '../src/benchmark/settings.js';
 import { rowToSequence } from '../src/benchmark/testRow.js';
 import { buildBenchmarkReportHtml } from '../src/simulation/benchmarkReport.js';
-import { runJobs, startViewerServer } from './benchmarkBrowser.mjs';
+import { runJobs } from './benchmarkBrowser.mjs';
 import { collectProvenance, policyFileHashes } from './benchmarkProvenance.mjs';
 import {
   MAX_ROBOTS, RESULT_SCHEMA, buildJobs, formatOutcomes, formatTasks, isComplete, mergeResults, parseShard, resultForPolicy, shardJobs, summarizeRun, toReportRun, uploadBlockers,
@@ -144,7 +144,7 @@ function linkLibrary(policies) {
     for (const link of links) try { unlinkSync(link); } catch { /* gone */ }
     try { rmdirSync(libraryDir); } catch { /* gone */ }
   };
-  return { libraryDir, libraryRoots: policies.map((policy) => policy.key).join(','), cleanup };
+  return { libraryDir, libraryRoots: policies.map((policy) => policy.key), cleanup };
 }
 
 function writeOutputs(outDir, run) {
@@ -266,7 +266,13 @@ async function runBenchmarkCommand(args) {
 
   const { libraryDir, libraryRoots, cleanup } = linkLibrary(policies);
   process.on('exit', cleanup);
-  const { server, url } = await startViewerServer({ appDir, libraryDir, libraryRoots });
+  const { startViewer } = await import('./startViewer.mjs');
+  const { server, url } = await startViewer({
+    policyLibrary: { dir: libraryDir, roots: libraryRoots },
+    port: 0,
+    editable: false,
+    logLevel: 'warn',
+  });
   const results = [];
   const started = Date.now();
   let browserVersion = null;
