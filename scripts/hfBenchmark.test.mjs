@@ -10,7 +10,7 @@ import { dirname, join, resolve } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
-import { publish } from './hfBenchmark.mjs';
+import { publish, withTestedCommit } from './hfBenchmark.mjs';
 import { RESULT_SCHEMA, summarize } from '../src/benchmark/run.js';
 import { submit } from './hfSubmit.mjs';
 
@@ -47,6 +47,10 @@ const lengthenFirstTest = (files) => {
   const row = JSON.parse(first);
   return { ...files, 'data/locomotion/test.jsonl': [JSON.stringify({ ...row, duration: row.duration + 1 }), ...rest].join('\n') + '\n' };
 };
+
+/** This viewer checkout, as publish sees it: clean and pushed. */
+const VIEWER = { commit: 'e'.repeat(40), dirty: false, public: true };
+const DEFAULT_PIN = '8bcbf47d6e7b206e1a9527029eab0fb2326630eb'; // benchmarks/default's harness.tested_commit
 
 function fakeHub() {
   const repos = new Map(); // "dataset:org/name" -> { commits: Map(sha -> files), main, tags, prs }
@@ -122,7 +126,7 @@ function fakeHub() {
     },
   };
   const lines = [];
-  const io = { env: { HF_TOKEN: 'hf_fake', HF_ENDPOINT: 'https://fake.hub' }, fetchImpl, hub, cacheDir: join(scratch, `cache-${dirs++}`), log: (line) => lines.push(line) };
+  const io = { env: { HF_TOKEN: 'hf_fake', HF_ENDPOINT: 'https://fake.hub' }, fetchImpl, hub, cacheDir: join(scratch, `cache-${dirs++}`), log: (line) => lines.push(line), viewer: () => VIEWER };
   return { repos, seed, io, lines, output: () => lines.join('\n'), dataset: (name) => repos.get(key('dataset', name)), model: (name) => repos.get(key('model', name)) };
 }
 
@@ -205,6 +209,50 @@ test('a token the Hub rejects while creating a dataset is explained', async () =
   const rejecting = async () => { throw Object.assign(new Error('Invalid username or password.'), { statusCode: 401 }); };
   const io = { ...fake.io, hub: { ...fake.io.hub, repoExists: rejecting } };
   await assert.rejects(publish(DEFAULT, { repo: 'me/new', create: true }, io), /Creating datasets\/me\/new failed: Hugging Face rejected your token \(from HF_TOKEN\)[^]*settings\/tokens/);
+});
+
+const uploadedYaml = (fake, repo) => fake.dataset(repo).commits.get(fake.dataset(repo).main)['benchmark.yaml'];
+
+test('publish puts this viewer commit in the uploaded benchmark.yaml, its layout kept, and leaves the folder alone', async () => {
+  const fake = fakeHub();
+  const dir = workingCopy();
+  const local = readFileSync(join(dir, 'benchmark.yaml'), 'utf8');
+  await publish(dir, { repo: 'me/new', create: true }, fake.io);
+  assert.equal(uploadedYaml(fake, 'me/new'), local.replace(DEFAULT_PIN, VIEWER.commit));
+  assert.equal(readFileSync(join(dir, 'benchmark.yaml'), 'utf8'), local);
+});
+
+test('a republish of the same version records this viewer commit, not the one before', async () => {
+  const fake = fakeHub();
+  fake.seed('dataset', 'me/bench', readTree(DEFAULT));
+  await publish(workingCopy(), { repo: 'me/bench' }, fake.io);
+  assert.equal(parseYaml(uploadedYaml(fake, 'me/bench')).harness.tested_commit, VIEWER.commit);
+});
+
+test('publish refuses a viewer checkout others cannot reproduce, even in dry-run, and writes nothing', async () => {
+  const fake = fakeHub();
+  const main = fake.seed('dataset', 'me/bench', readTree(DEFAULT));
+  const cases = [
+    [{ ...VIEWER, dirty: true }, /this viewer checkout has uncommitted changes, so commit eeeeeee is not the code that checked the benchmark/],
+    [{ ...VIEWER, public: false }, /viewer commit eeeeeee is not on a branch of https:\/\/github\.com\/menloresearch\/humanoid-policy-viewer[^]*push it first/],
+    [{ commit: null, dirty: null, public: null }, /this viewer is not a git checkout/],
+  ];
+  for (const [viewer, message] of cases) {
+    const io = { ...fake.io, viewer: () => viewer };
+    await assert.rejects(publish(workingCopy(), { repo: 'me/bench' }, io), message);
+    await assert.rejects(publish(workingCopy(), { repo: 'me/bench', dryRun: true }, io), message);
+  }
+  assert.equal(fake.dataset('me/bench').main, main);
+  assert.equal(fake.dataset('me/bench').commits.size, 1);
+});
+
+test('withTestedCommit replaces the value in place, and adds the key when there is none', () => {
+  const text = 'name: x   # the name\nharness:\n  protocol: 1      # p\n  tested_commit: abc   # set by publish\nversion: 1\n';
+  assert.equal(withTestedCommit(text, 'f'.repeat(40)), text.replace('abc', 'f'.repeat(40)));
+  assert.equal(parseYaml(withTestedCommit('harness: { protocol: 1, tested_commit: "abc" }\n', 'f'.repeat(40))).harness.tested_commit, 'f'.repeat(40));
+  for (const missing of ['harness:\n  protocol: 1\n', 'harness:\n  protocol: 1\n  tested_commit:\n']) {
+    assert.deepEqual(parseYaml(withTestedCommit(missing, 'f'.repeat(40))).harness, { protocol: 1, tested_commit: 'f'.repeat(40) });
+  }
 });
 
 function resultRun(overrides = {}) {

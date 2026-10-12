@@ -15,8 +15,9 @@ import { cpSync, existsSync, readdirSync, readFileSync, rmSync, statSync, writeF
 import { dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
+import { parseDocument } from 'yaml';
 import { compatibilityProblems } from '../src/benchmark/settings.js';
-import { collectProvenance } from './benchmarkProvenance.mjs';
+import { HPV_REPO, collectProvenance, onPublicRepo } from './benchmarkProvenance.mjs';
 import { classifyTarget } from './benchmarkTargets.mjs';
 import { explainAuthError, requireToken } from './hfAuth.mjs';
 import { commitFiles, hubCredentials } from './hfCommit.mjs';
@@ -32,8 +33,15 @@ function sha256(text) {
   return createHash('sha256').update(text).digest('hex');
 }
 
+/** This checkout: { commit, dirty, public } (public = on a branch of HPV_REPO). */
+function viewerCheckout() {
+  const { commit, dirty } = collectProvenance(appDir).hpv;
+  return { commit, dirty, public: onPublicRepo(appDir, commit) };
+}
+
 // Where the Hub is. Tests pass a fake one: env (HF_ENDPOINT, HF_TOKEN), fetchImpl,
-// hub (the @huggingface/hub functions used), cacheDir and log.
+// hub (the @huggingface/hub functions used), cacheDir and log; and viewer, this
+// checkout as viewerCheckout() describes it.
 /** true or false for a typed answer; null when there is no terminal to ask on. */
 async function askYesNo(question) {
   if (!process.stdin.isTTY) return null;
@@ -46,7 +54,7 @@ async function askYesNo(question) {
 }
 
 function hubIo(io = {}) {
-  return { env: process.env, fetchImpl: fetch, hub: null, cacheDir: undefined, log: console.log, confirm: askYesNo, ...io };
+  return { env: process.env, fetchImpl: fetch, hub: null, cacheDir: undefined, log: console.log, confirm: askYesNo, viewer: viewerCheckout, ...io };
 }
 
 export const DEFAULT_LICENSE = 'bsd-3-clause';
@@ -91,6 +99,17 @@ export function scoredContentHash(rawBenchmark, rows) {
       : value);
   return sha256(JSON.stringify(canonical({ benchmark: { ...rest, harness }, rows: [...rows].sort((a, b) => a.id.localeCompare(b.id)) })));
 }
+
+/** benchmark.yaml text with harness.tested_commit set to `commit`, its comments and layout kept. */
+export function withTestedCommit(text, commit) {
+  const doc = parseDocument(text);
+  const node = doc.getIn(['harness', 'tested_commit'], true);
+  if (node?.range && node.range[1] > node.range[0]) return text.slice(0, node.range[0]) + commit + text.slice(node.range[1]);
+  doc.setIn(['harness', 'tested_commit'], commit);
+  return doc.toString();
+}
+
+const withoutTestedCommit = (raw) => ({ ...raw, harness: { ...raw.harness, tested_commit: undefined } });
 
 // ---------------------------------------------------------------------------
 
@@ -153,14 +172,20 @@ function describeBase(base) {
 
 /**
  * Everything that must hold before a benchmark is published: the tests run
- * (checkTests), this viewer implements the benchmark's protocol, and a change that
- * can move a score (compared with `base`) came with a new benchmark version.
+ * (checkTests), this viewer implements the benchmark's protocol, this viewer is a
+ * clean checkout of a commit on HPV_REPO, and a change that can move a score
+ * (compared with `base`) came with a new benchmark version.
  */
-function publishCheck(dir, base) {
+function publishCheck(dir, base, viewer) {
   const loaded = loadBenchmarkDir(dir);
   const { benchmark, rawBenchmark, rows } = loaded;
   const { errors, warnings } = checkTests(loaded);
   errors.push(...compatibilityProblems(benchmark).map((p) => `this viewer: ${p}`));
+  if (!viewer.commit) errors.push('this viewer is not a git checkout, so there is no viewer commit to publish the benchmark with');
+  else {
+    if (viewer.dirty) errors.push(`this viewer checkout has uncommitted changes, so commit ${viewer.commit.slice(0, 7)} is not the code that checked the benchmark; commit them first`);
+    if (!viewer.public) errors.push(`viewer commit ${viewer.commit.slice(0, 7)} is not on a branch of ${HPV_REPO} (as last fetched), so others cannot check it out; push it first`);
+  }
   if (base) {
     const previous = base.loaded.benchmark.version;
     const changed = scoredContentHash(base.loaded.rawBenchmark, base.loaded.rows) !== scoredContentHash(rawBenchmark, rows);
@@ -168,12 +193,6 @@ function publishCheck(dir, base) {
       errors.push(`tests or scoring changed since ${describeBase(base)} but version is still ${benchmark.version}; bump benchmark.yaml version to ${previous + 1}`);
     }
     if (!changed && benchmark.version !== previous) warnings.push('version changed but nothing that affects scores did');
-  }
-  if (benchmark.harness.tested_commit) {
-    const commit = collectProvenance(appDir).hpv.commit;
-    if (commit && commit !== benchmark.harness.tested_commit) {
-      warnings.push(`benchmark.yaml harness.tested_commit is ${benchmark.harness.tested_commit.slice(0, 7)}, this viewer is ${commit.slice(0, 7)} (fine if the protocol matches)`);
-    }
   }
   for (const warning of warnings) console.warn(`Warning: ${warning}`);
   if (errors.length) throw new Error(`Not published:\n${errors.map((e) => `  - ${e}`).join('\n')}`);
@@ -185,7 +204,10 @@ function describeRowChange(a, b) {
   return keys.join(', ');
 }
 
-/** What changed from `base` to `current` (a loaded folder), and whether scores can move. */
+/**
+ * What changed from `base` to `current` (a loaded folder), and whether scores can
+ * move. harness.tested_commit is left to publish, which sets it.
+ */
 function changesText(base, current) {
   const before = new Map(base.loaded.rows.map((row) => [row.id, row]));
   const after = new Map(current.rows.map((row) => [row.id, row]));
@@ -195,7 +217,7 @@ function changesText(base, current) {
     else if (JSON.stringify(before.get(id)) !== JSON.stringify(row)) lines.push(`~ ${id}: ${describeRowChange(before.get(id), row)}`);
   }
   for (const id of before.keys()) if (!after.has(id)) lines.push(`- ${id}`);
-  const settingsChanged = describeRowChange(base.loaded.rawBenchmark, current.rawBenchmark);
+  const settingsChanged = describeRowChange(withoutTestedCommit(base.loaded.rawBenchmark), withoutTestedCommit(current.rawBenchmark));
   if (settingsChanged) lines.push(`~ benchmark.yaml: ${settingsChanged}`);
   const scored = scoredContentHash(base.loaded.rawBenchmark, base.loaded.rows) !== scoredContentHash(current.rawBenchmark, current.rows);
   lines.push(scored
@@ -291,18 +313,28 @@ export async function publish(dir, { repo, base: rev, pr = false, create = false
       throw new Error(`base=${rev} is stale: datasets/${name} main is now ${main.sha.slice(0, 7)}, not ${base.sha.slice(0, 7)}. See what changed with npm run hf diff ${dir} repo=${name}, then publish without base= (or with base=${main.sha}).`);
     }
   }
-  const checked = publishCheck(dir, base);
-  const loaded = { ...checked, rawBenchmark: { ...checked.rawBenchmark, license: await chooseLicense(checked.rawBenchmark, io, dryRun) } };
+  const viewer = io.viewer();
+  const checked = publishCheck(dir, base, viewer);
+  // Record the viewer commit that checked it in the uploaded benchmark.yaml (not the folder's).
+  const harness = { ...checked.rawBenchmark.harness, tested_commit: viewer.commit };
+  const loaded = {
+    ...checked,
+    benchmark: { ...checked.benchmark, harness },
+    rawBenchmark: { ...checked.rawBenchmark, harness, license: await chooseLicense(checked.rawBenchmark, io, dryRun) },
+  };
   // Older task ids in the Hub's eval.yaml are kept (a pulled copy has the same file).
   const evalYamlPath = [base && join(base.dir, 'eval.yaml'), join(dir, 'eval.yaml')].find((path) => path && existsSync(path));
   const previousEvalYaml = evalYamlPath ? readYamlFile(evalYamlPath) : null;
   const files = [
-    ...publishableFiles(dir).map((path) => ({ path, content: readFileSync(join(dir, path), 'utf8') })),
+    ...publishableFiles(dir).map((path) => {
+      const content = readFileSync(join(dir, path), 'utf8');
+      return { path, content: path === 'benchmark.yaml' ? withTestedCommit(content, viewer.commit) : content };
+    }),
     ...hubFiles(loaded, { previousEvalYaml }),
   ];
   const changes = base ? changesText(base, loaded) : `(new dataset: datasets/${name} has no benchmark yet)`;
   const baselineText = existsSync(join(dir, 'baseline.md')) ? readFileSync(join(dir, 'baseline.md'), 'utf8') : '(no baseline run: npm run hf baseline <dir>)';
-  const description = `Published with \`npm run hf publish\` from humanoid-policy-viewer ${collectProvenance(appDir).hpv.commit ?? ''}.\n\n### Changes\n\`\`\`\n${changes}\n\`\`\`\n\n### Baseline\n${baselineText}\n\nReviewers: \`npm run hf pull datasets/${name}@refs/pr/<n> <dir>\`, then \`npm run hf baseline <dir>\`.`;
+  const description = `Published with \`npm run hf publish\` from humanoid-policy-viewer ${viewer.commit}.\n\n### Changes\n\`\`\`\n${changes}\n\`\`\`\n\n### Baseline\n${baselineText}\n\nReviewers: \`npm run hf pull datasets/${name}@refs/pr/<n> <dir>\`, then \`npm run hf baseline <dir>\`.`;
   const { version } = loaded.benchmark;
   const tag = `v${version}`;
   if (dryRun) {

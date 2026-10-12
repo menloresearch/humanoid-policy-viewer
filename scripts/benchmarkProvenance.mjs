@@ -55,6 +55,20 @@ export function collectProvenance(appDir) {
   };
 }
 
+/**
+ * Whether `commit` is on a branch of HPV_REPO, as this clone last fetched it, so
+ * anyone can check it out. null when it is not a git checkout.
+ */
+export function onPublicRepo(appDir, commit) {
+  const remotes = git(appDir, ['remote', '-v']);
+  if (remotes === null || !commit) return null;
+  const names = new Set(remotes.split('\n')
+    .filter((line) => /[/:]menloresearch\/humanoid-policy-viewer(\.git)? \(fetch\)$/.test(line))
+    .map((line) => line.split('\t')[0]));
+  const branches = git(appDir, ['branch', '-r', '--contains', commit, '--format=%(refname:short)']) ?? '';
+  return branches.split('\n').some((branch) => names.has(branch.split('/')[0]));
+}
+
 /** sha256 of the policy ONNX and of the env.yaml the viewer will read beside it. */
 export function policyFileHashes(policyDir, primary) {
   const env = policyFileCandidates('env.yaml').find((file) => existsSync(join(policyDir, file)));

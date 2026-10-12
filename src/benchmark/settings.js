@@ -7,6 +7,7 @@
 //   name: asimov-locomotion
 //   version: 1
 //   harness: { repo: https://github.com/menloresearch/humanoid-policy-viewer, protocol: 1, tested_commit: <sha> }
+//                              # tested_commit is set by `npm run hf publish`
 //   requires: { robot: { name: asimov-1 }, policy_interface: velocity-command }
 //   defaults:
 //     repeats: 5

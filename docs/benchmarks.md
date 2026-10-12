@@ -100,7 +100,7 @@ tags: [humanoid, locomotion]       # added to the card after humanoid-policy-vie
 harness:
   repo: https://github.com/menloresearch/humanoid-policy-viewer
   protocol: 1                      # the viewer's BENCHMARK_PROTOCOL this benchmark was validated with
-  tested_commit: <viewer commit>
+  tested_commit: <viewer commit>   # set by `npm run hf publish`: the viewer commit that checked this benchmark
 requires: { robot: { name: asimov-1 }, policy_interface: velocity-command }
 defaults:
   repeats: 5
@@ -204,6 +204,12 @@ There is no separate check step. `npm run benchmark` checks the tests before it 
 in the command player, the benchmark's selection works, and it warns about tests no selector picks. `publish` runs
 the same checks plus "a change that can move a score needs a new `version`" (compared with `main`).
 
+`publish` also refuses a viewer checkout with uncommitted changes, or one whose commit is not on a branch of
+`menloresearch/humanoid-policy-viewer` (push it and `git fetch` first), since nobody else could check out the code
+that checked the benchmark. It records that commit as `harness.tested_commit` in the uploaded `benchmark.yaml` (your
+folder is left as it is). The commit is a record, not a requirement: any viewer implementing the benchmark's
+`harness.protocol` runs it, and each result records the viewer commit it actually ran on.
+
 When you own the dataset's namespace, `publish` commits to `main` and tags the commit `v<version>`; it does not tag
 when the version did not change (nothing that affects scores changed). Otherwise, or with `pr`, it opens a pull
 request and prints the release command. Hub dataset pull requests have no CI, so the reviewer reproduces the
@@ -220,8 +226,8 @@ and re-runs `npm run benchmark <policy> datasets/<org>/<name>@v<version>` for th
 ### When the viewer changes
 
 A change that moves numbers bumps `BENCHMARK_PROTOCOL` (and `npm run benchmark:golden update`). Benchmarks validated
-with the old protocol are then refused by `npm run hf submit` until they are re-validated: set `harness.protocol` and
-`tested_commit`, bump `version`, publish, release. Old results keep their old task ids.
+with the old protocol are then refused by `npm run hf submit` until they are re-validated: set `harness.protocol`, bump
+`version`, publish (which records the new `tested_commit`), release. Old results keep their old task ids.
 
 ### Creating a new benchmark
 

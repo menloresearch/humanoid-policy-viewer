@@ -176,11 +176,14 @@ the ones made with **New benchmark**.
 
 **Publishing** (`hf publish <dir> repo=org/name`):
 1. Compare `<dir>` with the dataset's current `main` (or `base=<rev>`). No pull is needed.
-2. Check the tests and the protocol. If scores can change, `version` must have gone up.
-3. Commit on top of the revision it compared with, so a publish that happened in the meantime is never
+2. Check the tests and the protocol. If scores can change, `version` must have gone up. The viewer checkout must
+   be clean and its commit pushed to `menloresearch/humanoid-policy-viewer`.
+3. Record that viewer commit as `harness.tested_commit` in the uploaded `benchmark.yaml`, for reference. Any
+   viewer implementing the benchmark's protocol runs it.
+4. Commit on top of the revision it compared with, so a publish that happened in the meantime is never
    overwritten. Commit directly if you own the namespace; otherwise, or with `pr`, open a pull request. `create`
    makes a new private repo.
-4. On a direct commit, tag it `v<version>`. Policies are benchmarked against a tag (`datasets/org/name@v2`),
+5. On a direct commit, tag it `v<version>`. Policies are benchmarked against a tag (`datasets/org/name@v2`),
    never a moving `main`. A pull request is tagged with `hf release` after it is merged.
 
 **Leaderboards** are built by the Hub, not by this repo. It collects every model repo's `.eval_results` entries
