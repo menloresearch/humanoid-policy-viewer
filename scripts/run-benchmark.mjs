@@ -72,7 +72,7 @@ no failed cells. Uploading needs HF_TOKEN (or \`hf auth login\`).
 
 Examples:
   npm run benchmark menloresearch/asimov1-loco
-  npm run benchmark ./models/model_Aug_18_1 suite=./benchmark
+  npm run benchmark ./models/model_Aug_18_1 suite=./benchmark_datasets/default
   npm run benchmark menloresearch/asimov1-loco datasets/<org>/<name>@v1 pr
   npm run benchmark menloresearch/asimov1-loco test/fixtures/smoke-suite jobs=2`;
 

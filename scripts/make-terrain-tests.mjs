@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// npm run terrain-tests [<benchmark dir>]      (default ./benchmark)
+// npm run terrain-tests [<benchmark dir>]      (default ./benchmark_datasets/default)
 //
 // Writes seven terrain tests to <benchmark dir>/data/terrain/test.jsonl (it
 // replaces that file): stairs, ramps, scattered boxes and rough tiles, each
@@ -15,9 +15,10 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildTerrain, defaultTerrain } from '../src/simulation/terrainGen.js';
 import { validateTestRow } from '../src/benchmark/testRow.js';
+import { defaultSuiteDir } from './suiteDir.mjs';
 
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const dir = resolve(process.argv[2] ?? join(appDir, 'benchmark'));
+const dir = resolve(process.argv[2] ?? defaultSuiteDir(appDir));
 const SPEED = 0.4;
 
 const push = (t, dy, force, body, label) => ({

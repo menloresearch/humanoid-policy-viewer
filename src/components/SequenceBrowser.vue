@@ -88,6 +88,16 @@
           <v-progress-circular v-if="running && isCurrent(suite)" indeterminate size="12" width="2" color="primary" />
           <span class="badge count" title="tests">{{ isCurrent(suite) && loaded ? items.length : suite.testCount }}</span>
           <v-btn
+            v-if="!STATIC"
+            icon
+            size="x-small"
+            variant="text"
+            title="Settings (suite.yaml): repeats, seeds, randomisation, leaderboard tasks"
+            @click.stop="openSettings(suite)"
+          >
+            <v-icon size="14">mdi-cog-outline</v-icon>
+          </v-btn>
+          <v-btn
             icon
             size="x-small"
             variant="text"
@@ -146,6 +156,13 @@
         </div>
       </div>
     </div>
+
+    <SuiteSettingsDialog
+      v-model="settingsOpen"
+      :suite="settingsSuite ? settingsSuite.key : null"
+      :suite-title="settingsSuite ? settingsSuite.title || settingsSuite.key : ''"
+      @saved="refresh"
+    />
   </div>
 </template>
 
@@ -155,6 +172,7 @@ import { STATIC } from '@/state/viewerMode.js';
 import { listSequences, listSuites, createSuite, deleteSequenceFile } from '@/state/sequenceStore.js';
 import SequenceNode from './SequenceNode.vue';
 import SequenceFileRow from './SequenceFileRow.vue';
+import SuiteSettingsDialog from './SuiteSettingsDialog.vue';
 
 const SUITE_NAME_RE = /^[a-z0-9][a-z0-9-]*$/;
 
@@ -166,10 +184,11 @@ function suiteRef(suite) {
 // The benchmarks the dev server knows, one open at a time: click a benchmark
 // to open it (its tests, by category, are what the benchmark runs and what the
 // editor saves into), double-click it to run every test. Inside, a test row
-// works as before: double-click plays it, the pencil edits it.
+// works as before: double-click plays it, the pencil edits it. The gear
+// edits a benchmark's suite.yaml (SuiteSettingsDialog).
 export default {
   name: 'SequenceBrowser',
-  components: { SequenceNode, SequenceFileRow },
+  components: { SequenceNode, SequenceFileRow, SuiteSettingsDialog },
   props: {
     running: { type: Boolean, default: false }
   },
@@ -186,7 +205,9 @@ export default {
       creating: false,
       createBusy: false,
       newName: '',
-      newTitle: ''
+      newTitle: '',
+      settingsOpen: false,
+      settingsSuite: null
     };
   },
   created() {
@@ -329,6 +350,10 @@ export default {
       }
       this.selectAll(true);
       this.$emit('run');
+    },
+    openSettings(suite) {
+      this.settingsSuite = suite;
+      this.settingsOpen = true;
     },
     startCreate() {
       this.creating = true;

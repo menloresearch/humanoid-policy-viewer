@@ -50,10 +50,10 @@ dist
 /public/model-library/
 /public/static-data/
 
-# Default local benchmark dataset that `npm run dev` edits (created on first
-# run). Benchmarks are published as Hugging Face datasets, not kept in this
-# repo: see docs/benchmark-datasets.md.
-/benchmark
+# Local benchmark datasets: default/ (what `npm run dev` edits, created on
+# first run), pulled Hub datasets and "New benchmark" folders. Benchmarks are
+# published as Hugging Face datasets, not kept in this repo: see
+# docs/benchmark-datasets.md.
 /benchmark_datasets
 
 # Local policies dropped into the default model library (see models/README.md).

@@ -85,7 +85,7 @@ How terrain interacts with the rest of a test:
 
 What a spec builds is part of `BENCHMARK_PROTOCOL`. `npm run terrain-tests [<benchmark dir>]` writes seven starter
 tests (stairs 5 and 10 cm, ramps 10° and 15°, the 10° ramp with shoulder pushes, boxes, rough tiles), each walked
-at 0.4 m/s for 20 s, to `data/terrain/test.jsonl` (default `./benchmark`).
+at 0.4 m/s for 20 s, to `data/terrain/test.jsonl` (default `./benchmark_datasets/default`).
 
 ## The suite (`suite.yaml`)
 
@@ -197,12 +197,13 @@ npm run suite publish ./new-bench repo=<org>/<name> dry-run    # what would be u
 npm run suite publish ./new-bench repo=<org>/<name> create     # creates a PRIVATE dataset repo first
 ```
 
-Plain `npm run dev` uses `./benchmark` (gitignored) and creates a starter benchmark there on first run. The starter is the
+Plain `npm run dev` uses `./benchmark_datasets/default` (gitignored) and creates a starter benchmark there on first run
+(a `./benchmark` folder from before is moved there). The starter is the
 example benchmark for trying things out: a forward walk, a 1 m radius circle walk, and one test with four 100 N chest
 pushes (front, back, left, right).
 
 Or start in the viewer: the **Tests & Benchmark** panel lists every benchmark the dev server knows (the one
-`npm run dev` opened, `./benchmark`, and each folder under `./benchmark_datasets/`). **New benchmark** asks for a
+`npm run dev` opened and each folder under `./benchmark_datasets/`). **New benchmark** asks for a
 folder name and an optional title and creates an empty `./benchmark_datasets/<name>/` (`HPV_BENCHMARKS_DIR` moves that
 folder); **Add test** inside an open benchmark opens the editor, and Save writes into that benchmark. Click a
 benchmark to open it, double-click it to run its tests. The folder is the same working copy `suite init` makes, so

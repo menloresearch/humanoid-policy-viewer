@@ -29,13 +29,14 @@ import { METRICS, latestMetricVersion } from './summary.js';
 import { ALL_CONFIG } from './testRow.js';
 
 const TASK_ID_RE = /^[a-z][a-z0-9_]*$/;
-const DEFAULTS = {
+// What a setting is when suite.yaml leaves it out.
+export const SUITE_DEFAULTS = Object.freeze({
   repeats: 1,
   seed: 0,
   randomize: {},
   timeout_s: 600,
-};
-const SETTING_KEYS = Object.keys(DEFAULTS);
+});
+const SETTING_KEYS = Object.keys(SUITE_DEFAULTS);
 const SCOPE_KEYS = ['config', 'id', 'tag'];
 
 const isPlainObject = (value) => !!value && typeof value === 'object' && !Array.isArray(value);
@@ -86,7 +87,7 @@ export function parseSuite(raw) {
   if (!isPlainObject(raw.harness) || !Number.isInteger(raw.harness.protocol)) errors.push('harness.protocol (integer) is required');
   if (!isPlainObject(raw.requires)) errors.push('requires is required');
 
-  const defaults = { ...DEFAULTS, ...(raw.defaults ?? {}) };
+  const defaults = { ...SUITE_DEFAULTS, ...(raw.defaults ?? {}) };
   defaults.randomize = { ...(raw.defaults?.randomize ?? {}) };
   checkSettings(defaults, 'defaults', errors);
 

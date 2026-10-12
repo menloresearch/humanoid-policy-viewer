@@ -12,7 +12,8 @@ import { basename, dirname, extname, relative, resolve } from 'node:path'
 import { listModelRoots, listModels as discoverModels } from './scripts/modelDiscovery.mjs'
 import { getBenchmarkRunsDir, getModelLibrary } from './scripts/modelLibraryConfig.mjs'
 import { initSuite } from './scripts/suiteInit.mjs'
-import { SUITE_FILE, readRows, readYamlFile, writeRows } from './scripts/suiteDir.mjs'
+import { SUITE_FILE, defaultSuiteDir, readRows, readYamlFile, writeRows } from './scripts/suiteDir.mjs'
+import { applySuiteEdit, checkSuiteText, suiteFormFields } from './scripts/suiteEdit.mjs'
 import { OPT_IN_METRICS, rowToSequence, sequenceToRow, validateGoal, validateTestRow } from './src/benchmark/testRow.js'
 import { validateTerrain } from './src/simulation/terrainGen.js'
 
@@ -72,7 +73,8 @@ function humanoidDevPlugin() {
   // ---- Trajectory sequence persistence (/api/sequences) ----
   // The trajectory editor and the in-app benchmark read and write the tests of
   // a benchmark dataset working copy (see scripts/suiteDir.mjs): HPV_SUITE_DIR
-  // (`npm run dev suite=<dir>`), by default ./benchmark (gitignored), or another
+  // (`npm run dev suite=<dir>`), by default ./benchmark_datasets/default
+  // (gitignored), or another
   // benchmark the request names (see /api/suites below). Run outputs live under
   // ./benchmark_runs. All are outside public/, so writing them never triggers a
   // page reload.
@@ -244,22 +246,22 @@ function humanoidDevPlugin() {
 
   // Each row of data/<category>/test.jsonl shows up as "<category>/<name>.json";
   // saving writes the row back, and a new category gets its own file.
-  const SUITE_DIR = resolve(process.env.HPV_SUITE_DIR || resolve(appDir, 'benchmark'));
+  const SUITE_DIR = resolve(process.env.HPV_SUITE_DIR || defaultSuiteDir(appDir));
   const TEST_ID_RE = /^[a-z0-9][a-z0-9_]*\/[a-z0-9][a-z0-9_.-]*$/;
   const rowFile = (row) => `${row.id}.json`;
 
   // ---- Benchmarks (/api/suites) ----
   // The viewer lists every benchmark dataset folder it can find: the session's
-  // (SUITE_DIR, what a request without ?suite= reads and writes), ./benchmark,
-  // and each folder of BENCHMARKS_DIR (Hub working copies pulled by
-  // `npm run dev suite=datasets/...`, and the benchmarks "New benchmark" makes).
+  // (SUITE_DIR, what a request without ?suite= reads and writes) and each
+  // folder of BENCHMARKS_DIR (the default benchmark, Hub working copies pulled
+  // by `npm run dev suite=datasets/...`, and the benchmarks "New benchmark" makes).
   // A request names one by its key; only listed folders are accepted.
   const BENCHMARKS_DIR = resolve(process.env.HPV_BENCHMARKS_DIR || resolve(appDir, 'benchmark_datasets'));
   const SUITE_NAME_RE = /^[a-z0-9][a-z0-9-]*$/;
   const suiteKey = (dir) => (isWithinDirectory(appDir, dir) ? relative(appDir, dir) : dir);
 
   function listSuites() {
-    const dirs = [SUITE_DIR, resolve(appDir, 'benchmark')];
+    const dirs = [SUITE_DIR];
     const others = [];
     try {
       for (const entry of readdirSync(BENCHMARKS_DIR, { withFileTypes: true })) {
@@ -317,6 +319,66 @@ function humanoidDevPlugin() {
         const title = typeof body.title === 'string' && body.title.trim() ? body.title.trim() : null;
         initSuite(dir, { title, exampleTest: false, log: () => {} });
         sendJson(res, 201, { ok: true, suite: listSuites().find((suite) => suite.dir === dir) });
+        return;
+      }
+      sendJson(res, 405, { error: 'Method not allowed' });
+    } catch (e) {
+      sendJson(res, 500, { error: String(e?.message ?? e) });
+    }
+  }
+
+  // ---- Benchmark settings (/api/suite) ----
+  // The suite.yaml of the benchmark ?suite= names, for the Benchmark settings
+  // dialog: GET returns the text and the form's fields; PUT takes { fields } or
+  // { text }, plus the text it was based on (`base`), and refuses an edit
+  // `npm run benchmark` would reject (scripts/suiteEdit.mjs).
+  function describeSuiteFile(text, rows) {
+    const { raw, errors, warnings } = checkSuiteText(text, rows);
+    return {
+      text,
+      fields: suiteFormFields(raw),
+      errors,
+      warnings,
+      configs: [...new Set(rows.map((row) => row.config))].sort(),
+      testIds: rows.map((row) => row.id).sort(),
+    };
+  }
+
+  async function handleSuiteFile(req, res) {
+    try {
+      const dir = requestSuiteDir(new URL(req.url, 'http://localhost'));
+      if (!dir) {
+        sendJson(res, 404, { error: 'Unknown benchmark' });
+        return;
+      }
+      const path = resolve(dir, SUITE_FILE);
+      const current = readFileSync(path, 'utf8');
+      const { rows } = readRows(dir);
+      if (req.method === 'GET') {
+        sendJson(res, 200, describeSuiteFile(current, rows));
+        return;
+      }
+      if (req.method === 'PUT') {
+        let body;
+        try {
+          body = await readRequestJson(req);
+        } catch (e) {
+          sendJson(res, 400, { error: e.message });
+          return;
+        }
+        if (typeof body.base === 'string' && body.base !== current) {
+          sendJson(res, 409, { error: 'suite.yaml changed on disk since you opened it; reopen the settings to see the new version.' });
+          return;
+        }
+        let result;
+        try {
+          result = applySuiteEdit(current, body, rows);
+        } catch (e) {
+          sendJson(res, 400, { error: e.message, problems: e.problems ?? [] });
+          return;
+        }
+        if (result.text !== current) writeFileSync(path, result.text);
+        sendJson(res, 200, { ok: true, ...describeSuiteFile(result.text, rows) });
         return;
       }
       sendJson(res, 405, { error: 'Method not allowed' });
@@ -500,6 +562,10 @@ function humanoidDevPlugin() {
         }
         if (pathname === '/api/suites') {
           await handleSuites(req, res);
+          return;
+        }
+        if (pathname === '/api/suite') {
+          await handleSuiteFile(req, res);
           return;
         }
         if (pathname === '/api/sequences') {

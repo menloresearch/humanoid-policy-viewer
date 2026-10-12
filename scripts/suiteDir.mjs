@@ -22,6 +22,10 @@ export const SUITE_FILE = 'suite.yaml';
 export const DATA_DIR = 'data';
 export const ROWS_FILE = 'test.jsonl';
 
+// Local benchmarks live in ./benchmark_datasets (gitignored): the one plain
+// `npm run dev` opens, the ones "New benchmark" makes and Hub working copies.
+export const defaultSuiteDir = (appDir) => join(appDir, 'benchmark_datasets', 'default');
+
 export function readYamlFile(path) {
   return parseYaml(readFileSync(path, 'utf8'));
 }

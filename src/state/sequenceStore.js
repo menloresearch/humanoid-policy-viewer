@@ -98,6 +98,36 @@ export async function createSuite(name, title = '') {
   return (await response.json()).suite;
 }
 
+const SUITE_API = '/api/suite';
+const suiteFileUrl = (suite) => (suite ? `${SUITE_API}?${new URLSearchParams({ suite })}` : SUITE_API);
+
+/**
+ * suite.yaml of benchmark `suite` (a key; null: the server's default):
+ * { text, fields, errors, warnings, configs, testIds }.
+ */
+export async function loadSuiteSettings(suite) {
+  if (STATIC) throw new Error("Static deployments can't read suite.yaml.");
+  const response = await fetch(suiteFileUrl(suite));
+  if (!response.ok) throw new Error(await parseError(response));
+  return response.json();
+}
+
+/**
+ * Saves `edit` ({ fields } from the settings form, or { text }) over the
+ * suite.yaml text `base` it was made from. Throws listing every problem when
+ * the result would not be a valid suite; returns what loadSuiteSettings does.
+ */
+export async function saveSuiteSettings(suite, edit, base) {
+  if (STATIC) throw new Error("Static deployments can't save suite.yaml.");
+  const response = await fetch(suiteFileUrl(suite), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...edit, base })
+  });
+  if (!response.ok) throw new Error(await parseError(response));
+  return response.json();
+}
+
 export async function loadSequenceFile(file) {
   if (STATIC) {
     const catalog = await loadStaticCatalog();

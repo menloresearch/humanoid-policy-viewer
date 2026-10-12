@@ -1965,7 +1965,7 @@ export default {
         const body = await response.json();
         files = (body.files || []).map((entry) => entry.file);
       }
-      if (!files.length) throw new Error('No benchmark test files found under ./benchmark');
+      if (!files.length) throw new Error('This benchmark has no tests yet');
 
       const tests = await Promise.all(
         files.map(async (file) => {

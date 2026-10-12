@@ -5,8 +5,9 @@
 // Starts the Vite dev server. The trajectory editor and the in-app benchmark
 // read and write the tests of a benchmark dataset folder (see
 // scripts/suiteDir.mjs and docs/benchmark-datasets.md): suite=<dir>, or by
-// default ./benchmark (gitignored), which is created with a starter suite on
-// first use. A Hugging Face dataset is pulled on first use into
+// default ./benchmark_datasets/default (gitignored), which is created with the
+// example benchmark on first use (or moved there from ./benchmark, where it
+// used to live). A Hugging Face dataset is pulled on first use into
 // ./benchmark_datasets/<org>__<name> (gitignored), an ordinary working copy
 // (edit it, `npm run suite diff` / `publish` it); later runs reuse it as is.
 // That folder is where the app opens first; its "New benchmark" button adds
@@ -27,11 +28,12 @@ import { checkCheckpointDir, readReferenceJointNames } from './checkpointChecks.
 import { HF_MODEL_ROOT, defaultCacheDir, ensureModel, normalizeRepoId } from './hfModel.mjs';
 import { DEFAULT_MODEL_ROOT } from './modelLibraryConfig.mjs';
 import { initSuite, pull, pulledFrom } from './suite.mjs';
+import { defaultSuiteDir } from './suiteDir.mjs';
 
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const env = { ...process.env };
 const passThrough = [];
-let suiteDir = join(appDir, 'benchmark');
+let suiteDir = defaultSuiteDir(appDir);
 let explicit = false;
 let hub = null;
 const hubModels = [];

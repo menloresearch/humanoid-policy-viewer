@@ -218,3 +218,4 @@ test('the scored-content hash ignores prose, version and tested_commit', () => {
   assert.notEqual(scoredContentHash({ ...suite, harness: { protocol: 2 } }, rows), hash);
   assert.notEqual(scoredContentHash(suite, [{ id: 'loco/a', duration: 11 }]), hash);
 });
+

@@ -105,8 +105,7 @@ same everywhere: the `asimov-1` submodule.
 - `public/examples/checkpoints/` - policy config JSON, bundled ONNX files, and motion clips
 - `scripts/` - `npm run hf`, `npm run benchmark`, `npm run suite`, and dev-server helpers
 - `src/benchmark/` - benchmark protocol, test-row and suite formats, scoring
-- `benchmark/` - (gitignored) the local benchmark dataset `npm run dev` edits; created on first run
-- `benchmark_datasets/` - (gitignored) pulled Hub datasets and benchmarks made with the app's **New benchmark**
+- `benchmark_datasets/` - (gitignored) local benchmark datasets: `default/` (what `npm run dev` opens; created on first run), pulled Hub datasets and benchmarks made with the app's **New benchmark**
 - `benchmark_runs/` - (gitignored) saved benchmark runs
 - `test/fixtures/smoke-suite/` - a tiny benchmark suite for tests and the golden check
 - an optional [model library](docs/model-library.md) served by local Vite middleware under `/model-library/`
