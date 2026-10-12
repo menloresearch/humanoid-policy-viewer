@@ -101,16 +101,11 @@ function computeGaitSymmetry(rows, jointNames) {
     return { joint: pair.label, mirrorRmse: round(rmse(errors)) };
   });
   const meanMirrorRmse = mean(jointMetrics.map((metric) => metric.mirrorRmse));
-  const contactDutyAsymmetry = Math.abs(
-    (mean(rows.map((sample) => (sample.footContacts?.left ? 1 : 0))) || 0) -
-    (mean(rows.map((sample) => (sample.footContacts?.right ? 1 : 0))) || 0)
-  );
-  const limpIndex = Math.max(0, Math.min(1, (meanMirrorRmse || 0) + contactDutyAsymmetry));
+  const limpIndex = Math.max(0, Math.min(1, meanMirrorRmse || 0));
   return {
     symmetryScorePercent: round(100 * (1 - limpIndex), 2),
     limpIndex: round(limpIndex),
     meanMirrorRmse: round(meanMirrorRmse),
-    contactDutyAsymmetry: round(contactDutyAsymmetry),
     pairs: jointMetrics,
   };
 }
@@ -166,6 +161,13 @@ function trackingError(sample) {
     ey: heading.y - (Number(cmd[1]) || 0),
     ew: YAW_LEVER_M * (wz - (Number(cmd[2]) || 0)),
   };
+}
+
+// Base height above the ground under it (groundZ is the terrain height there,
+// absent or 0 on the floor), so a push on a platform is judged like one on the floor.
+function clearance(sample) {
+  const z = sample.rootPosition?.[2];
+  return Number.isFinite(z) ? z - (sample.groundZ || 0) : undefined;
 }
 
 function tiltRadians(sample) {
@@ -258,9 +260,9 @@ function computePerturbations(samples, sequence, massByBody, fallbackMassKg) {
       ey: mean(preErrors.map((e) => e.ey)) || 0,
       ew: mean(preErrors.map((e) => e.ew)) || 0,
     };
-    const zPre = mean(anchorWindow.map((s) => s.rootPosition?.[2]));
+    const zPre = mean(anchorWindow.map(clearance));
     const noiseFloor = rmse(preErrors.map((e, i) => {
-      const z = anchorWindow[i].rootPosition?.[2];
+      const z = clearance(anchorWindow[i]);
       const dEz = Number.isFinite(z) && Number.isFinite(zPre) ? z - zPre : 0;
       return Math.hypot(e.ex - baseline.ex, e.ey - baseline.ey, e.ew - baseline.ew, dEz);
     })) || 0;
@@ -275,7 +277,7 @@ function computePerturbations(samples, sequence, massByBody, fallbackMassKg) {
       const dEx = e.ex - baseline.ex;
       const dEy = e.ey - baseline.ey;
       const dEw = e.ew - baseline.ew;
-      const z = sample.rootPosition?.[2];
+      const z = clearance(sample);
       // Included so a purely (or mostly) vertical push — where dEx/dEy/dEw
       // stay near their pre-push baseline — still drives recoveryTau off the
       // disturbance it actually causes (a height dip) instead of reading as
@@ -351,6 +353,20 @@ function computePerturbations(samples, sequence, massByBody, fallbackMassKg) {
   };
 }
 
+/**
+ * Whether a top-down path ([[x, y], ...]) entered a test's end zone
+ * ({ x, y, radius_m }), and how far outside it the closest point stayed
+ * (miss_m, 0 when it got in; null with no usable points).
+ */
+export function goalOutcome(path, goal) {
+  let closest = Infinity;
+  for (const [px, py] of path ?? []) {
+    if (Number.isFinite(px) && Number.isFinite(py)) closest = Math.min(closest, Math.hypot(px - goal.x, py - goal.y));
+  }
+  const reached = closest <= goal.radius_m;
+  return { reached, miss_m: Number.isFinite(closest) ? (reached ? 0 : round(closest - goal.radius_m, 3)) : null };
+}
+
 export function computeMetrics(samples, { dt = 0.02, jointNames = [], sequence = null, massByBody = null, fallbackMassKg = null } = {}) {
   const rows = Array.isArray(samples) ? samples : [];
 
@@ -393,19 +409,10 @@ export function computeMetrics(samples, { dt = 0.02, jointNames = [], sequence =
     rmse_m: round(rmse(driftValues)),
   };
 
-  // Balance.
-  const supportMargins = rows.map((sample) => sample.supportMargin).filter(Number.isFinite);
-  const balance = {
-    meanSupportMargin_m: round(mean(supportMargins)),
-    minSupportMargin_m: supportMargins.length ? round(Math.min(...supportMargins)) : null,
-    leftContactDuty: round(mean(rows.map((sample) => (sample.footContacts?.left ? 1 : 0)))),
-    rightContactDuty: round(mean(rows.map((sample) => (sample.footContacts?.right ? 1 : 0)))),
-  };
-
-  // Gait symmetry over ALL samples — opt-in per test (see METHODOLOGY.md):
-  // the left/right mirror assumption only holds during sustained,
-  // constant-velocity straight-line walking, so a test must explicitly set
-  // `"gaitSymmetry": true` at its sequence's top level to have this computed.
+  // Gait symmetry over ALL samples — opt-in per test: the left/right mirror
+  // assumption only holds during sustained, constant-velocity straight-line
+  // walking, so a test must explicitly opt in (dataset row
+  // `metrics_opt_in: ["gait_symmetry"]`, i.e. `gaitSymmetry: true` here).
   const gaitSymmetry = sequence?.gaitSymmetry === true ? computeGaitSymmetry(rows, jointNames) : null;
 
   // Action smoothness.
@@ -426,6 +433,9 @@ export function computeMetrics(samples, { dt = 0.02, jointNames = [], sequence =
     time: firstFallen ? round(firstFallen.time) : null,
   };
 
+  // End zone: did the base get there (whether or not it fell afterwards)?
+  const goal = sequence?.goal ? goalOutcome(topDown.actual, sequence.goal) : null;
+
   return {
     duration_s: rows.length ? round(rows[rows.length - 1].time - rows[0].time, 4) : 0,
     frames: rows.length,
@@ -433,10 +443,10 @@ export function computeMetrics(samples, { dt = 0.02, jointNames = [], sequence =
     series,
     topDown,
     drift,
-    balance,
     gaitSymmetry,
     actionSmoothness,
     perturbations,
     fell,
+    goal,
   };
 }

@@ -11,8 +11,11 @@ policy can be tried without a GPU or a training stack.
   local model library, or use the bundled example.
 - **Drive and stress it:** set velocity commands, push the robot, and change
   friction, armature, gains, gravity and other physical parameters live.
-- **Score it:** run the `benchmark/` suite (locomotion, pushes, friction, long
-  walks) in the app or headless, and compare saved runs.
+- **Score it:** `npm run benchmark <model>` runs a benchmark suite (locomotion,
+  pushes, friction, long walks) published as a Hugging Face dataset, and posts
+  the results to the model's `.eval_results/` for the Hub leaderboards. Build
+  your own in the app's Tests & Benchmark panel: tests, repeats, seeds and
+  leaderboard tasks.
 - **Faithful setup:** the robot is the canonical `asimov-1` model, and each
   policy's gains, action scale and torque limits are read from its training
   `env.yaml`, so what you see matches how it was trained.
@@ -89,9 +92,9 @@ same everywhere: the `asimov-1` submodule.
 | [Run a policy from Hugging Face](docs/huggingface.md) | `npm run hf`: options, private repos, where downloads are cached |
 | [Policy config](docs/policy-config.md) | What `reference_policy_config.json` and a checkpoint's `env.yaml` each control, and which wins |
 | [Model library](docs/model-library.md) | Serving checkpoints from outside `public/` (`HPV_MODEL_*` variables) |
-| [Benchmarking](docs/benchmarking.md) | Running the `benchmark/` suite in the app or headless |
+| [Benchmarking](docs/benchmarking.md) | `npm run benchmark`: running a suite, what gets uploaded, versions, parallelism |
+| [Benchmark datasets](docs/benchmark-datasets.md) | The suite format on the Hub, and `npm run suite` for creating, changing and releasing one |
 | [Adding a robot](docs/adding-a-robot.md) | Bringing your own MJCF, policy and motion clips |
-| [Benchmark methodology](benchmark/METHODOLOGY.md) | How the test suite and its thresholds were chosen |
 | [Scenes](public/examples/scenes/README.md) | The `asimov-1` submodule and how actuators are added at load |
 
 ## Project structure
@@ -102,8 +105,11 @@ same everywhere: the `asimov-1` submodule.
 - `src/simulation/policyRunner.js` - ONNX inference wrapper and observation pipeline
 - `public/examples/scenes/` - MJCF files + meshes staged into MuJoCo's MEMFS; the Asimov robot is the `asimov-1/` git submodule
 - `public/examples/checkpoints/` - policy config JSON, bundled ONNX files, and motion clips
-- `scripts/` - `npm run hf`, the headless benchmark runner, and dev-server helpers
-- `benchmark/` - velocity-command and push test definitions
+- `scripts/` - `npm run hf`, `npm run benchmark`, `npm run suite`, and dev-server helpers
+- `src/benchmark/` - benchmark protocol, test-row and suite formats, scoring
+- `benchmark_datasets/` - (gitignored) local benchmark datasets: `default/` (what `npm run dev` opens; created on first run), pulled Hub datasets and benchmarks made with the app's **New benchmark**
+- `benchmark_runs/` - (gitignored) saved benchmark runs
+- `test/fixtures/smoke-suite/` - a tiny benchmark suite for tests and the golden check
 - an optional [model library](docs/model-library.md) served by local Vite middleware under `/model-library/`
 
 ## License and acknowledgements

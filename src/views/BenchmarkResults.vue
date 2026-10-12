@@ -124,14 +124,14 @@
               v-for="row in perTestRows"
               :key="'oc-' + row.policyId"
               class="outcome"
-              :class="row.fell || row.error ? 'bad' : 'good'"
+              :class="row.fell || row.error ? 'bad' : row.missedGoal ? 'warn' : 'good'"
             >
               <span class="swatch" :style="{ background: colorFor(row.policyId) }"></span>
               <v-icon size="16" class="mr-1">
-                {{ row.error ? 'mdi-alert-circle' : row.fell ? 'mdi-account-off' : 'mdi-check-circle' }}
+                {{ row.error ? 'mdi-alert-circle' : row.fell ? 'mdi-account-off' : row.missedGoal ? 'mdi-map-marker-remove' : 'mdi-check-circle' }}
               </v-icon>
               <span class="outcome-text">
-                <b :title="row.error || null">{{ row.error ? 'error' : row.fell ? `FELL at ${fmt(row.fellTime, 1)}s` : 'completed upright' }}</b>
+                <b :title="row.error || null">{{ outcomeText(row) }}</b>
                 <span class="outcome-policy" :title="labelFor(row.policyId)">{{ shortLabel(row.policyId) }}</span>
               </span>
               <span v-if="row.error" class="outcome-note" :title="row.error">{{ row.error }}</span>
@@ -166,6 +166,7 @@
                 <span class="swatch" :style="{ background: colorFor(row.policyId) }"></span>
                 <span class="kpi-name text-subtitle-2">{{ labelFor(row.policyId) }}</span>
                 <v-chip v-if="row.fell" size="x-small" color="error">fell @ {{ fmt(row.fellTime, 1) }}s</v-chip>
+                <v-chip v-else-if="row.missedGoal" size="x-small" color="warning">missed end zone{{ row.goalMiss != null ? ` by ${fmt(row.goalMiss, 2)} m` : '' }}</v-chip>
               </div>
               <div class="kpi-stats">
                 <div><span class="kpi-val">{{ fmt(row.trackRmse, 3) }}</span><span class="kpi-lbl">track RMSE</span></div>
@@ -235,8 +236,8 @@
             </div>
           </div>
 
-          <!-- Balance / smoothness KPI tiles -->
-          <div class="section-title">Balance &amp; smoothness</div>
+          <!-- Smoothness KPI tiles -->
+          <div class="section-title">Smoothness</div>
           <div class="tile-grid mb-6">
             <div v-for="row in perTestRows" :key="'bal-' + row.policyId" class="tile-card">
               <div class="kpi-head">
@@ -244,8 +245,6 @@
                 <span class="kpi-name text-caption">{{ labelFor(row.policyId) }}</span>
               </div>
               <div class="tile-stats">
-                <div><span class="t-val">{{ fmt(row.supMean, 3) }}</span><span class="t-lbl">support margin mean (m)</span></div>
-                <div><span class="t-val">{{ fmt(row.supMin, 3) }}</span><span class="t-lbl">support margin min (m)</span></div>
                 <div><span class="t-val">{{ fmt(row.meanDelta, 4) }}</span><span class="t-lbl">mean action Δ</span></div>
                 <div><span class="t-val">{{ fmt(row.rmsDelta, 4) }}</span><span class="t-lbl">RMS action Δ</span></div>
               </div>
@@ -258,7 +257,7 @@
       <!-- ================= AGGREGATE ================= -->
       <div v-else>
         <!-- Survival first: which tests each policy stayed upright through. -->
-        <div class="section-title">Fall summary — did the robot stay upright?</div>
+        <div class="section-title">Fall summary — did the robot stay upright (and reach the end zone)?</div>
         <v-table density="compact" class="cmp-table fall-table mb-6">
           <thead>
             <tr>
@@ -266,7 +265,7 @@
               <th v-for="t in tests" :key="'fh-' + t.file" class="text-center">
                 <span :title="t.file">{{ t.name || t.file }}</span>
               </th>
-              <th class="text-center">Upright</th>
+              <th class="text-center">Passed</th>
             </tr>
           </thead>
           <tbody>
@@ -280,7 +279,7 @@
                   {{ fallCell(p.id, t.file).text }}
                 </span>
               </td>
-              <td class="text-center font-weight-medium">{{ uprightCount(p.id) }} / {{ tests.length }}</td>
+              <td class="text-center font-weight-medium">{{ passedCount(p.id) }} / {{ tests.length }}</td>
             </tr>
           </tbody>
         </v-table>
@@ -335,7 +334,10 @@
                 <span class="swatch" :style="{ background: colorFor(row.policyId) }"></span>
                 {{ labelFor(row.policyId) }}
               </td>
-              <td class="text-right">{{ row.upright }} / {{ row.total }}</td>
+              <td class="text-right">
+                {{ row.upright }} / {{ row.total }}
+                <span v-if="row.missedGoal" class="text-medium-emphasis">({{ row.missedGoal }} missed end zone)</span>
+              </td>
               <td class="text-right">{{ fmt(row.trackRmse, 3) }}</td>
               <td class="text-right">{{ row.pushesLabel }}</td>
               <td class="text-right">{{ row.maxForce != null ? fmt(row.maxForce, 0) : 'n/a' }}</td>
@@ -378,7 +380,7 @@ import { listBenchmarks, loadBenchmark } from '@/state/benchmarkStore.js';
 import { loadSequenceFile } from '@/state/sequenceStore.js';
 import { resolveLimits } from '@/simulation/commandSequencer.js';
 import {
-  downloadBenchmarkReport, categoryOf, maxForceSurvived, computeCategoryRollup, isUpright
+  downloadBenchmarkReport, categoryOf, isPushCategory, maxForceSurvived, computeCategoryRollup, isUpright, missedGoalText
 } from '@/simulation/benchmarkReport.js';
 import {
   Chart, LineElement, PointElement, LineController,
@@ -497,7 +499,7 @@ export default {
         }
       };
     },
-    /** Saved runs under benchmarks/, newest first, as select items. */
+    /** Saved runs under benchmark_runs/, newest first, as select items. */
     runItems() {
       return appState.benchmarkRuns.map((run) => {
         const when = run.generatedAt ? new Date(run.generatedAt).toLocaleString() : run.file;
@@ -697,6 +699,7 @@ export default {
           policyId: p.policyId,
           total: p.total,
           upright: p.upright,
+          missedGoal: p.missedGoal,
           trackRmse: p.trackRmse,
           pushesLabel: p.pushTotal ? `${p.pushSurvived}/${p.pushTotal}` : 'n/a',
           maxForce: p.maxForce
@@ -709,7 +712,7 @@ export default {
     // this is the actual per-location max-force breakdown.
     pushLocationRows() {
       return this.tests
-        .filter((t) => categoryOf(t.file).startsWith('push/'))
+        .filter((t) => isPushCategory(categoryOf(t.file)))
         .flatMap((t) => this.policies.map((p) => {
           const result = this.br.results.find((r) => r.testFile === t.file && r.policyId === p.id);
           if (!result) return null;
@@ -888,9 +891,17 @@ export default {
     colorFor(policyId) {
       return PALETTE[this.colorIndex[policyId] ?? 0];
     },
+    /** The outcome strip's headline: error, fell, upright but missed the end zone, or passed. */
+    outcomeText(row) {
+      if (row.error) return 'error';
+      if (row.fell) return `FELL at ${this.fmt(row.fellTime, 1)}s`;
+      if (row.missedGoal) return missedGoalText(row);
+      return row.goalReached ? 'completed upright, reached end zone' : 'completed upright';
+    },
     /**
-     * One cell of the fall matrix: fell (with the time), stayed upright, or no
-     * usable result (policy failed to load, or the capture never ran).
+     * One cell of the fall matrix: fell (with the time), stayed upright but
+     * missed the end zone, passed, or no usable result (policy failed to load,
+     * or the capture never ran).
      */
     fallCell(policyId, testFile) {
       const result = this.br?.results?.find((r) => r.policyId === policyId && r.testFile === testFile);
@@ -904,13 +915,20 @@ export default {
           title: `Fell at ${this.fmt(row.fellTime, 1)}s` + (row.warning ? ` · ${row.warning}` : '')
         };
       }
+      if (row.missedGoal) {
+        return {
+          text: `missed end zone${row.goalMiss != null ? ` by ${this.fmt(row.goalMiss, 2)} m` : ''}`,
+          cls: 'missed',
+          title: 'Stayed upright but never reached the end zone' + (row.warning ? ` · ${row.warning}` : '')
+        };
+      }
       return {
-        text: 'upright',
+        text: row.goalReached ? 'reached end zone' : 'upright',
         cls: 'upright',
-        title: 'Stayed upright' + (row.warning ? ` · ${row.warning}` : '')
+        title: (row.goalReached ? 'Stayed upright and reached the end zone' : 'Stayed upright') + (row.warning ? ` · ${row.warning}` : '')
       };
     },
-    uprightCount(policyId) {
+    passedCount(policyId) {
       return this.tests.filter((t) => this.fallCell(policyId, t.file).cls === 'upright').length;
     },
     /** Trailing file name of a checkpoint label — full text stays in a tooltip. */
@@ -931,7 +949,6 @@ export default {
       const ct = (m.commandTracking && m.commandTracking.overall) || {};
       const gs = m.gaitSymmetry || {};
       const as = m.actionSmoothness || {};
-      const bal = m.balance || {};
       const drift = m.drift || {};
       const fell = m.fell || {};
       const pert = m.perturbations || null;
@@ -948,12 +965,13 @@ export default {
         jerk: as.jerkLikeScore,
         perturbations: pert,
         pushesLabel: pert ? `${pert.survived}/${pert.total}` : 'n/a',
-        supMean: bal.meanSupportMargin_m,
-        supMin: bal.minSupportMargin_m,
         meanDelta: as.meanAbsDelta,
         rmsDelta: as.rmsDelta,
         fell: !!fell.fell,
-        fellTime: fell.time
+        fellTime: fell.time,
+        goalReached: m.goal ? m.goal.reached : null,
+        goalMiss: m.goal?.miss_m ?? null,
+        missedGoal: !r.error && !fell.fell && m.goal?.reached === false
       };
     },
     // Build parallel-array line dataset as {x,y} points (time arrays may differ per policy)
@@ -1145,6 +1163,7 @@ export default {
 }
 .outcome.good { border-color: rgba(27, 175, 122, 0.5); background: rgba(27, 175, 122, 0.08); }
 .outcome.bad { border-color: rgba(227, 73, 72, 0.5); background: rgba(227, 73, 72, 0.08); }
+.outcome.warn { border-color: rgba(230, 150, 20, 0.55); background: rgba(230, 150, 20, 0.08); }
 .outcome-text { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
 .outcome-policy {
   color: rgba(0, 0, 0, 0.6);
@@ -1187,6 +1206,7 @@ export default {
 }
 .fall-cell.upright { background: rgba(27, 175, 122, 0.16); color: #0b6b4a; }
 .fall-cell.fell { background: rgba(227, 73, 72, 0.16); color: #a3201f; }
+.fall-cell.missed { background: rgba(230, 150, 20, 0.18); color: #8a5300; }
 .fall-cell.none { background: rgba(0, 0, 0, 0.06); color: rgba(0, 0, 0, 0.5); }
 
 /* The manifest tables are plain <table>s, so they carry their own borders. */

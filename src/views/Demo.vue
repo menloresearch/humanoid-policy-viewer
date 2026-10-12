@@ -173,8 +173,8 @@
           <details open>
             <summary style="cursor:pointer; font-size: 12px;"><b>Tests &amp; Benchmark</b></summary>
 
-            <!-- Folder manager over ./sequences: check tests to benchmark,
-                 double-click to play one live, pencil to edit it. -->
+            <!-- Benchmarks and their tests: double-click a benchmark to run it,
+                 double-click a test to play it live, pencil to edit it. -->
             <SequenceBrowser
               ref="sequenceBrowser"
               class="mt-1"
@@ -182,6 +182,7 @@
               @play="playSequenceFile"
               @edit="editSequenceFile"
               @new="newSequenceInEditor"
+              @run="requestBenchmark"
             />
 
             <div class="d-flex align-center mt-2">
@@ -345,7 +346,7 @@
                 <div class="mono-path">{{ pendingDeleteRun?.file }}</div>
                 <div class="mt-1">{{ pendingDeleteRun ? runLabel(pendingDeleteRun) : '' }}</div>
                 <div class="text-caption text-medium-emphasis mt-2">
-                  The file is removed from benchmarks/ and can't be recovered from the app.
+                  The file is removed from benchmark_runs/ and can't be recovered from the app.
                   Download its HTML report first if you want to keep it.
                 </div>
               </v-card-text>
@@ -360,7 +361,9 @@
           <!-- Estimate + confirm before a (potentially long) benchmark run -->
           <v-dialog v-model="showBenchmarkConfirm" max-width="460">
             <v-card>
-              <v-card-title class="text-subtitle-1">Run benchmark?</v-card-title>
+              <v-card-title class="text-subtitle-1">
+                Run {{ pendingSuiteTitle || 'benchmark' }}?
+              </v-card-title>
               <v-card-text class="text-body-2">
                 <div>
                   {{ pendingTests.length }} test(s) × {{ pendingPolicies.length }} policy(ies)
@@ -370,8 +373,16 @@
                   Estimated time: <b>{{ benchmarkEstimateLabel }}</b> (sim time; wall-clock varies with
                   render speed).
                 </div>
-                <div class="text-caption text-medium-emphasis mt-2">
-                  The viewer will cycle policies and replay each test; leave this tab in the foreground.
+                <v-checkbox
+                  v-model="benchmarkRealtime"
+                  label="Watch at real-time speed"
+                  density="compact"
+                  hide-details
+                  class="mt-1"
+                ></v-checkbox>
+                <div class="text-caption text-medium-emphasis">
+                  The viewer will cycle policies and replay each test{{ benchmarkRealtime ? ' at real-time speed' : ', fast-forwarded' }};
+                  leave this tab in the foreground.
                 </div>
               </v-card-text>
               <v-card-actions>
@@ -884,7 +895,7 @@
 import { MuJoCoDemo } from '@/simulation/main.js';
 import { asimovCommandState, asimovInterruptState, imuBiasState } from '@/simulation/observationHelpers.js';
 import { commandSequencer } from '@/simulation/commandSequencer.js';
-import { runBenchmark, estimateBenchmarkSeconds } from '@/simulation/benchmarkRunner.js';
+import { runBenchmark, runBenchmarkGroup, waitForPolicyReady, estimateBenchmarkSeconds } from '@/simulation/benchmarkRunner.js';
 import { loadTestScene } from '@/simulation/terrainScene.js';
 import { appState, openEditor, newBlankSequence, openResults, setBenchmarkResults } from '@/state/appState.js';
 import { demoRef } from '@/state/demoRef.js';
@@ -947,6 +958,8 @@ export default {
     showBenchmarkConfirm: false,
     pendingTests: [],
     pendingPolicies: [],
+    pendingSuiteTitle: '',
+    benchmarkRealtime: false, // play each test at wall-clock speed to watch the run
     benchmarkEstimateSeconds: 0,
     resultsLoading: false,
     panelWidth: 320,
@@ -1851,6 +1864,7 @@ export default {
 
       this.pendingTests = tests;
       this.pendingPolicies = policies;
+      this.pendingSuiteTitle = this.$refs.sequenceBrowser?.currentSuiteTitle() || '';
       this.benchmarkEstimateSeconds = estimateBenchmarkSeconds(policies.length, tests);
       this.showBenchmarkConfirm = true;
     },
@@ -1881,6 +1895,7 @@ export default {
           component: commandView,
           policies,
           tests,
+          realtime: this.benchmarkRealtime,
           onProgress: (progress) => {
             this.benchmark.done = progress.done;
             this.benchmark.total = progress.total;
@@ -1930,18 +1945,18 @@ export default {
       const values = Array.isArray(policyValues) && policyValues.length
         ? policyValues
         : [this.currentPolicy];
+      const unknown = values.filter((value) => !this.policies.some((p) => p.value === value));
+      if (unknown.length) {
+        throw new Error(`Unknown policies: ${unknown.join(', ')}`);
+      }
       const policies = values
         .map((value) => this.policies.find((p) => p.value === value))
-        .filter(Boolean)
         .map((p) => ({
           id: p.value,
           label: p.title,
           configPath: p.policyPath,
           onnxPath: p.onnxPath || undefined
         }));
-      if (!policies.length) {
-        throw new Error(`No matching policies found for: ${values.join(', ')}`);
-      }
 
       let files = Array.isArray(testFiles) && testFiles.length ? testFiles : null;
       if (!files) {
@@ -1950,7 +1965,7 @@ export default {
         const body = await response.json();
         files = (body.files || []).map((entry) => entry.file);
       }
-      if (!files.length) throw new Error('No benchmark test files found under ./benchmark');
+      if (!files.length) throw new Error('This benchmark has no tests yet');
 
       const tests = await Promise.all(
         files.map(async (file) => {
@@ -1986,6 +2001,62 @@ export default {
       } finally {
         commandSequencer.bindSim(this.demo);
       }
+    },
+    /**
+     * Headless entry point for `npm run benchmark` (scripts/run-benchmark.mjs):
+     * runs one benchmark cell (one test, one repeat) for a policy given by its
+     * ONNX URL, so it needs no model catalog. A group of one; see
+     * runBenchmarkGroupHeadless. `cell` = { sequence, seed, randomize, realtime, timeoutMs }.
+     */
+    async runBenchmarkCellHeadless(policy, cell) {
+      const { sequence, seed, randomize, realtime, timeoutMs } = cell;
+      const outcome = await this.runBenchmarkGroupHeadless(policy, {
+        sequence, realtime, timeoutMs, cells: [{ seed, randomize }],
+      });
+      return outcome.policyLoadError ? outcome : outcome.results[0];
+    },
+    /**
+     * Headless entry point for `npm run benchmark`: runs several repeats of one
+     * test at once, as that many robots in one scene (runBenchmarkGroup), for a
+     * policy given by its ONNX URL. Each browser page keeps the last policy
+     * loaded, which lets the driver send a model's jobs to the same page.
+     * `group` = { sequence, cells: [{ seed, randomize }], realtime, timeoutMs };
+     * returns { results: [one per cell, in order] }, or { policyLoadError, error }.
+     * A real-time (watched) run keeps drawing; a headless one stops the draw loop.
+     */
+    async runBenchmarkGroupHeadless(policy, group) {
+      if (!this.demo) throw new Error('Demo not ready yet');
+      if (group.realtime) this.demo.startRenderLoop?.();
+      else this.demo.stopRenderLoop?.();
+      const key = `${policy.configPath ?? REFERENCE_POLICY_CONFIG}|${policy.onnxPath}`;
+      if (this._benchmarkPolicyKey !== key) {
+        this._benchmarkPolicyKey = null;
+        await this.demo.stopMainLoop();
+        try {
+          await this.demo.reloadPolicy(policy.configPath ?? REFERENCE_POLICY_CONFIG, { onnxPath: policy.onnxPath });
+          if (!(await waitForPolicyReady(this.demo, 30000))) throw new Error('it did not become ready within 30s');
+        } catch (error) {
+          // Reported, not thrown: the page is fine, only this policy is not.
+          return { policyLoadError: true, error: `Could not load policy ${policy.onnxPath}: ${error?.message || error}`, metrics: null };
+        }
+        this._benchmarkPolicyKey = key;
+      }
+      const commandView = {
+        get cmdVx() { return asimovCommandState.vx; },
+        get cmdVy() { return asimovCommandState.vy; },
+        get cmdWz() { return asimovCommandState.wz; }
+      };
+      const results = await runBenchmarkGroup({
+        demo: this.demo,
+        component: commandView,
+        sequence: group.sequence,
+        randomizations: group.cells.map((cell) => (cell.seed === undefined || cell.seed === null
+          ? null
+          : { seed: cell.seed, randomize: cell.randomize ?? {} })),
+        realtime: !!group.realtime,
+        timeoutMs: group.timeoutMs ?? undefined,
+      });
+      return { results };
     },
     async refreshBenchmarkRuns() {
       try {
@@ -2500,6 +2571,8 @@ export default {
   mounted() {
     window.__humanoidViewerDemoComponent = this;
     window.__runHeadlessBenchmark = (policyValues, testFiles) => this.runHeadlessBenchmark(policyValues, testFiles);
+    window.__runBenchmarkCell = (policy, cell) => this.runBenchmarkCellHeadless(policy, cell);
+    window.__runBenchmarkGroup = (policy, group) => this.runBenchmarkGroupHeadless(policy, group);
     this.customMotions = {};
     this.isSafari = this.detectSafari();
     this.restorePanelWidth();
@@ -2556,6 +2629,12 @@ export default {
   beforeUnmount() {
     if (window.__humanoidViewerDemoComponent === this) {
       window.__humanoidViewerDemoComponent = null;
+    }
+    if (window.__runBenchmarkCell) {
+      window.__runBenchmarkCell = null;
+    }
+    if (window.__runBenchmarkGroup) {
+      window.__runBenchmarkGroup = null;
     }
     if (window.__runHeadlessBenchmark) {
       window.__runHeadlessBenchmark = null;

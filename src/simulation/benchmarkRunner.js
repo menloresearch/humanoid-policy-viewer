@@ -8,8 +8,8 @@ import { computeMetrics, TILT_FALL_RAD, HEIGHT_FALL_M } from './metrics.js';
 import { commandSequencer } from './commandSequencer.js';
 import { yawFromQuat } from './idealPath.js';
 import { loadTestScene } from './terrainScene.js';
+import { mulberry32 } from '../benchmark/rng.js';
 
-const CONTACT_FORCE_THRESHOLD_N = 1.0;
 
 // ---------------------------------------------------------------------------
 // small numeric helpers (ported from sim-metrics.js)
@@ -52,52 +52,27 @@ function now() {
 // geometry / failure helpers (ported from sim-metrics.js)
 // ---------------------------------------------------------------------------
 
-function averageBodyPosition(simulation, ids) {
-  const valid = Array.from(ids || []).filter(
-    (id) => Number.isFinite(id) && simulation?.xpos?.length >= (id + 1) * 3
-  );
-  if (!valid.length) return null;
-  const total = [0, 0, 0];
-  for (const id of valid) {
-    total[0] += simulation.xpos[id * 3 + 0] || 0;
-    total[1] += simulation.xpos[id * 3 + 1] || 0;
-    total[2] += simulation.xpos[id * 3 + 2] || 0;
-  }
-  return total.map((value) => value / valid.length);
-}
-
-function estimateSupport(rootPosition, leftPosition, rightPosition, contacts, forces) {
-  const active = [];
-  if (contacts.left && leftPosition) active.push({ position: leftPosition, weight: Math.max(1, Math.abs(forces.leftFz || forces.leftMag || 0)) });
-  if (contacts.right && rightPosition) active.push({ position: rightPosition, weight: Math.max(1, Math.abs(forces.rightFz || forces.rightMag || 0)) });
-  if (!active.length || !rootPosition) return { zmp: null, supportMargin: null };
-
-  const totalWeight = active.reduce((sum, item) => sum + item.weight, 0);
-  const zmp = [
-    active.reduce((sum, item) => sum + item.position[0] * item.weight, 0) / totalWeight,
-    active.reduce((sum, item) => sum + item.position[1] * item.weight, 0) / totalWeight,
-  ];
-
-  let supportMargin = null;
-  if (active.length === 2) {
-    const center = [(leftPosition[0] + rightPosition[0]) / 2, (leftPosition[1] + rightPosition[1]) / 2];
-    supportMargin = distance2(leftPosition, rightPosition) / 2 - distance2(rootPosition, center);
-  } else {
-    supportMargin = 0.08 - distance2(rootPosition, active[0].position);
-  }
-  return { zmp: roundArray(zmp), supportMargin: round(supportMargin) };
-}
-
 function projectedGravityZ(qpos) {
   const qy = qpos?.[4] || 0;
   const qz = qpos?.[5] || 0;
   return -(1 - 2 * (qy * qy + qz * qz));
 }
 
-function hasFailed(demo) {
-  const qpos = demo?.simulation?.qpos;
+/**
+ * Height of the ground under (x, y): the test's terrain course there, or 0
+ * (the floor). A fall is judged by the base's height above this, so a robot
+ * slumped on a 0.4 m platform counts as fallen just as one on the floor does.
+ */
+export function groundHeight(demo, x, y) {
+  return demo?.terrain?.heightAt?.(x, y) ?? 0;
+}
+
+/** Whether `robot` (default: the demo's own robot 0) has fallen. */
+export function hasFailed(demo, robot = demo) {
+  const qpos = robot?.simulation?.qpos;
   if (!qpos) return true;
-  return !!demo._tumbling || (qpos[2] || 0) < HEIGHT_FALL_M || projectedGravityZ(qpos) > -Math.cos(TILT_FALL_RAD);
+  const clearance = (qpos[2] || 0) - groundHeight(demo, qpos[0] || 0, qpos[1] || 0);
+  return !!robot._tumbling || clearance < HEIGHT_FALL_M || projectedGravityZ(qpos) > -Math.cos(TILT_FALL_RAD);
 }
 
 // ---------------------------------------------------------------------------
@@ -105,16 +80,17 @@ function hasFailed(demo) {
 // ---------------------------------------------------------------------------
 
 /**
- * Build a single metrics sample from the live sim.
+ * Build a single metrics sample of one robot (see MuJoCoDemo.robots) from the
+ * live sim.
  *
  * `state` carries per-test tracking that captureFrame kept on the runner:
  *   { dt, index, prevActions, expectedPosition }
  * `state.index` is used for the sample time (index * dt) and then advanced.
  */
-function buildSample(demo, component, state) {
+function buildSample(demo, robot, component, state) {
   const dt = state.dt;
-  const simulation = demo.simulation;
-  const policyState = typeof demo.readPolicyState === 'function' ? demo.readPolicyState() : null;
+  const simulation = robot.simulation;
+  const policyState = typeof demo.readPolicyState === 'function' ? demo.readPolicyState(robot) : null;
   const qpos = simulation?.qpos || [];
   const qvel = simulation?.qvel || [];
 
@@ -130,7 +106,7 @@ function buildSample(demo, component, state) {
   ];
 
   const actions = arraySlice(
-    demo.rawActions || demo.policyRunner?.lastActions || demo.actionTarget,
+    robot.rawActions || robot.policyRunner?.lastActions || robot.actionTarget,
     0,
     demo.numActions || undefined
   );
@@ -157,15 +133,6 @@ function buildSample(demo, component, state) {
   state.expectedPosition[1] += ((command[0] || 0) * sinH + (command[1] || 0) * cosH) * dt;
   const drift = distance2(rootPosition, state.expectedPosition);
 
-  const forces = typeof demo.readFootGroundForces === 'function' ? demo.readFootGroundForces() : {};
-  const contacts = {
-    left: Math.abs(forces.leftFz || 0) > CONTACT_FORCE_THRESHOLD_N || (forces.leftMag || 0) > CONTACT_FORCE_THRESHOLD_N,
-    right: Math.abs(forces.rightFz || 0) > CONTACT_FORCE_THRESHOLD_N || (forces.rightMag || 0) > CONTACT_FORCE_THRESHOLD_N,
-  };
-  const leftFootPosition = averageBodyPosition(simulation, demo.leftFootBodyIds);
-  const rightFootPosition = averageBodyPosition(simulation, demo.rightFootBodyIds);
-  const balance = estimateSupport(rootPosition, leftFootPosition, rightFootPosition, contacts, forces);
-
   const time = round(state.index * dt, 5);
   state.index += 1;
 
@@ -180,21 +147,10 @@ function buildSample(demo, component, state) {
     jointVelocities: roundArray(policyState?.jointVel),
     policyActions: actions,
     actionDeltas,
-    footContacts: contacts,
-    contactForces: {
-      leftFz: round(forces.leftFz),
-      leftMag: round(forces.leftMag),
-      rightFz: round(forces.rightFz),
-      rightMag: round(forces.rightMag),
-    },
-    footPositions: {
-      left: leftFootPosition ? roundArray(leftFootPosition) : null,
-      right: rightFootPosition ? roundArray(rightFootPosition) : null,
-    },
-    supportMargin: balance.supportMargin,
+    groundZ: round(groundHeight(demo, rootPosition[0] || 0, rootPosition[1] || 0)),
     expectedTrajectory: roundArray(state.expectedPosition),
     drift: round(drift),
-    fallen: hasFailed(demo),
+    fallen: hasFailed(demo, robot),
   };
 }
 
@@ -215,7 +171,7 @@ export function estimateBenchmarkSeconds(policyCount, tests) {
 // benchmark runner
 // ---------------------------------------------------------------------------
 
-async function waitForPolicyReady(demo, deadlineMs = 10000) {
+export async function waitForPolicyReady(demo, deadlineMs = 10000) {
   const deadline = now() + deadlineMs;
   while (now() < deadline) {
     if (demo.simulation && demo.model && demo.policyRunner) return true;
@@ -225,56 +181,175 @@ async function waitForPolicyReady(demo, deadlineMs = 10000) {
 }
 
 /**
- * `main_loop` sets `alive = false` and returns on an inference error, and
- * nothing restarts it — so one bad step would otherwise leave every remaining
- * (policy, test) cell recording nothing while this runner waits out its
- * timeouts. Bring the loop back before each test and report it.
+ * Most robots one page runs at once: the repeats of a test beyond this are run
+ * in further groups (see scripts/benchmarkRun.mjs).
  */
-async function reviveSimLoop(demo) {
-  if (demo.alive) return false;
-  demo.alive = true;
-  demo.main_loop();
-  await sleep(100);
-  return true;
+export const MAX_ROBOTS = 5;
+
+/**
+ * Plays one test against the policy that is already loaded and returns its
+ * metrics. The runner owns the clock: it stops the real-time loop and calls
+ * demo.stepPolicyTick() exactly round(duration / dt) times, so the result is
+ * the same however fast or loaded the machine is, and however many pages run
+ * in parallel. The caller restarts the real-time loop afterwards if it wants it.
+ *
+ * `randomization` is null (fixed behaviour: midpoint action delay, no noise)
+ * or `{ seed, randomize: { action_delay, initial_joint_noise_rad } }` from the
+ * suite; the same seed always gives the same run.
+ * `realtime` paces ticks to wall-clock time, for watching a run.
+ * `timeoutMs` is a wall-clock budget; a cell over it stops early with an error.
+ */
+export async function runBenchmarkCell({ randomization = null, ...options }) {
+  const [result] = await runBenchmarkGroup({ ...options, randomizations: [randomization] });
+  return result;
 }
 
 /**
- * Wait for the sequence to finish, judged by *progress* rather than wall-clock.
- * The sim steps well below real time (WASM + ONNX inference), so a fixed
- * multiple of the test duration silently truncated long tests midway; only a
- * stalled clock — the sim loop stopped stepping — ends the wait early.
+ * Plays one test as several robots at once, one per entry of `randomizations`
+ * (at most MAX_ROBOTS; each entry as runBenchmarkCell's `randomization`), and
+ * returns one result per entry, in order, each exactly what runBenchmarkCell
+ * would have returned for it alone. The robots share the scene, the command
+ * clock and the push schedule but nothing that steers one robot's run (see
+ * MuJoCoDemo.addExtraRobots); robot 0 is the demo's own. A group of one is
+ * the plain single-robot run. `timeoutMs` is the budget of the whole group.
  */
-async function waitForTestCompletion(duration, { stallMs = 8000, hardCapMs = 20 * 60 * 1000 } = {}) {
-  const start = now();
-  let lastT = -1;
-  let lastProgressAt = now();
-  while (now() - start < hardCapMs) {
-    const status = commandSequencer.getStatus();
-    if (status.mode !== 'playing') return { reason: 'finished' };
-    if (Number.isFinite(status.t)) {
-      if (duration > 0 && status.t >= duration) return { reason: 'finished' };
-      if (status.t > lastT + 1e-9) {
-        lastT = status.t;
-        lastProgressAt = now();
-      } else if (now() - lastProgressAt > stallMs) {
-        return { reason: 'stalled', at: lastT };
+export async function runBenchmarkGroup({
+  demo,
+  component,
+  sequence,
+  randomizations = [null],
+  realtime = false,
+  timeoutMs = 20 * 60 * 1000,
+  yieldEvery = 25,
+}) {
+  if (!randomizations.length || randomizations.length > MAX_ROBOTS) {
+    throw new Error(`runBenchmarkGroup: needs 1 to ${MAX_ROBOTS} robots, got ${randomizations.length}`);
+  }
+  const recorders = [];
+  let prevFootFriction = null;
+  await demo.stopMainLoop();
+  // Before the scene can reload: extra robots hold mjData of the old model.
+  demo.removeExtraRobots?.();
+  // The scene a test runs in: the default robot scene, or the test's course
+  // spliced into it (terrainScene.js). Reloads only when it differs from the
+  // scene already loaded, keeping the policy; the loop stays stopped.
+  await loadTestScene(demo, sequence?.terrain, { restartLoop: false });
+  commandSequencer.bindSim(demo);
+  let robots = [demo];
+  try {
+    if (randomizations.length > 1) robots = demo.addExtraRobots(randomizations.length - 1);
+    // Each robot draws from its own seeded generator, in the same order a
+    // single-robot run does: joint noise in resetSimulation, then the lag.
+    robots.forEach((robot, i) => {
+      const randomization = randomizations[i];
+      demo.setBenchmarkRandomization(randomization
+        ? {
+          random: mulberry32(randomization.seed),
+          actionDelay: randomization.randomize?.action_delay ?? 'midpoint',
+          initialJointNoiseRad: randomization.randomize?.initial_joint_noise_rad ?? 0,
+        }
+        : null, robot);
+      demo.resetSimulation(robot);
+    });
+    demo.drainBodyResolutionWarnings?.(); // discard anything left over from a prior test
+    const { warning: loadWarning } = commandSequencer.loadSequence(sequence, sequence?.name);
+    // The commands actually sent: loadSequence clamps them to this policy's
+    // trained command range, so two policies can get different inputs.
+    const clampedCommands = Number(/^(\d+) command/.exec(loadWarning || '')?.[1] || 0);
+    const appliedCommands = clampedCommands
+      ? commandSequencer.sequence.commands.map((cmd) => ({ ...cmd }))
+      : null;
+
+    // Optional per-test ground-grip override (see MuJoCoDemo.setFootFriction).
+    const footFrictionOverride = Number(sequence?.footFriction);
+    prevFootFriction = Number.isFinite(footFrictionOverride) ? demo.setFootFriction(footFrictionOverride) : null;
+
+    const dt = (demo.timestep || 0.002) * (demo.decimation || 10) || 0.02;
+    const sampleSets = robots.map((robot) => {
+      const samples = [];
+      const captureState = { dt, index: 0, prevActions: null, expectedPosition: null, expectedHeading: 0 };
+      const recorder = { captureFrame() { samples.push(buildSample(demo, robot, component, captureState)); } };
+      recorders.push(recorder);
+      demo.__simMetricsRecorders.add(recorder);
+      return samples;
+    });
+
+    const duration = commandSequencer.sequence.duration;
+    const expectedFrames = Math.round(duration / dt);
+    commandSequencer.play();
+    const start = now();
+    let ticks = 0;
+    let stoppedBy = null;
+    while (ticks < expectedFrames) {
+      if (!(await demo.stepPolicyTick())) {
+        stoppedBy = 'sim loop died (see console for an inference error)';
+        break;
+      }
+      ticks += 1;
+      const elapsed = now() - start;
+      if (elapsed > timeoutMs) {
+        stoppedBy = `stopped after ${(ticks * dt).toFixed(1)}s of ${duration}s: over the ${Math.round(timeoutMs / 1000)}s time budget`;
+        break;
+      }
+      const ahead = realtime ? ticks * dt * 1000 - elapsed : 0;
+      if (ahead > 0) {
+        await sleep(ahead);
+      } else if (ticks % yieldEvery === 0) {
+        // Let the page breathe (progress updates, rendering) — also a real-time
+        // run that has fallen behind, e.g. several robots on a slow machine.
+        await sleep(0);
       }
     }
-    await sleep(50);
+    for (const recorder of recorders.splice(0)) demo.__simMetricsRecorders.delete(recorder);
+
+    // Push events carry Newtons, not a velocity change — the resistance
+    // metric (metrics.js) needs each event's target-body mass to derive
+    // an expected dV to normalize against. Keyed by targetBody name,
+    // with '' standing in for the default (pelvis).
+    const massByBody = {};
+    for (const ev of sequence?.events || []) {
+      if (ev?.type !== 'push') continue;
+      const key = ev.targetBody || '';
+      if (!(key in massByBody)) massByBody[key] = demo.getBodyMass(ev.targetBody);
+    }
+
+    // A push event's targetBody that didn't resolve (see main.js's
+    // resolveBodyId) is silent to the naked eye, so it has to surface here.
+    const warnings = demo.drainBodyResolutionWarnings?.() || [];
+    return robots.map((robot, i) => ({
+      frames: sampleSets[i].length,
+      expectedFrames,
+      // A run that did not play the whole test is an error, not a warning.
+      error: stoppedBy,
+      warning: warnings.length ? warnings.join('; ') : null,
+      clampedCommands,
+      appliedCommands,
+      actionDelayLag: robot.actionDelayLag,
+      metrics: computeMetrics(sampleSets[i], {
+        dt,
+        jointNames: demo.policyRunner?.policyJointNames || demo.policyJointNames || [],
+        sequence,
+        massByBody,
+      }),
+    }));
+  } finally {
+    for (const recorder of recorders) demo.__simMetricsRecorders.delete(recorder);
+    if (prevFootFriction) demo.restoreFootFriction?.(prevFootFriction);
+    commandSequencer.stop({ zero: true });
+    for (const robot of robots) demo.setBenchmarkRandomization(null, robot);
+    demo.removeExtraRobots?.();
   }
-  return { reason: 'timeout', at: lastT };
 }
 
-export async function runBenchmark({ demo, component, policies, tests, onProgress }) {
+// Every test against every policy, one cell at a time. `realtime` plays each
+// test at wall-clock speed so the run can be watched in the viewer.
+export async function runBenchmark({ demo, component, policies, tests, onProgress, realtime = false }) {
   const policyList = Array.isArray(policies) ? policies : [];
   const testList = Array.isArray(tests) ? tests : [];
   const results = [];
 
   const total = policyList.length * testList.length;
   let done = 0;
-
-  const prevPaused = demo?.params?.paused;
-  let activeRecorder = null;
 
   try {
     for (let policyIndex = 0; policyIndex < policyList.length; policyIndex++) {
@@ -283,6 +358,7 @@ export async function runBenchmark({ demo, component, policies, tests, onProgres
       // A checkpoint whose observation layout doesn't match the base config
       // fails here; record it and keep sweeping the remaining policies.
       try {
+        await demo.stopMainLoop();
         await demo.reloadPolicy(policy.configPath, { onnxPath: policy.onnxPath });
         const ready = await waitForPolicyReady(demo, 10000);
         if (!ready) throw new Error('policy did not become ready within 10s');
@@ -306,109 +382,24 @@ export async function runBenchmark({ demo, component, policies, tests, onProgres
         }
         continue;
       }
-      commandSequencer.bindSim(demo);
 
       for (let testIndex = 0; testIndex < testList.length; testIndex++) {
         const test = testList[testIndex];
-        let recorder = null;
-        let prevFootFriction = null;
-
         // A misconfigured test (unresolvable target body, no matching foot
-        // geoms, etc.) now throws loudly from setFootFriction/getBodyMass
-        // instead of silently corrupting the result — caught here so one bad
-        // test file fails just that row of the report, the same way a
-        // policy-load failure above fails just that policy's rows, rather
-        // than aborting the whole sweep.
+        // geoms, etc.) throws loudly from setFootFriction/getBodyMass instead
+        // of silently corrupting the result — caught here so one bad test
+        // fails just that row of the report rather than the whole sweep.
         try {
-          // Optional per-test terrain (terrain/*.json name a fragment under
-          // public/examples/scenes/ at the sequence's top level). Tests without
-          // one run in the default scene, which is only reloaded if a previous
-          // test left a terrain scene loaded.
-          await loadTestScene(demo, test.sequence?.terrain);
-          const revived = await reviveSimLoop(demo);
-          demo.resetSimulation();
-          demo.drainBodyResolutionWarnings?.(); // discard anything left over from a prior test
-          const { warning: loadWarning } = commandSequencer.loadSequence(test.sequence, test.name);
-
-          // Optional per-test ground-grip override (see MuJoCoDemo.setFootFriction) —
-          // a test authors a `footFriction` number (the sliding-friction
-          // coefficient) at the sequence's top level to stress locomotion on a
-          // slicker or grippier floor than the scene's default.
-          const footFrictionOverride = Number(test.sequence?.footFriction);
-          prevFootFriction = Number.isFinite(footFrictionOverride)
-            ? demo.setFootFriction?.(footFrictionOverride)
-            : null;
-
-          const dt = (demo.timestep || 0.002) * (demo.decimation || 10) || 0.02;
-          const samples = [];
-          const captureState = {
-            dt, index: 0, prevActions: null, expectedPosition: null, expectedHeading: 0,
-          };
-          recorder = {
-            captureFrame() {
-              samples.push(buildSample(demo, component, captureState));
-            },
-          };
-          activeRecorder = recorder;
-          demo.__simMetricsRecorders.add(recorder);
-
-          if (demo.params) demo.params.paused = false;
-          commandSequencer.play();
-
-          const completion = await waitForTestCompletion(test.sequence?.duration || 0);
-
-          demo.__simMetricsRecorders.delete(recorder);
-          activeRecorder = null;
-          recorder = null;
-          commandSequencer.stop({ zero: true });
-          if (prevFootFriction) demo.restoreFootFriction?.(prevFootFriction);
-          prevFootFriction = null;
-
-          // Push events carry Newtons, not a velocity change — the resistance
-          // metric (metrics.js) needs each event's target-body mass to derive
-          // an expected dV to normalize against. Keyed by targetBody name,
-          // with '' standing in for the default (pelvis).
-          const massByBody = {};
-          for (const ev of test.sequence?.events || []) {
-            if (ev?.type !== 'push') continue;
-            const key = ev.targetBody || '';
-            if (!(key in massByBody)) massByBody[key] = demo.getBodyMass(ev.targetBody);
-          }
-
-          const metrics = computeMetrics(samples, {
-            dt,
-            jointNames: demo.policyRunner?.policyJointNames || demo.policyJointNames || [],
-            sequence: test.sequence,
-            massByBody,
-          });
-
-          // A capture far short of duration/dt means the sim stopped stepping
-          // mid-test; the metrics are real but cover only part of the test, so
-          // say so rather than letting a near-empty chart look like a plot bug.
-          const duration = test.sequence?.duration || 0;
-          const expectedFrames = duration > 0 ? Math.round(duration / dt) : 0;
-          const warnings = [];
-          if (loadWarning) warnings.push(loadWarning);
-          if (revived) warnings.push('sim loop was restarted before this test');
-          if (completion.reason === 'stalled') warnings.push('sim stopped stepping mid-test');
-          if (completion.reason === 'timeout') warnings.push('test hit the 20-minute cap');
-          if (expectedFrames && samples.length < expectedFrames * 0.9) {
-            warnings.push(`${(samples.length * dt).toFixed(1)}s of ${duration}s captured`);
-          }
-          if (!demo.alive) warnings.push('sim loop died (see console for an inference error)');
-          // A push event's targetBody that didn't resolve (see main.js's
-          // resolveBodyId) is silent to the naked eye — the test still runs
-          // and "completes" — so it has to surface here instead, or it's
-          // only findable by reading the raw browser console.
-          warnings.push(...(demo.drainBodyResolutionWarnings?.() || []));
-
+          const cell = await runBenchmarkCell({ demo, component, sequence: test.sequence, realtime });
           results.push({
             policyId: policy.id,
             testFile: test.file,
-            frames: samples.length,
-            expectedFrames,
-            warning: warnings.length ? warnings.join('; ') : null,
-            metrics,
+            frames: cell.frames,
+            expectedFrames: cell.expectedFrames,
+            warning: cell.warning,
+            ...(cell.error ? { error: cell.error } : {}),
+            clampedCommands: cell.clampedCommands,
+            metrics: cell.metrics,
           });
         } catch (error) {
           results.push({
@@ -417,13 +408,6 @@ export async function runBenchmark({ demo, component, policies, tests, onProgres
             error: error?.message || String(error),
             metrics: null,
           });
-        } finally {
-          if (recorder && demo?.__simMetricsRecorders) {
-            demo.__simMetricsRecorders.delete(recorder);
-            if (activeRecorder === recorder) activeRecorder = null;
-          }
-          if (prevFootFriction) demo.restoreFootFriction?.(prevFootFriction);
-          commandSequencer.stop({ zero: true });
         }
 
         done += 1;
@@ -437,10 +421,11 @@ export async function runBenchmark({ demo, component, policies, tests, onProgres
       }
     }
   } finally {
-    if (activeRecorder && demo?.__simMetricsRecorders) {
-      demo.__simMetricsRecorders.delete(activeRecorder);
+    // Back to the live, real-time view.
+    if (demo) {
+      demo.alive = true;
+      demo.main_loop();
     }
-    if (demo?.params) demo.params.paused = prevPaused;
   }
 
   // The run carries its own inputs — the policy identities and the full command

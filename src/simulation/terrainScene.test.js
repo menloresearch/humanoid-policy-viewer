@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { loadTestScene, spliceTerrain, withTerrain } from './terrainScene.js';
+import { defaultTerrain, terrainKey } from './terrainGen.js';
 
 const ROBOT = `<mujoco model="robot">
   <asset>
@@ -41,31 +42,46 @@ test('spliceTerrain rejects a fragment without geoms', () => {
   assert.throws(() => spliceTerrain(ROBOT, '<mujoco><asset/></mujoco>'), /no <worldbody> geoms/);
 });
 
-test('withTerrain writes the combined scene next to the robot XML', () => {
-  const files = { '/working/robot/xmls/robot.xml': ROBOT, '/working/terrain/stairs_5cm.xml': FRAGMENT };
+const STAIRS = { ...defaultTerrain('stairs'), step_height_m: 0.05 };
+
+test('withTerrain builds the course and writes the combined scene next to the robot XML', () => {
+  const files = { '/working/robot/xmls/robot.xml': ROBOT };
   const mujoco = {
     FS: {
       readFile: (path) => files[path],
       writeFile: (path, text) => { files[path] = text; },
     },
   };
-  const path = withTerrain(mujoco, 'robot/xmls/robot.xml', 'terrain/stairs_5cm.xml');
-  assert.equal(path, 'robot/xmls/robot.terrain-stairs_5cm.xml');
-  assert.match(files['/working/' + path], /name="step1"/);
+  const { path, terrain } = withTerrain(mujoco, 'robot/xmls/robot.xml', STAIRS);
+  assert.equal(path, `robot/xmls/robot.terrain-${terrainKey(STAIRS)}.xml`);
+  assert.match(files['/working/' + path], /name="stair5"/);
+  assert.equal(terrain.heightAt(4, 0), 0.25);
 });
 
 function fakeDemo() {
-  const files = { '/working/robot/xmls/robot.xml': ROBOT, '/working/terrain/stairs_5cm.xml': FRAGMENT };
+  const files = { '/working/robot/xmls/robot.xml': ROBOT };
   const demo = {
     mujoco: { FS: { readFile: (path) => files[path], writeFile: (path, text) => { files[path] = text; } } },
     defaultScenePath: 'robot/xmls/robot.xml',
     currentScenePath: 'robot/xmls/robot.xml',
-    params: { paused: false },
+    alive: true,
+    _loopPromise: null,
     reloads: [],
+    loopStarts: 0,
+    async stopMainLoop() {
+      this.alive = false;
+      await this._loopPromise;
+      this._loopPromise = null;
+    },
+    main_loop() {
+      this.loopStarts += 1;
+      this._loopPromise = Promise.resolve();
+    },
     async reload(path) {
-      assert.equal(this.params.paused, true, 'the sim loop is paused while the model is replaced');
+      assert.equal(this.alive, false, 'the sim loop is stopped while the model is replaced');
       this.reloads.push(path);
       this.currentScenePath = path;
+      this.terrain = null; // as reloadScene does
     },
   };
   return demo;
@@ -74,9 +90,22 @@ function fakeDemo() {
 test('loadTestScene switches to a terrain scene and back, reloading only on a change', async () => {
   const demo = fakeDemo();
   assert.equal(await loadTestScene(demo, undefined), false);
-  assert.equal(await loadTestScene(demo, 'terrain/stairs_5cm.xml'), true);
-  assert.equal(await loadTestScene(demo, 'terrain/stairs_5cm.xml'), false);
+  assert.equal(demo.terrain, null);
+  assert.equal(await loadTestScene(demo, STAIRS), true);
+  assert.equal(demo.terrain.heightAt(4, 0), 0.25, 'the course is kept for fall detection');
+  assert.equal(await loadTestScene(demo, { ...STAIRS }), false, 'the same parameters reuse the loaded scene');
+  assert.equal(demo.terrain.heightAt(4, 0), 0.25);
   assert.equal(await loadTestScene(demo, null), true);
-  assert.deepEqual(demo.reloads, ['robot/xmls/robot.terrain-stairs_5cm.xml', 'robot/xmls/robot.xml']);
-  assert.equal(demo.params.paused, false, 'the pause state is restored');
+  assert.equal(demo.terrain, null);
+  assert.equal(demo.reloads.length, 2);
+  assert.equal(demo.reloads[1], 'robot/xmls/robot.xml');
+});
+
+test('loadTestScene restarts a running loop only when asked', async () => {
+  const demo = fakeDemo();
+  demo.main_loop();
+  await loadTestScene(demo, STAIRS);
+  assert.equal(demo.loopStarts, 2, 'live playback: the loop runs again');
+  await loadTestScene(demo, null, { restartLoop: false });
+  assert.equal(demo.loopStarts, 2, 'benchmark: the loop stays stopped');
 });

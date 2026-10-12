@@ -338,9 +338,9 @@ function section(title, note, body) {
 }
 
 // ---------------------------------------------------------------------------
-// categorization — a test's folder (see benchmark/*/*.json) IS its category,
-// so this needs no separate taxonomy to maintain: reorganizing benchmark/
-// reorganizes the report. A root-level file (no folder) is "general".
+// categorization — a test id is <category>/<name> (the category is the
+// benchmark dataset config the test lives in), so the report needs no separate
+// taxonomy. An id without a category is "general".
 // ---------------------------------------------------------------------------
 
 export function categoryOf(file) {
@@ -348,18 +348,23 @@ export function categoryOf(file) {
   return idx === -1 ? 'general' : file.slice(0, idx);
 }
 
+// push_standing, push_walking, ...; runs from before the dataset format used push/standing folders.
+export function isPushCategory(cat) {
+  return /^push([_/]|$)/.test(cat);
+}
+
 const CATEGORY_LABELS = {
   general: 'General',
   locomotion: 'Locomotion',
   distance: 'Distance / endurance',
   friction: 'Friction stress',
-  'push/standing': 'Push — standing',
-  'push/walking': 'Push — walking',
-  'push/sustained': 'Push — sustained ramp',
+  push_standing: 'Push — standing',
+  push_walking: 'Push — walking',
+  push_sustained: 'Push — sustained ramp',
 };
 
 export function categoryLabel(cat) {
-  return CATEGORY_LABELS[cat] || cat.split('/').map((s) => s[0].toUpperCase() + s.slice(1)).join(' — ');
+  return CATEGORY_LABELS[cat] || cat.split(/[/_]/).filter(Boolean).map((s) => s[0].toUpperCase() + s.slice(1)).join(' — ');
 }
 
 // ---------------------------------------------------------------------------
@@ -371,7 +376,6 @@ export function deriveRow(result) {
   const ct = m.commandTracking?.overall || {};
   const gs = m.gaitSymmetry || {};
   const as = m.actionSmoothness || {};
-  const bal = m.balance || {};
   const drift = m.drift || {};
   const pert = m.perturbations || null;
   return {
@@ -389,11 +393,14 @@ export function deriveRow(result) {
     jerk: as.jerkLikeScore,
     meanDelta: as.meanAbsDelta,
     rmsDelta: as.rmsDelta,
-    supMean: bal.meanSupportMargin_m,
-    supMin: bal.minSupportMargin_m,
     perturbations: pert,
     fell: !!m.fell?.fell,
     fellTime: m.fell?.time ?? null,
+    // The test's end zone, when it has one: null (no zone), or whether the base got there.
+    goalReached: m.goal ? m.goal.reached : null,
+    goalMiss: m.goal?.miss_m ?? null,
+    // Stayed upright for the whole test but never got to its end zone: a failure, but not a fall.
+    missedGoal: !result.error && !m.fell?.fell && m.goal?.reached === false,
   };
 }
 
@@ -429,6 +436,16 @@ export function isUpright(row) {
   return !row.error && !row.fell;
 }
 
+/** Upright and, if the test has an end zone, got there: the test was passed. */
+export function isPassed(row) {
+  return isUpright(row) && !row.missedGoal;
+}
+
+/** "upright, missed end zone by 1.2 m" for a row with missedGoal. */
+export function missedGoalText(row) {
+  return `upright, missed end zone${row.goalMiss != null ? ` by ${row.goalMiss.toFixed(2)} m` : ''}`;
+}
+
 /**
  * Group `tests` by category (see categoryOf) and, within each category,
  * build one summary per policy from its rows — the loop that used to be
@@ -454,6 +471,7 @@ export function computeCategoryRollup(tests, policies, results) {
         rows,
         total: rows.length,
         upright: rows.filter(isUpright).length,
+        missedGoal: rows.filter((r) => r.missedGoal).length,
         trackRmse: mean(rows.map((r) => r.trackRmse)),
         finalDrift: mean(rows.map((r) => r.finalDrift)),
         pushSurvived,
@@ -506,11 +524,13 @@ code { background: #eef2f6; border-radius: 3px; padding: 1px 5px; font-size: 12p
 .pill { display: inline-block; min-width: 66px; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 500 }
 .pill.upright { background: #d9f2e8; color: #0b6b4a }
 .pill.fell { background: #fbdedd; color: #a3201f }
+.pill.missed { background: #fdefd3; color: #8a5300 }
 .pill.none { background: #eceff2; color: #7b8794 }
 .outcomes { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 14px }
 .outcome { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 6px; border: 1px solid; font-size: 13px }
 .outcome.good { border-color: #8fd9c0; background: #f2fbf7 }
 .outcome.bad { border-color: #f0b3b0; background: #fff5f4 }
+.outcome.warn { border-color: #f1cf8f; background: #fffaf0 }
 .outcome-policy { color: #63727f; font-size: 12px }
 .outcome-note { background: rgba(0,0,0,.06); color: #52606d; border-radius: 10px; padding: 1px 7px; font-size: 11px }
 .warn { background: #fff4f3; border: 1px solid #f3c6c2; border-radius: 4px; padding: 8px 12px; margin: 8px 0 }
@@ -560,6 +580,7 @@ export function buildBenchmarkReportHtml(run) {
       // than shoulders).
       maxForce: maxForceSurvived(rows),
       falls: rows.filter((r) => r.fell).length,
+      missedGoal: rows.filter((r) => r.missedGoal).length,
       errors: rows.filter((r) => r.error).length,
     };
   });
@@ -569,33 +590,34 @@ export function buildBenchmarkReportHtml(run) {
     const result = run.results.find((r) => r.policyId === policyId && r.testFile === testFile);
     if (!result) return { text: '—', cls: 'none' };
     if (result.error) return { text: '—', cls: 'none' };
-    const fell = result.metrics?.fell;
-    if (fell?.fell) return { text: `fell ${fmt(fell.time, 1)}s`, cls: 'fell' };
-    return { text: 'upright', cls: 'upright' };
+    const row = deriveRow(result);
+    if (row.fell) return { text: `fell ${fmt(row.fellTime, 1)}s`, cls: 'fell' };
+    if (row.missedGoal) return { text: `missed end zone${row.goalMiss != null ? ` by ${fmt(row.goalMiss, 2)} m` : ''}`, cls: 'missed' };
+    return { text: row.goalReached ? 'reached end zone' : 'upright', cls: 'upright' };
   };
   const fallTable = '<table><thead><tr><th>Policy</th>'
     + tests.map((t) => `<th>${esc(t.name || t.file)}</th>`).join('')
-    + '<th>Upright</th></tr></thead><tbody>'
+    + '<th>Passed</th></tr></thead><tbody>'
     + policies.map((p) => {
       const cells = tests.map((t) => cellFor(p.id, t.file));
-      const upright = cells.filter((c) => c.cls === 'upright').length;
+      const passed = cells.filter((c) => c.cls === 'upright').length;
       return `<tr>
         <td><span class="swatch" style="background:${colorFor(p.id)}"></span> ${esc(p.label)}</td>
         ${cells.map((c) => `<td><span class="pill ${c.cls}">${esc(c.text)}</span></td>`).join('')}
-        <td>${upright} / ${tests.length}</td>
+        <td>${passed} / ${tests.length}</td>
       </tr>`;
     }).join('')
     + '</tbody></table>';
 
   const aggregateTable = `<table><thead><tr>
       <th>Policy</th><th>Tests</th><th>Track RMSE</th><th>Symmetry %</th>
-      <th>Final drift (m)</th><th>Jerk</th><th>Pushes survived</th><th>Max force survived (N)</th><th>Falls</th>
+      <th>Final drift (m)</th><th>Jerk</th><th>Pushes survived</th><th>Max force survived (N)</th><th>Falls</th><th>Missed end zone</th>
     </tr></thead><tbody>`
     + aggregate.map((a) => `<tr>
         <td><span class="swatch" style="background:${colorFor(a.policy.id)}"></span> ${esc(a.policy.label)}${a.errors ? ' <span class="err">(load failed)</span>' : ''}</td>
         <td>${a.tests}</td><td>${fmt(a.trackRmse)}</td><td>${fmt(a.symmetry, 1)}</td>
         <td>${fmt(a.finalDrift, 2)}</td><td>${fmt(a.jerk)}</td><td>${esc(a.pushes)}</td>
-        <td>${a.maxForce != null ? fmt(a.maxForce, 0) : 'n/a'}</td><td>${a.falls}</td>
+        <td>${a.maxForce != null ? fmt(a.maxForce, 0) : 'n/a'}</td><td>${a.falls}</td><td>${a.missedGoal}</td>
       </tr>`).join('')
     + '</tbody></table>';
 
@@ -611,7 +633,7 @@ export function buildBenchmarkReportHtml(run) {
         ${i === 0 ? `<td rowspan="${perPolicy.length}">${esc(categoryLabel(category))}</td>` : ''}
         <td><span class="swatch" style="background:${colorFor(p.policy.id)}"></span> ${esc(p.policy.label)}${p.errors ? ' <span class="err">(load failed)</span>' : ''}</td>
         <td>${p.total}</td>
-        <td>${p.upright}/${p.total}</td>
+        <td>${p.upright}/${p.total}${p.missedGoal ? ` <span class="muted">(${p.missedGoal} missed end zone)</span>` : ''}</td>
         <td>${fmt(p.trackRmse)}</td>
         <td>${fmt(p.finalDrift, 2)}</td>
         <td>${p.pushTotal ? `${p.pushSurvived}/${p.pushTotal}` : 'n/a'}</td>
@@ -620,12 +642,12 @@ export function buildBenchmarkReportHtml(run) {
     + '</tbody></table>';
 
   // ---- push envelope by location ----
-  // The category rollup above groups by folder (push/standing, push/walking,
+  // The category rollup above groups by category (push_standing, push_walking,
   // ...), which still lumps e.g. groin/pelvis pushes in with shoulder pushes
   // — exactly the kind of single-number masking maxForceSurvived exists to
-  // avoid. Each push test file IS one location (see benchmark/push/**), so
+  // avoid. Each push test IS one location, so
   // one row per (test, policy) here is the actual per-location breakdown.
-  const pushTests = tests.filter((t) => categoryOf(t.file).startsWith('push/'));
+  const pushTests = tests.filter((t) => isPushCategory(categoryOf(t.file)));
   const pushEnvelopeTable = pushTests.length ? '<table><thead><tr><th>Location</th><th>Policy</th>'
     + '<th>Survived</th><th>Max force survived (N)</th></tr></thead><tbody>'
     + pushTests.flatMap((t) => policies.map((p, i) => {
@@ -661,16 +683,16 @@ export function buildBenchmarkReportHtml(run) {
     const kpiTable = `<table><thead><tr>
         <th>Policy</th><th>RMSE vx</th><th>RMSE vy</th><th>RMSE wz</th><th>Symmetry %</th>
         <th>Final drift (m)</th><th>Max drift (m)</th><th>Jerk</th><th>RMS action Δ</th>
-        <th>Support margin mean / min (m)</th><th>Pushes</th><th>Fell</th>
+        <th>Pushes</th><th>Fell</th><th>End zone</th>
       </tr></thead><tbody>`
       + rows.map((r) => `<tr>
           <td><span class="swatch" style="background:${colorFor(r.policyId)}"></span> ${esc(labelFor(r.policyId))}</td>
           <td>${fmt(r.rmse.vx)}</td><td>${fmt(r.rmse.vy)}</td><td>${fmt(r.rmse.wz)}</td>
           <td>${fmt(r.symmetry, 1)}</td><td>${fmt(r.finalDrift, 2)}</td><td>${fmt(r.maxDrift, 2)}</td>
           <td>${fmt(r.jerk)}</td><td>${fmt(r.rmsDelta, 4)}</td>
-          <td>${fmt(r.supMean)} / ${fmt(r.supMin)}</td>
           <td>${r.perturbations ? `${r.perturbations.survived}/${r.perturbations.total}` : 'n/a'}</td>
           <td>${r.fell ? `<span class="err">yes @ ${fmt(r.fellTime, 1)}s</span>` : 'no'}</td>
+          <td>${r.goalReached === null ? 'n/a' : r.goalReached ? 'reached' : `<span class="pill missed">missed${r.goalMiss != null ? ` by ${fmt(r.goalMiss, 2)} m` : ''}</span>`}</td>
         </tr>`).join('')
       + '</tbody></table>';
 
@@ -759,13 +781,15 @@ export function buildBenchmarkReportHtml(run) {
         + '</tbody></table>')
       : '';
 
-    // Outcome first: fell / upright / failed, plus any capture caveat.
+    // Outcome first: fell / missed the end zone / passed / failed, plus any capture caveat.
     const outcomes = '<div class="outcomes">'
       + rows.map((r) => {
-        const state = r.error ? 'bad' : r.fell ? 'bad' : 'good';
+        const state = r.error || r.fell ? 'bad' : r.missedGoal ? 'warn' : 'good';
         const text = r.error
           ? 'failed to load'
-          : r.fell ? `FELL at ${fmt(r.fellTime, 1)}s` : 'completed upright';
+          : r.fell ? `FELL at ${fmt(r.fellTime, 1)}s`
+            : r.missedGoal ? missedGoalText(r)
+              : r.goalReached ? 'completed upright, reached end zone' : 'completed upright';
         return `<span class="outcome ${state}">`
           + `<span class="swatch" style="background:${colorFor(r.policyId)}"></span>`
           + `<b>${esc(text)}</b> <span class="outcome-policy">${esc(labelFor(r.policyId).split('/').pop())}</span>`
@@ -870,12 +894,12 @@ ${legend(policies.map((p) => ({ label: p.label, color: colorFor(p.id) })))}
 ${manifest}
 ${tabs}
 <div class="view" data-view="agg">
-<h2>Fall summary — did the robot stay upright?</h2>
+<h2>Fall summary — did the robot stay upright (and reach the end zone)?</h2>
 ${fallTable}
 <h2>Aggregate across all tests</h2>
 ${aggregateTable}
 <h2>Results by category</h2>
-<p class="explain">Same metrics, grouped by each test's folder under benchmark/ — this is what shows whether a policy is uniformly robust or has a specific weak spot (e.g. fine standing, weak mid-walk; fine on rapid pushes, weak on friction).</p>
+<p class="explain">Same metrics, grouped by each test's category — this is what shows whether a policy is uniformly robust or has a specific weak spot (e.g. fine standing, weak mid-walk; fine on rapid pushes, weak on friction).</p>
 ${categoryTable}
 ${pushEnvelopeTable ? `<h2>Push envelope by location</h2>
 <p class="explain">One row per push test file — each file targets one location (groin/pelvis, chest, a specific shoulder axis, ...), so this is the actual per-location breakdown the category table above can't show (e.g. groin/pelvis reliably tolerating far more force than a shoulder push does). "Max force survived" is the highest force among that location's push events the policy actually recovered from.</p>

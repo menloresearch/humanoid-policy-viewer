@@ -50,10 +50,11 @@ dist
 /public/model-library/
 /public/static-data/
 
-# Test definitions (Trajectory Editor tests, incl. the bundled defaults) —
-# local scratch data, entirely untracked. Keeping one in git is an intentional
-# act: `git add -f benchmark/<file>.json`.
-/benchmark
+# Local benchmark datasets: default/ (what `npm run dev` edits, created on
+# first run), pulled Hub datasets and "New benchmark" folders. Benchmarks are
+# published as Hugging Face datasets, not kept in this repo: see
+# docs/benchmark-datasets.md.
+/benchmark_datasets
 
 # Local policies dropped into the default model library (see models/README.md).
 # Checkpoints are never committed; only the README that documents the folder is.

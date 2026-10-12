@@ -1,0 +1,140 @@
+{
+  "protocol": 1,
+  "cells": {
+    "locomotion/forward_short#0": {
+      "frames": 200,
+      "actionDelayLag": 2,
+      "fell": {
+        "fell": false,
+        "time": null
+      },
+      "tracking": {
+        "vx": 0.19018,
+        "vy": 0.12344,
+        "wz": 0.12879
+      },
+      "drift": {
+        "final_m": 0.27349,
+        "max_m": 0.39753,
+        "rmse_m": 0.28925
+      },
+      "pushes": []
+    },
+    "locomotion/forward_short#1": {
+      "frames": 200,
+      "actionDelayLag": 3,
+      "fell": {
+        "fell": false,
+        "time": null
+      },
+      "tracking": {
+        "vx": 0.18932,
+        "vy": 0.12576,
+        "wz": 0.11551
+      },
+      "drift": {
+        "final_m": 0.30449,
+        "max_m": 0.41993,
+        "rmse_m": 0.30354
+      },
+      "pushes": []
+    },
+    "push_standing/chest_front_short#0": {
+      "frames": 300,
+      "actionDelayLag": 4,
+      "fell": {
+        "fell": true,
+        "time": 3.76
+      },
+      "tracking": {
+        "vx": 0.88911,
+        "vy": 0.14492,
+        "wz": 0.75338
+      },
+      "drift": {
+        "final_m": 2.54137,
+        "max_m": 2.54192,
+        "rmse_m": 1.62829
+      },
+      "pushes": [
+        {
+          "recovered": true,
+          "peakInstability": 0.0581
+        },
+        {
+          "recovered": false,
+          "peakInstability": 1
+        }
+      ]
+    },
+    "push_standing/chest_front_short#1": {
+      "frames": 300,
+      "actionDelayLag": 3,
+      "fell": {
+        "fell": true,
+        "time": 3.76
+      },
+      "tracking": {
+        "vx": 0.81079,
+        "vy": 0.14894,
+        "wz": 0.64828
+      },
+      "drift": {
+        "final_m": 2.21482,
+        "max_m": 2.21497,
+        "rmse_m": 1.4414
+      },
+      "pushes": [
+        {
+          "recovered": true,
+          "peakInstability": 0.0589
+        },
+        {
+          "recovered": false,
+          "peakInstability": 1
+        }
+      ]
+    }
+  },
+  "tasks": [
+    {
+      "taskId": "survival_rate_v1",
+      "metric": "survival_rate@1",
+      "higherIsBetter": true,
+      "value": 0.5,
+      "stderr": 0.2165,
+      "ci95": [
+        0.0756,
+        0.9244
+      ],
+      "tests": 2,
+      "cells": 4
+    },
+    {
+      "taskId": "survival_time_v1",
+      "metric": "survival_time@1",
+      "higherIsBetter": true,
+      "value": 0.8134,
+      "stderr": 0.1989,
+      "ci95": [
+        0.4235,
+        1
+      ],
+      "tests": 2,
+      "cells": 4
+    },
+    {
+      "taskId": "push_survival_rate_v1",
+      "metric": "survival_rate@1",
+      "higherIsBetter": true,
+      "value": 0,
+      "stderr": 0.3062,
+      "ci95": [
+        0,
+        0.6001
+      ],
+      "tests": 1,
+      "cells": 2
+    }
+  ]
+}

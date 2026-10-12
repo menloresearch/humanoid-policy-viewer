@@ -28,9 +28,9 @@
 
         <v-text-field
           :model-value="event.t"
-          label="Time (s)" type="number" min="0" :max="duration" step="0.1"
+          label="Time (s)" type="number" :min="PUSH_START_MIN_S" :max="latestStart" step="0.1"
           density="compact" variant="outlined" hide-details class="mb-4"
-          @update:modelValue="(v) => emitPatch({ t: clamp(Number(v), 0, duration) })"
+          @update:modelValue="(v) => emitPatch({ t: clamp(Number(v), PUSH_START_MIN_S, latestStart) })"
         ></v-text-field>
 
         <div class="text-caption text-medium-emphasis mb-1">
@@ -55,7 +55,7 @@
         <v-text-field
           :model-value="event.duration"
           label="Duration (s) — how long the force/torque is held" type="number" min="0.01" step="0.05"
-          density="compact" variant="outlined" hide-details
+          density="compact" variant="outlined" hide-details class="mb-4"
           @update:modelValue="(v) => emitPatch({ duration: Math.max(0.01, Number(v) || 0.15) })"
         ></v-text-field>
       </v-card-text>
@@ -73,6 +73,7 @@ import DirectionDial from './DirectionDial.vue';
 import TorqueVectorEditor from './TorqueVectorEditor.vue';
 import { demoRef } from '@/state/demoRef.js';
 import { clamp as clampShared } from './clamp.js';
+import { PUSH_START_MIN_S, latestPushStart } from '@/benchmark/testRow.js';
 
 /**
  * MJCF body names are raw kinematic-chain identifiers (e.g. "left_hip_pitch_link",
@@ -102,9 +103,15 @@ export default {
   },
   emits: ['update:modelValue', 'update-event', 'delete'],
   data() {
-    return { hoveredBodyLabel: '' };
+    return {
+      hoveredBodyLabel: '',
+      PUSH_START_MIN_S,
+    };
   },
   computed: {
+    latestStart() {
+      return Math.max(PUSH_START_MIN_S, latestPushStart(this.duration, this.event?.duration ?? 0));
+    },
     bodySelectItems() {
       return [
         { label: 'default (pelvis)', value: null },
