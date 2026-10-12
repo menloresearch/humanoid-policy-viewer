@@ -11,6 +11,7 @@
 import { takeNextJob } from '../src/benchmark/run.js';
 
 const PAGE_READY_TIMEOUT_MS = 180_000;
+const LIVENESS_MS = 5_000;
 const OPTIONAL_POLICY_FILES = /\/policy-library\/.*\/(tracking_policy\.json|env\.yaml)$/;
 
 // Chromium slows timers in pages it thinks are in the background; a pool page
@@ -27,6 +28,17 @@ function withTimeout(promise, ms, message) {
     promise,
     new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(message)), ms); }),
   ]).finally(() => clearTimeout(timer));
+}
+
+// A page takes tens of seconds to load and prints nothing meanwhile; say that it is still going.
+async function withLiveness(task, message, log, everyMs = LIVENESS_MS) {
+  const started = Date.now();
+  const timer = setInterval(() => log(`${message}... ${Math.round((Date.now() - started) / 1000)}s`), everyMs);
+  try {
+    return await task();
+  } finally {
+    clearInterval(timer);
+  }
 }
 
 /**
@@ -120,7 +132,7 @@ export async function runJobs({
           outcome = { error: message, metrics: null };
           // The page may be wedged or have lost its policy; start a fresh one.
           await page.close().catch(() => {});
-          page = await openPage();
+          page = await withLiveness(openPage, 'Reopening a page', log);
           lastPolicyKey = null;
         }
         // A group shares its wall time; each cell is charged its share.
@@ -131,9 +143,12 @@ export async function runJobs({
     };
 
     const workers = Math.max(1, Math.min(concurrency, queue.length));
-    const first = await openPage();
-    const others = await Promise.all(Array.from({ length: workers - 1 }, () => openPage()));
-    await Promise.all([first, ...others].map((page) => worker(page)));
+    const pages = await withLiveness(async () => {
+      const first = await openPage();
+      const others = await Promise.all(Array.from({ length: workers - 1 }, () => openPage()));
+      return [first, ...others];
+    }, 'Loading the viewer', log);
+    await Promise.all(pages.map((page) => worker(page)));
     return { browserVersion };
   } finally {
     await browser.close();
