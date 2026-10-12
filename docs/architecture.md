@@ -82,7 +82,7 @@ comes first. A swallowed flag is reported with the words form to use instead.
 ```
 npm run dev ──────┐
 npm run hf ───────┼──► startViewer() ──► Vite + viewerServer ◄── /api/*, /policy-library/* ──► browser page
-npm run benchmark ┘    (setup.mjs first      │                                                 Demo.vue
+npm run benchmark ┘    (setup.mjs first,     │                                                 Demo.vue
   (drives pages with    for dev and hf)      │ reads and writes                                simulation/
    Playwright,                               ▼                                                 src/benchmark/
    editable: false)    benchmarks/   benchmark_results/   policies/ + Hub cache
@@ -90,7 +90,7 @@ npm run benchmark ┘    (setup.mjs first      │                              
 
 | Piece | File | Job |
 |---|---|---|
-| First-run setup | `scripts/setup.mjs` | Fetches the `asimov-1` robot (`init-asimov-1.sh`), and runs `npm ci` if `node_modules` is missing. It has no dependencies, so it runs before anything is installed. |
+| First-run setup | `scripts/setup.mjs` | Fetches the `asimov-1` robot (`init-asimov-1.sh`), and runs `npm ci` if `node_modules` is missing. It has no dependencies, so it runs before anything is installed. `dev` and `hf` call it from their own script; `npm run benchmark` goes through `scripts/benchmark.mjs`, which calls it and then imports `run-benchmark.mjs`. It skips the robot for `merge`, `init` and `path-end`, and for a run it also installs Chromium (`setupBrowser`, after the dependencies) when Playwright has none. |
 | Start-up | `scripts/startViewer.mjs` | `startViewer({policies, benchmark, policyLibrary, host, port, open, editable})`. It resolves the words (downloading Hub policies and benchmarks into the cache), starts Vite in-process with the server plugin, and returns `{server, url}`. `policyLibrary` (`{dir, roots}`) replaces the default library: `hf` passes its one policy, the runner a temporary folder of links. All three launchers call it. |
 | Server | `scripts/viewerServer.mjs` | The Vite plugin `viewerServer(options)`: the [routes](#server-routes). Its options are `{benchmarksDir, openBenchmark, resultsDir, policyLibraryDir, policyRoots, editable}`. `vite.config.mjs` fills them from `HPV_*` env vars for plain `npx vite`; the launchers pass them directly. |
 | Launchers | `scripts/dev.mjs`, `scripts/hf.mjs`, `scripts/run-benchmark.mjs` | Parse words with `scripts/cliArgs.mjs` `parseWords`, then call `startViewer`. `hf.mjs` dispatches on its first word. |

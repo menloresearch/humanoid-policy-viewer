@@ -50,8 +50,8 @@ To run policies you have on disk, or to work on the viewer itself:
 npm run dev                  # start the viewer on the bundled example policy
 ```
 
-Like `npm run hf`, it installs the dependencies and fetches the Asimov robot
-model on the first run. Then open the printed URL. It opens the example
+Like `npm run hf` and `npm run benchmark` (which also installs Chromium), it
+installs the dependencies and fetches the Asimov robot model on the first run. Then open the printed URL. It opens the example
 benchmark `benchmarks/default/` in the Tests & Benchmark panel; give
 `benchmark=<dir>` for another. To add your own policy, put it in a folder under
 `policies/` (git-ignored, and not built into `dist/`):

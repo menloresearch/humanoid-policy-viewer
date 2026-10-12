@@ -11,6 +11,7 @@
 import { takeNextJob } from '../src/benchmark/run.js';
 
 const PAGE_READY_TIMEOUT_MS = 180_000;
+const OPTIONAL_POLICY_FILES = /\/policy-library\/.*\/(tracking_policy\.json|env\.yaml)$/;
 
 // Chromium slows timers in pages it thinks are in the background; a pool page
 // is never in front, so turn that off or the sim crawls.
@@ -56,7 +57,13 @@ export async function runJobs({
       const id = ++pageCount;
       const page = await browser.newPage();
       page.on('console', (msg) => {
-        if (verbose || msg.type() === 'error') log(`[page ${id} ${msg.type()}] ${msg.text()}`);
+        if (!verbose && msg.type() !== 'error') return;
+        // Chromium's "Failed to load resource" lines do not say which resource; the location does.
+        const failed = msg.text().startsWith('Failed to load resource');
+        const url = failed ? msg.location().url : '';
+        // The policy loader looks for these in params/ and then at the policy root, so one 404 is expected.
+        if (failed && !verbose && OPTIONAL_POLICY_FILES.test(url) && msg.text().includes('404')) return;
+        log(`[page ${id} ${msg.type()}] ${msg.text()}${url ? ` (${url})` : ''}`);
       });
       page.on('pageerror', (error) => log(`[page ${id} pageerror] ${error.message}`));
       await page.goto(url, { waitUntil: 'load' });

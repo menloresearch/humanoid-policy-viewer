@@ -17,6 +17,10 @@ npm run benchmark menloresearch/asimov1-loco test/fixtures/smoke-benchmark jobs=
 
 No `--` is needed: everything is a word. `npm run benchmark` alone prints the full usage.
 
+The first run on a fresh clone sets itself up, as `npm run dev` and `npm run hf` do: it installs the dependencies,
+fetches the Asimov robot model and installs the Chromium that Playwright drives (`merge`, `init` and `path-end` need
+only the dependencies, and `view` no browser). The usage text and `help` install nothing.
+
 | Word | Meaning |
 |---|---|
 | `org/name`, `org/name@rev`, a Hub model URL | policy on the Hub |

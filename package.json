@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "hf": "node scripts/hf.mjs",
-    "benchmark": "node scripts/run-benchmark.mjs",
+    "benchmark": "node scripts/benchmark.mjs",
     "benchmark:golden": "node scripts/check-golden.mjs",
     "build": "vite build",
     "preview": "vite preview",
