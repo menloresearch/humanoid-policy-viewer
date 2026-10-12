@@ -264,7 +264,7 @@
               >{{ benchmark.stopping ? 'Stopping after this test…' : 'Stop (nothing is saved)' }}</v-btn>
             </template>
             <v-btn
-              v-if="hasBenchmarkRun && !benchmark.running"
+              v-if="hasBenchmarkResult && !benchmark.running"
               density="compact"
               color="primary"
               variant="tonal"
@@ -274,32 +274,32 @@
               :loading="resultsLoading"
               @click="viewResults"
             >View Results</v-btn>
-            <template v-if="savedRunCount && !benchmark.running">
+            <template v-if="savedResultCount && !benchmark.running">
               <div class="text-caption text-medium-emphasis mt-2">
-                Saved results ({{ savedRunCount }}) — open one on the results page for its charts and HTML export
+                Saved results ({{ savedResultCount }}) — open one on the results page for its charts and HTML export
               </div>
-              <div class="saved-runs">
+              <div class="saved-results">
                 <div
-                  v-for="run in appState.savedResults"
-                  :key="run.file"
-                  class="saved-run d-flex align-center ga-1"
-                  :class="{ current: run.file === appState.benchmarkResultsFile }"
+                  v-for="result in appState.savedResults"
+                  :key="result.file"
+                  class="saved-result d-flex align-center ga-1"
+                  :class="{ current: result.file === appState.benchmarkResultsFile }"
                 >
                   <v-icon size="13" class="flex-shrink-0 text-medium-emphasis">mdi-file-chart-outline</v-icon>
-                  <span class="run-label" :title="run.file">{{ runLabel(run) }}</span>
+                  <span class="result-label" :title="result.file">{{ resultLabel(result) }}</span>
                   <v-btn
                     v-if="!STATIC"
                     icon
                     size="x-small"
                     variant="text"
                     title="Delete this result"
-                    @click="askDeleteRun(run)"
+                    @click="askDeleteResult(result)"
                   >
                     <v-icon size="14">mdi-delete-outline</v-icon>
                   </v-btn>
                 </div>
               </div>
-              <v-alert v-if="runDeleteError" type="error" density="compact" class="my-1">{{ runDeleteError }}</v-alert>
+              <v-alert v-if="resultDeleteError" type="error" density="compact" class="my-1">{{ resultDeleteError }}</v-alert>
             </template>
 
             <!-- Live playback transport for the sequence currently loaded -->
@@ -348,12 +348,12 @@
           </details>
 
           <!-- Deleting a saved result removes the file from disk; confirm first -->
-          <v-dialog v-model="showDeleteRunConfirm" max-width="420">
+          <v-dialog v-model="showDeleteResultConfirm" max-width="420">
             <v-card>
               <v-card-title class="text-subtitle-1">Delete this result?</v-card-title>
               <v-card-text class="text-body-2">
-                <div class="mono-path">{{ pendingDeleteRun?.file }}</div>
-                <div class="mt-1">{{ pendingDeleteRun ? runLabel(pendingDeleteRun) : '' }}</div>
+                <div class="mono-path">{{ pendingDeleteResult?.file }}</div>
+                <div class="mt-1">{{ pendingDeleteResult ? resultLabel(pendingDeleteResult) : '' }}</div>
                 <div class="text-caption text-medium-emphasis mt-2">
                   The file is removed from benchmark_results/ and can't be recovered from the app.
                   Download its HTML report first if you want to keep it.
@@ -361,8 +361,8 @@
               </v-card-text>
               <v-card-actions>
                 <v-spacer />
-                <v-btn variant="text" @click="showDeleteRunConfirm = false">Cancel</v-btn>
-                <v-btn color="error" variant="flat" :loading="deletingRun" @click="confirmDeleteRun">Delete</v-btn>
+                <v-btn variant="text" @click="showDeleteResultConfirm = false">Cancel</v-btn>
+                <v-btn color="error" variant="flat" :loading="deletingResult" @click="confirmDeleteResult">Delete</v-btn>
               </v-card-actions>
             </v-card>
           </v-dialog>
@@ -998,10 +998,10 @@ export default {
     resultsLoading: false,
     panelWidth: 320,
     isResizingPanel: false,
-    showDeleteRunConfirm: false,
-    pendingDeleteRun: null,
-    deletingRun: false,
-    runDeleteError: '',
+    showDeleteResultConfirm: false,
+    pendingDeleteResult: null,
+    deletingResult: false,
+    resultDeleteError: '',
     currentPolicy: 'asimov-reference',
     cmdVx: 0.0,
     cmdVy: 0.0,
@@ -1207,10 +1207,10 @@ export default {
     selectedPolicy() {
       return this.policies.find((policy) => policy.value === this.currentPolicy) ?? null;
     },
-    hasBenchmarkRun() {
+    hasBenchmarkResult() {
       return !!appState.benchmarkResults || appState.savedResults.length > 0;
     },
-    savedRunCount() {
+    savedResultCount() {
       return appState.savedResults.length;
     },
     benchmarkSelectionCount() {
@@ -2098,38 +2098,38 @@ export default {
         this.resultsLoading = false;
       }
     },
-    runLabel(run) {
-      const when = run.generatedAt
-        ? new Date(run.generatedAt).toLocaleString()
-        : run.file.replace(/\/result\.json$/, '');
-      const shape = run.policyCount != null && run.testCount != null
-        ? ` · ${run.policyCount}p × ${run.testCount}t`
+    resultLabel(result) {
+      const when = result.generatedAt
+        ? new Date(result.generatedAt).toLocaleString()
+        : result.file.replace(/\/result\.json$/, '');
+      const shape = result.policyCount != null && result.testCount != null
+        ? ` · ${result.policyCount}p × ${result.testCount}t`
         : '';
       return when + shape;
     },
-    askDeleteRun(run) {
-      this.runDeleteError = '';
-      this.pendingDeleteRun = run;
-      this.showDeleteRunConfirm = true;
+    askDeleteResult(result) {
+      this.resultDeleteError = '';
+      this.pendingDeleteResult = result;
+      this.showDeleteResultConfirm = true;
     },
-    async confirmDeleteRun() {
-      const run = this.pendingDeleteRun;
-      if (!run) return;
-      this.deletingRun = true;
-      this.runDeleteError = '';
+    async confirmDeleteResult() {
+      const result = this.pendingDeleteResult;
+      if (!result) return;
+      this.deletingResult = true;
+      this.resultDeleteError = '';
       try {
-        await deleteResult(run.file);
-        // Drop it from view too if it was the run currently loaded.
-        if (appState.benchmarkResultsFile === run.file) {
+        await deleteResult(result.file);
+        // Drop it from view too if it was the result currently loaded.
+        if (appState.benchmarkResultsFile === result.file) {
           setBenchmarkResults(null, null);
         }
         await this.refreshSavedResults();
-        this.showDeleteRunConfirm = false;
-        this.pendingDeleteRun = null;
+        this.showDeleteResultConfirm = false;
+        this.pendingDeleteResult = null;
       } catch (e) {
-        this.runDeleteError = `Could not delete ${run.file}: ${e.message}`;
+        this.resultDeleteError = `Could not delete ${result.file}: ${e.message}`;
       } finally {
-        this.deletingRun = false;
+        this.deletingResult = false;
       }
     },
     async viewResults() {
@@ -2681,26 +2681,26 @@ export default {
   font-size: 12px;
 }
 
-/* Saved benchmark runs: the label clips with an ellipsis so a long timestamp
+/* Saved benchmark results: the label clips with an ellipsis so a long timestamp
    never pushes the delete button out of the panel. */
-.saved-runs {
+.saved-results {
   max-height: 132px;
   overflow-y: auto;
   margin-top: 2px;
 }
-.saved-run {
+.saved-result {
   min-width: 0;
   min-height: 24px;
   border-radius: 4px;
   padding: 0 2px;
 }
-.saved-run:hover {
+.saved-result:hover {
   background: rgba(127, 127, 127, 0.12);
 }
-.saved-run.current {
+.saved-result.current {
   background: rgba(42, 120, 214, 0.14);
 }
-.saved-run .run-label {
+.saved-result .result-label {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;

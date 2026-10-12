@@ -1,23 +1,25 @@
 <template>
   <div class="results-page">
     <v-app-bar density="compact" color="primary" flat>
-      <v-btn variant="text" prepend-icon="mdi-arrow-left" @click="closeResults()">Back to viewer</v-btn>
-      <v-app-bar-title>Benchmark Results</v-app-bar-title>
+      <v-btn variant="text" prepend-icon="mdi-arrow-left" title="Back to viewer" @click="closeResults()">
+        <span class="d-none d-sm-inline">Back to viewer</span>
+      </v-btn>
+      <v-app-bar-title class="d-none d-md-flex">Benchmark Results</v-app-bar-title>
       <template #append>
         <v-select
-          v-if="runItems.length"
+          v-if="resultItems.length"
           :model-value="appState.benchmarkResultsFile"
-          :items="runItems"
+          :items="resultItems"
           item-title="title"
           item-value="value"
-          label="Run"
+          label="Result"
           density="compact"
           hide-details
           variant="solo-filled"
           flat
-          class="run-picker mr-4"
-          :loading="loadingRun"
-          @update:modelValue="selectRun"
+          class="result-picker mr-2"
+          :loading="loadingResult"
+          @update:modelValue="selectResult"
         ></v-select>
         <span v-else-if="hasResults" class="text-caption mr-4">{{ generatedAtLabel }}</span>
         <v-btn
@@ -40,58 +42,68 @@
     <div v-if="!hasResults" class="empty-state">
       <v-icon size="64" color="grey">mdi-chart-box-outline</v-icon>
       <div class="text-h6 mt-2">No benchmark results loaded</div>
-      <div v-if="runItems.length" class="text-body-2 text-medium-emphasis">
-        Pick one of the {{ runItems.length }} saved result(s) above, or run a new benchmark from the viewer.
+      <div v-if="resultItems.length" class="text-body-2 text-medium-emphasis">
+        Pick one of the {{ resultItems.length }} saved result(s) above, or run a new benchmark from the viewer.
       </div>
       <div v-else class="text-body-2 text-medium-emphasis">Run a benchmark from the viewer to see comparisons here.</div>
-      <v-alert v-if="runError" type="error" density="compact" class="mt-3">{{ runError }}</v-alert>
+      <v-alert v-if="resultError || viewError" type="error" density="compact" class="mt-3">{{ resultError || viewError }}</v-alert>
       <v-btn class="mt-4" color="primary" @click="closeResults()">Back to viewer</v-btn>
     </div>
 
     <div v-else class="results-body">
-      <v-alert v-if="runError" type="error" density="compact" class="mb-4">{{ runError }}</v-alert>
+      <v-alert v-if="resultError" type="error" density="compact" class="mb-4">{{ resultError }}</v-alert>
+      <div class="text-h6">
+        {{ view.benchmark.title }} <span class="text-medium-emphasis">v{{ view.benchmark.version }}</span>
+      </div>
+      <div class="text-caption text-medium-emphasis mb-3">
+        {{ generatedAtLabel }} · {{ policies.length }} policy(ies) × {{ tests.length }} test(s) · {{ view.cellCount }} cell(s){{ resultFileLabel }}
+      </div>
+      <v-alert v-if="!view.complete" type="warning" density="compact" class="mb-4">
+        Partial result: {{ view.cellCount }} of {{ view.expectedCells }} cells{{ view.shard ? ` (shard ${view.shard.index}/${view.shard.count})` : '' }}.
+        Task values need every cell, so they are left out.
+      </v-alert>
+
       <!-- Shared legend: color -> policy -->
       <div class="policy-legend">
-        <div v-for="p in policies" :key="p.id" class="legend-chip">
-          <span class="swatch" :style="{ background: colorFor(p.id) }"></span>
+        <div v-for="p in policies" :key="p.key" class="legend-chip">
+          <span class="swatch" :style="{ background: colorFor(p.key) }"></span>
           <span class="text-body-2">{{ p.label }}</span>
         </div>
       </div>
 
-      <!-- What was run: the exact policies and test JSONs behind these numbers -->
+      <!-- What was run: the exact policies and tests behind these numbers -->
       <v-expansion-panels variant="accordion" class="mb-4 manifest">
         <v-expansion-panel>
           <v-expansion-panel-title>
             <span class="text-subtitle-2">What was run</span>
-            <span class="text-caption text-medium-emphasis ml-2">
-              {{ policies.length }} policy(ies) × {{ tests.length }} test(s){{ runFileLabel }}
-            </span>
           </v-expansion-panel-title>
           <v-expansion-panel-text>
             <div class="manifest-grid">
-              <div>
+              <div class="scroll">
                 <div class="section-title">Policies</div>
                 <table class="cmp-table">
-                  <thead><tr><th>Policy</th><th>ONNX weights</th></tr></thead>
+                  <thead><tr><th>Policy</th><th>Id</th><th>Weights</th></tr></thead>
                   <tbody>
-                    <tr v-for="p in policies" :key="'mp-' + p.id">
-                      <td><span class="swatch" :style="{ background: colorFor(p.id) }"></span> {{ p.label }}</td>
-                      <td class="mono">{{ p.onnxPath || 'from base config' }}</td>
+                    <tr v-for="p in manifestPolicies" :key="'mp-' + p.key">
+                      <td><span class="swatch" :style="{ background: colorFor(p.key) }"></span> {{ p.label }}</td>
+                      <td class="mono">{{ p.id }}</td>
+                      <td class="mono">{{ p.primary || 'from base config' }}</td>
                     </tr>
                   </tbody>
                 </table>
               </div>
-              <div>
+              <div class="scroll">
                 <div class="section-title">Tests</div>
                 <table class="cmp-table">
-                  <thead><tr><th>Test</th><th>File</th><th>Duration</th><th>Keypoints</th><th>Pushes</th></tr></thead>
+                  <thead><tr><th>Test</th><th>Id</th><th>Duration</th><th>Repeats</th><th>Keypoints</th><th>Pushes</th></tr></thead>
                   <tbody>
-                    <tr v-for="t in tests" :key="'mt-' + t.file">
-                      <td>{{ t.name || t.file }}</td>
-                      <td class="mono">{{ t.file }}</td>
+                    <tr v-for="t in tests" :key="'mt-' + t.id">
+                      <td>{{ t.name }}</td>
+                      <td class="mono">{{ t.id }}</td>
                       <td>{{ fmt(t.duration, 0) }}s</td>
-                      <td>{{ t.sequence ? t.sequence.commands.length : '—' }}</td>
-                      <td>{{ t.sequence && t.sequence.events ? t.sequence.events.length : 0 }}</td>
+                      <td :title="t.repeats.map((r) => `#${r.repeat}: seed ${r.seed}`).join('\n')">{{ t.repeats.length }}</td>
+                      <td>{{ t.sequence.commands.length }}</td>
+                      <td>{{ t.sequence.events ? t.sequence.events.length : 0 }}</td>
                     </tr>
                   </tbody>
                 </table>
@@ -103,82 +115,122 @@
 
       <!-- ================= PER-TEST ================= -->
       <div v-if="viewMode === 'per-test'">
-        <v-select
-          v-model="selectedTestFile"
-          :items="testItems"
-          item-title="title"
-          item-value="value"
-          label="Test"
-          density="compact"
-          hide-details
-          variant="outlined"
-          style="max-width: 360px"
-          class="mb-4"
-        ></v-select>
+        <div class="d-flex flex-wrap align-center ga-3 mb-4">
+          <v-select
+            v-model="selectedTestId"
+            :items="testItems"
+            item-title="title"
+            item-value="value"
+            label="Test"
+            density="compact"
+            hide-details
+            variant="outlined"
+            class="test-picker"
+          ></v-select>
+          <div v-if="selectedTest && selectedTest.repeats.length > 1" class="d-flex align-center ga-2">
+            <span class="text-caption text-medium-emphasis">Repeat</span>
+            <v-btn-toggle v-model="selectedRepeat" density="compact" mandatory variant="outlined" divided class="repeat-picker">
+              <v-btn
+                v-for="r in selectedTest.repeats"
+                :key="'rp-' + r.repeat"
+                :value="r.repeat"
+                size="small"
+                :title="`seed ${r.seed}`"
+              >#{{ r.repeat }}</v-btn>
+            </v-btn-toggle>
+          </div>
+          <span v-if="selectedRepeatInfo" class="text-caption text-medium-emphasis">
+            repeat #{{ selectedRepeatInfo.repeat }} · seed {{ selectedRepeatInfo.seed }}
+          </span>
+        </div>
+
+        <!-- Every policy's outcome on every repeat of this test; a click shows that repeat below. -->
+        <div class="section-title">Outcome of each repeat</div>
+        <v-table density="compact" class="cmp-table outcome-table mb-4">
+          <thead>
+            <tr>
+              <th>Policy</th>
+              <th v-for="r in selectedTest.repeats" :key="'oh-' + r.repeat" class="text-center" :title="`seed ${r.seed}`">#{{ r.repeat }}</th>
+              <th class="text-center">Passed</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="p in policies" :key="'or-' + p.key">
+              <td class="policy-cell">
+                <span class="swatch" :style="{ background: colorFor(p.key) }"></span>
+                <span :title="p.label">{{ shortLabel(p.key) }}</span>
+              </td>
+              <td v-for="(o, i) in testOf(p, selectedTestId).outcomes" :key="'oc-' + p.key + i" class="text-center">
+                <button
+                  type="button"
+                  :class="['outcome-pill', o ? o.kind : 'none', { selected: selectedTest.repeats[i].repeat === selectedRepeat }]"
+                  :title="outcomeTitle(o)"
+                  @click="selectedRepeat = selectedTest.repeats[i].repeat"
+                >{{ o ? o.text : '—' }}</button>
+              </td>
+              <td class="text-center font-weight-medium">
+                {{ testOf(p, selectedTestId).counts.passed }} / {{ testOf(p, selectedTestId).counts.total }}
+              </td>
+            </tr>
+          </tbody>
+        </v-table>
+
+        <!-- The input: what this test commands -->
+        <div class="section-title">Test input — commanded trajectory</div>
+        <div class="chart-row">
+          <div v-for="ax in AXES" :key="'in-' + ax.key" class="chart-cell">
+            <div class="chart-cap">commanded {{ ax.label }}</div>
+            <div class="chart-box"><Line :data="charts.input[ax.key]" :options="charts.axisOpts[ax.key]" /></div>
+          </div>
+        </div>
+        <div v-if="inputEvents.length" class="chart-row mb-4">
+          <div class="chart-cell wide">
+            <div class="chart-cap">
+              commanded push events — real force (N) through the target body's own CoM, held for a duration (positive = forward / left)
+            </div>
+            <div class="chart-box"><Bar :data="charts.pushInput" :options="charts.pushInputOpts" /></div>
+          </div>
+        </div>
 
         <template v-if="perTestRows.length">
-          <!-- Outcome first: did each policy survive this test, and was the
-               capture complete? Both were previously buried in the KPI cards. -->
+          <!-- Outcome first: did each policy pass this repeat, and was the capture complete? -->
+          <div class="section-title">Repeat #{{ selectedRepeat }}</div>
           <div class="outcome-strip mb-4">
             <div
               v-for="row in perTestRows"
-              :key="'oc-' + row.policyId"
+              :key="'os-' + row.key"
               class="outcome"
-              :class="row.fell || row.error ? 'bad' : row.missedGoal ? 'warn' : 'good'"
+              :class="STRIP_CLASS[row.outcome.kind]"
             >
-              <span class="swatch" :style="{ background: colorFor(row.policyId) }"></span>
-              <v-icon size="16" class="mr-1">
-                {{ row.error ? 'mdi-alert-circle' : row.fell ? 'mdi-account-off' : row.missedGoal ? 'mdi-map-marker-remove' : 'mdi-check-circle' }}
-              </v-icon>
+              <span class="swatch" :style="{ background: colorFor(row.key) }"></span>
+              <v-icon size="16" class="mr-1">{{ STRIP_ICON[row.outcome.kind] }}</v-icon>
               <span class="outcome-text">
-                <b :title="row.error || null">{{ outcomeText(row) }}</b>
-                <span class="outcome-policy" :title="labelFor(row.policyId)">{{ shortLabel(row.policyId) }}</span>
+                <b>{{ row.outcome.text }}</b>
+                <span class="outcome-policy" :title="labelFor(row.key)">{{ shortLabel(row.key) }}</span>
               </span>
-              <span v-if="row.error" class="outcome-note" :title="row.error">{{ row.error }}</span>
-              <span v-else-if="row.warning" class="outcome-note" :title="row.warning">{{ row.warning }}</span>
-            </div>
-          </div>
-
-          <!-- The input: what this test JSON actually commands -->
-          <div class="section-title">Test input — commanded trajectory{{ inputSequenceNote }}</div>
-          <div v-if="inputSequence" class="chart-row">
-            <div v-for="ax in AXES" :key="'in-' + ax.key" class="chart-cell">
-              <div class="chart-cap">commanded {{ ax.label }}</div>
-              <div class="chart-box"><Line :data="charts.input[ax.key]" :options="charts.axisOpts[ax.key]" /></div>
-            </div>
-          </div>
-          <v-alert v-else type="info" density="compact" class="mb-4">
-            The test JSON was not stored with this result. Results recorded from now on embed it.
-          </v-alert>
-          <div v-if="inputEvents.length" class="chart-row mb-4">
-            <div class="chart-cell wide">
-              <div class="chart-cap">
-                commanded push events — real force (N) through the target body's own CoM, held for a duration (positive = forward / left)
-              </div>
-              <div class="chart-box"><Bar :data="charts.pushInput" :options="charts.pushInputOpts" /></div>
+              <span v-if="row.outcome.detail" class="outcome-note" :title="row.outcome.detail">{{ row.outcome.detail }}</span>
             </div>
           </div>
 
           <!-- KPI row per policy -->
           <div class="kpi-grid mb-4">
-            <div v-for="row in perTestRows" :key="row.policyId" class="kpi-card">
+            <div v-for="row in perTestRows" :key="row.key" class="kpi-card">
               <div class="kpi-head">
-                <span class="swatch" :style="{ background: colorFor(row.policyId) }"></span>
-                <span class="kpi-name text-subtitle-2">{{ labelFor(row.policyId) }}</span>
-                <v-chip v-if="row.fell" size="x-small" color="error">fell @ {{ fmt(row.fellTime, 1) }}s</v-chip>
-                <v-chip v-else-if="row.missedGoal" size="x-small" color="warning">missed end zone{{ row.goalMiss != null ? ` by ${fmt(row.goalMiss, 2)} m` : '' }}</v-chip>
+                <span class="swatch" :style="{ background: colorFor(row.key) }"></span>
+                <span class="kpi-name text-subtitle-2">{{ labelFor(row.key) }}</span>
+                <span :class="['outcome-pill', row.outcome.kind]">{{ row.outcome.text }}</span>
               </div>
               <div class="kpi-stats">
-                <div><span class="kpi-val">{{ fmt(row.trackRmse, 3) }}</span><span class="kpi-lbl">track RMSE</span></div>
-                <div><span class="kpi-val">{{ fmt(row.symmetry, 1) }}%</span><span class="kpi-lbl">symmetry</span></div>
-                <div><span class="kpi-val">{{ fmt(row.finalDrift, 2) }}m</span><span class="kpi-lbl">final drift</span></div>
-                <div><span class="kpi-val">{{ fmt(row.jerk, 3) }}</span><span class="kpi-lbl">jerk</span></div>
-                <div><span class="kpi-val">{{ row.pushesLabel }}</span><span class="kpi-lbl">pushes survived</span></div>
+                <div><span class="kpi-val">{{ fmt(metricOf(row, 'trackRmse'), 3) }}</span><span class="kpi-lbl">track RMSE</span></div>
+                <div><span class="kpi-val">{{ fmt(metricOf(row, 'symmetry'), 1) }}%</span><span class="kpi-lbl">symmetry</span></div>
+                <div><span class="kpi-val">{{ fmt(metricOf(row, 'finalDrift'), 2) }}m</span><span class="kpi-lbl">final drift</span></div>
+                <div><span class="kpi-val">{{ fmt(metricOf(row, 'jerk'), 3) }}</span><span class="kpi-lbl">jerk</span></div>
+                <div><span class="kpi-val">{{ pushesLabel(row.metrics.perturbations) }}</span><span class="kpi-lbl">pushes survived</span></div>
               </div>
             </div>
           </div>
 
-          <!-- Tracking: actual (solid) vs command (dashed) per axis -->
+          <!-- Tracking: actual velocity per axis -->
           <div class="section-title">Actual velocity per policy (commanded profile is charted above)</div>
           <div class="chart-row">
             <div v-for="ax in AXES" :key="'trk-' + ax.key" class="chart-cell">
@@ -213,8 +265,8 @@
                 </template>
               </div>
               <div class="chart-cap">
-                <span class="swatch" :style="{ background: colorFor(topDownRow.policyId) }"></span>
-                {{ labelFor(topDownRow.policyId) }} — actual (solid) vs canonical (orange, dotted)
+                <span class="swatch" :style="{ background: colorFor(topDownRow.key) }"></span>
+                {{ labelFor(topDownRow.key) }} — actual (solid) vs canonical (orange, dotted)
               </div>
               <div class="chart-box tall"><Line :data="topDownData" :options="topDownOpts" /></div>
             </div>
@@ -239,52 +291,95 @@
           <!-- Smoothness KPI tiles -->
           <div class="section-title">Smoothness</div>
           <div class="tile-grid mb-6">
-            <div v-for="row in perTestRows" :key="'bal-' + row.policyId" class="tile-card">
+            <div v-for="row in perTestRows" :key="'bal-' + row.key" class="tile-card">
               <div class="kpi-head">
-                <span class="swatch" :style="{ background: colorFor(row.policyId) }"></span>
-                <span class="kpi-name text-caption">{{ labelFor(row.policyId) }}</span>
+                <span class="swatch" :style="{ background: colorFor(row.key) }"></span>
+                <span class="kpi-name text-caption">{{ labelFor(row.key) }}</span>
               </div>
               <div class="tile-stats">
-                <div><span class="t-val">{{ fmt(row.meanDelta, 4) }}</span><span class="t-lbl">mean action Δ</span></div>
-                <div><span class="t-val">{{ fmt(row.rmsDelta, 4) }}</span><span class="t-lbl">RMS action Δ</span></div>
+                <div><span class="t-val">{{ fmt(row.metrics.actionSmoothness?.meanAbsDelta, 4) }}</span><span class="t-lbl">mean action Δ</span></div>
+                <div><span class="t-val">{{ fmt(row.metrics.actionSmoothness?.rmsDelta, 4) }}</span><span class="t-lbl">RMS action Δ</span></div>
               </div>
             </div>
           </div>
         </template>
-        <v-alert v-else type="info" density="compact">No results recorded for this test.</v-alert>
+        <v-alert v-else type="info" density="compact">No results recorded for this repeat.</v-alert>
       </div>
 
       <!-- ================= AGGREGATE ================= -->
       <div v-else>
-        <!-- Survival first: which tests each policy stayed upright through. -->
-        <div class="section-title">Fall summary — did the robot stay upright (and reach the end zone)?</div>
-        <v-table density="compact" class="cmp-table fall-table mb-6">
-          <thead>
-            <tr>
-              <th>Policy</th>
-              <th v-for="t in tests" :key="'fh-' + t.file" class="text-center">
-                <span :title="t.file">{{ t.name || t.file }}</span>
-              </th>
-              <th class="text-center">Passed</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="p in policies" :key="'fr-' + p.id">
-              <td>
-                <span class="swatch" :style="{ background: colorFor(p.id) }"></span>
-                <span :title="p.label">{{ shortLabel(p.id) }}</span>
-              </td>
-              <td v-for="t in tests" :key="'fc-' + p.id + t.file" class="text-center">
-                <span :class="['fall-cell', fallCell(p.id, t.file).cls]" :title="fallCell(p.id, t.file).title">
-                  {{ fallCell(p.id, t.file).text }}
-                </span>
-              </td>
-              <td class="text-center font-weight-medium">{{ passedCount(p.id) }} / {{ tests.length }}</td>
-            </tr>
-          </tbody>
-        </v-table>
+        <!-- The benchmark's own scores first: each task with its 95% interval. -->
+        <template v-if="taskRows.length">
+          <div class="section-title">Tasks</div>
+          <v-table density="compact" class="cmp-table mb-6">
+            <thead>
+              <tr>
+                <th>Task</th>
+                <th v-for="p in policies" :key="'th-' + p.key">
+                  <span class="swatch" :style="{ background: colorFor(p.key) }"></span>
+                  <span :title="p.label">{{ shortLabel(p.key) }}</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(task, i) in taskRows" :key="task.taskId">
+                <td class="task-cell">
+                  <b>{{ task.id }}</b> <span class="text-medium-emphasis">{{ task.taskId }}</span>
+                  <div class="text-caption text-medium-emphasis">{{ task.description }}</div>
+                </td>
+                <td v-for="p in policies" :key="'tv-' + p.key + task.taskId" class="text-no-wrap">{{ formatTask(p.tasks[i]) }}</td>
+              </tr>
+            </tbody>
+          </v-table>
+        </template>
 
-        <div class="section-title">Aggregate across {{ tests.length }} test(s)</div>
+        <!-- How every repeat of every test ended, per policy; a click opens that repeat. -->
+        <div class="section-title">Outcomes</div>
+        <div v-for="p in policies" :key="'po-' + p.key" class="mb-6">
+          <div class="policy-head">
+            <span class="swatch" :style="{ background: colorFor(p.key) }"></span>
+            <span class="text-subtitle-2">{{ p.label }}</span>
+            <span class="text-caption text-medium-emphasis ml-2">{{ p.counts.passed }} / {{ p.counts.total }} passed</span>
+          </div>
+          <v-table density="compact" class="cmp-table outcome-table">
+            <thead>
+              <tr>
+                <th>Test</th>
+                <th v-for="n in repeatNumbers" :key="'rh-' + n" class="text-center">#{{ n }}</th>
+                <th class="text-center">Passed</th>
+                <th v-for="m in MEANS" :key="'mh-' + m.key" class="text-right" :title="m.description">{{ meanLabel(m) }}</th>
+                <th class="text-right">Pushes survived</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(t, ti) in tests" :key="'pt-' + p.key + t.id">
+                <td class="test-cell">{{ t.name }} <span class="text-medium-emphasis">{{ t.config }}</span></td>
+                <td v-for="n in repeatNumbers" :key="'pc-' + n" class="text-center">
+                  <template v-if="outcomeAt(p, ti, n) !== undefined">
+                    <button
+                      type="button"
+                      :class="['outcome-pill', outcomeAt(p, ti, n) ? outcomeAt(p, ti, n).kind : 'none']"
+                      :title="outcomeTitle(outcomeAt(p, ti, n))"
+                      @click="openRepeat(t.id, n)"
+                    >{{ outcomeAt(p, ti, n) ? outcomeAt(p, ti, n).text : '—' }}</button>
+                  </template>
+                </td>
+                <td class="text-center">{{ p.tests[ti].counts.passed }} / {{ p.tests[ti].counts.total }}</td>
+                <td v-for="m in MEANS" :key="'pm-' + m.key" class="text-right">{{ fmt(p.tests[ti].means[m.key], m.digits) }}</td>
+                <td class="text-right">{{ pushesLabel(p.tests[ti].pushes) }}</td>
+              </tr>
+              <tr class="total-row">
+                <td>All tests</td>
+                <td v-for="n in repeatNumbers" :key="'tc-' + n"></td>
+                <td class="text-center">{{ p.counts.passed }} / {{ p.counts.total }}</td>
+                <td v-for="m in MEANS" :key="'tm-' + m.key" class="text-right">{{ fmt(p.means[m.key], m.digits) }}</td>
+                <td class="text-right">{{ pushesLabel(p.pushes) }}</td>
+              </tr>
+            </tbody>
+          </v-table>
+        </div>
+
+        <div class="section-title">Across all {{ tests.length }} test(s)</div>
         <div class="chart-row">
           <div v-for="m in AGG_METRICS" :key="m.key" class="chart-cell">
             <div class="chart-cap">{{ m.label }}</div>
@@ -297,75 +392,26 @@
           <thead>
             <tr>
               <th>Policy</th>
-              <th v-for="m in AGG_METRICS" :key="'h-' + m.key" class="text-right">{{ m.label }}</th>
-              <th class="text-right">Max force survived (N)</th>
+              <th class="text-right">Passed</th>
+              <th class="text-right">Fell</th>
+              <th class="text-right">Missed end zone</th>
+              <th class="text-right">Errors</th>
+              <th v-for="m in MEANS" :key="'ch-' + m.key" class="text-right" :title="m.description">{{ meanLabel(m) }}</th>
+              <th class="text-right">Pushes survived</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="a in aggregateRows" :key="a.policyId">
+            <tr v-for="p in policies" :key="'cr-' + p.key">
               <td class="policy-cell">
-                <span class="swatch" :style="{ background: colorFor(a.policyId) }"></span>
-                {{ labelFor(a.policyId) }}
+                <span class="swatch" :style="{ background: colorFor(p.key) }"></span>
+                <span :title="p.label">{{ shortLabel(p.key) }}</span>
               </td>
-              <td class="text-right">{{ fmt(a.trackRmse, 3) }}</td>
-              <td class="text-right">{{ fmt(a.symmetry, 1) }}%</td>
-              <td class="text-right">{{ fmt(a.finalDrift, 2) }}</td>
-              <td class="text-right">{{ fmt(a.jerk, 3) }}</td>
-              <td class="text-right">{{ a.pushesSurvived }}</td>
-              <td class="text-right">{{ fmt(a.pushScore, 2) }}</td>
-              <td class="text-right">{{ a.maxForce != null ? fmt(a.maxForce, 0) : 'n/a' }}</td>
-            </tr>
-          </tbody>
-        </v-table>
-
-        <div class="section-title">Results by category</div>
-        <v-table density="compact" class="cmp-table mb-6">
-          <thead>
-            <tr>
-              <th>Category</th><th>Policy</th><th class="text-right">Upright</th>
-              <th class="text-right">Track RMSE</th><th class="text-right">Pushes survived</th>
-              <th class="text-right">Max force survived (N)</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="row in categoryRows" :key="row.category + row.policyId">
-              <td>{{ row.categoryLabel }}</td>
-              <td class="policy-cell">
-                <span class="swatch" :style="{ background: colorFor(row.policyId) }"></span>
-                {{ labelFor(row.policyId) }}
-              </td>
-              <td class="text-right">
-                {{ row.upright }} / {{ row.total }}
-                <span v-if="row.missedGoal" class="text-medium-emphasis">({{ row.missedGoal }} missed end zone)</span>
-              </td>
-              <td class="text-right">{{ fmt(row.trackRmse, 3) }}</td>
-              <td class="text-right">{{ row.pushesLabel }}</td>
-              <td class="text-right">{{ row.maxForce != null ? fmt(row.maxForce, 0) : 'n/a' }}</td>
-            </tr>
-          </tbody>
-        </v-table>
-
-        <div class="section-title">Push envelope by location</div>
-        <p class="text-caption text-medium-emphasis mb-2">
-          The category table above still lumps e.g. groin/pelvis in with shoulder pushes. Each push
-          test file targets exactly one location, so this is the real per-location max-force breakdown.
-        </p>
-        <v-table density="compact" class="cmp-table mb-6">
-          <thead>
-            <tr>
-              <th>Location</th><th>Policy</th><th class="text-right">Survived</th>
-              <th class="text-right">Max force survived (N)</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="row in pushLocationRows" :key="row.file + row.policyId">
-              <td>{{ row.name }}</td>
-              <td class="policy-cell">
-                <span class="swatch" :style="{ background: colorFor(row.policyId) }"></span>
-                {{ labelFor(row.policyId) }}
-              </td>
-              <td class="text-right">{{ row.pert ? `${row.pert.survived}/${row.pert.total}` : 'n/a' }}</td>
-              <td class="text-right">{{ row.maxForce != null ? fmt(row.maxForce, 0) : 'n/a' }}</td>
+              <td class="text-right">{{ p.counts.passed }} / {{ p.counts.total }}</td>
+              <td class="text-right">{{ p.counts.fell }}</td>
+              <td class="text-right">{{ p.counts.missed }}</td>
+              <td class="text-right" :class="{ 'text-error': p.counts.error }">{{ p.counts.error }}</td>
+              <td v-for="m in MEANS" :key="'cm-' + m.key" class="text-right">{{ fmt(p.means[m.key], m.digits) }}</td>
+              <td class="text-right">{{ pushesLabel(p.pushes) }}</td>
             </tr>
           </tbody>
         </v-table>
@@ -376,13 +422,11 @@
 
 <script>
 import { appState, closeResults, setBenchmarkResults } from '@/state/appState.js';
-import { RESULT_SCHEMA, toReport } from '@/benchmark/run.js';
+import { RESULT_SCHEMA } from '@/benchmark/run.js';
+import { MEANS, fmt, formatTask, resultView } from '@/benchmark/resultView.js';
 import { listResults, loadResult } from '@/state/resultStore.js';
-import { loadTest } from '@/state/testStore.js';
 import { resolveLimits } from '@/simulation/commandSequencer.js';
-import {
-  downloadBenchmarkReport, categoryOf, isPushCategory, maxForceSurvived, computeCategoryRollup, isUpright, missedGoalText
-} from '@/simulation/benchmarkReport.js';
+import { downloadBenchmarkReport } from '@/simulation/benchmarkReport.js';
 import {
   Chart, LineElement, PointElement, LineController,
   BarElement, BarController, LinearScale, CategoryScale, Legend, Tooltip
@@ -415,48 +459,122 @@ const AGG_METRICS = [
   { key: 'pushesSurvived', label: 'Total pushes survived', unit: '' },
   { key: 'pushScore', label: 'Mean push score', unit: '' }
 ];
-
-function mean(arr) {
-  const v = arr.filter((x) => Number.isFinite(x));
-  return v.length ? v.reduce((a, b) => a + b, 0) / v.length : NaN;
-}
+const MEAN_BY_KEY = Object.fromEntries(MEANS.map((m) => [m.key, m]));
+// How the outcome strip shows each kind of repeat outcome (resultView).
+const STRIP_CLASS = { passed: 'good', missed: 'warn', fell: 'bad', error: 'bad' };
+const STRIP_ICON = { passed: 'mdi-check-circle', missed: 'mdi-map-marker-remove', fell: 'mdi-account-off', error: 'mdi-alert-circle' };
 
 export default {
   name: 'BenchmarkResults',
   components: { Line, Bar },
   data() {
     return {
-      // Aggregate first: the fall summary and per-policy comparison answer
-      // "which policy is better" before drilling into a single test.
+      // Aggregate first: tasks and outcomes answer "which policy is better"
+      // before drilling into a single test.
       viewMode: 'aggregate',
-      selectedTestFile: null,
+      selectedTestId: null,
+      selectedRepeat: null,
       topDownIndex: 0,
-      loadingRun: false,
-      runError: '',
-      // Test JSONs recovered from disk for older runs that didn't embed them.
-      fetchedSequences: {},
+      loadingResult: false,
+      resultError: '',
       AXES,
-      AGG_METRICS
+      AGG_METRICS,
+      MEANS,
+      STRIP_CLASS,
+      STRIP_ICON
     };
   },
   computed: {
     appState() {
       return appState;
     },
-    runFileLabel() {
+    resultFileLabel() {
       return appState.benchmarkResultsFile ? ` · ${appState.benchmarkResultsFile}` : '';
     },
-    /** The selected test's declared command profile, embedded or recovered. */
-    inputSequence() {
-      const test = this.tests.find((t) => t.file === this.selectedTestFile);
-      if (test?.sequence?.commands?.length) return test.sequence;
-      const fetched = this.fetchedSequences[this.selectedTestFile];
-      return fetched?.commands?.length ? fetched : null;
+    /** The loaded result.json as resultView's tables, or { error } when it can't be shown. */
+    loaded() {
+      const result = appState.benchmarkResults;
+      if (!result) return { view: null, error: '' };
+      if (result.schema !== RESULT_SCHEMA) {
+        return { view: null, error: `Not a benchmark result (expected schema ${RESULT_SCHEMA}, got ${result.schema ?? 'none'}).` };
+      }
+      try {
+        return { view: resultView(result), error: '' };
+      } catch (e) {
+        return { view: null, error: `Could not read this result: ${e.message}` };
+      }
     },
-    inputSequenceNote() {
-      const test = this.tests.find((t) => t.file === this.selectedTestFile);
-      if (test?.sequence?.commands?.length) return '';
-      return this.inputSequence ? ' (current file on disk — not stored with this result)' : '';
+    view() {
+      return this.loaded.view;
+    },
+    viewError() {
+      return this.loaded.error;
+    },
+    hasResults() {
+      return this.view != null;
+    },
+    /** Saved results under benchmark_results/, newest first, as select items. */
+    resultItems() {
+      return appState.savedResults.map((result) => {
+        const when = result.generatedAt ? new Date(result.generatedAt).toLocaleString() : result.file;
+        const shape = result.policyCount != null && result.testCount != null
+          ? ` — ${result.policyCount}p × ${result.testCount}t`
+          : '';
+        return { title: when + shape, value: result.file };
+      });
+    },
+    generatedAtLabel() {
+      const g = this.view && this.view.generatedAt;
+      if (!g) return '';
+      const d = new Date(g);
+      return Number.isNaN(d.getTime()) ? String(g) : d.toLocaleString();
+    },
+    policies() {
+      return this.view ? this.view.policies : [];
+    },
+    tests() {
+      return this.view ? this.view.tests : [];
+    },
+    /** The result's own policy entries, for the weights file each one ran. */
+    manifestPolicies() {
+      const byKey = new Map((appState.benchmarkResults?.policies || []).map((p) => [p.key, p]));
+      return this.policies.map((p) => ({ ...p, primary: byKey.get(p.key)?.primary ?? null }));
+    },
+    testItems() {
+      return this.tests.map((t) => ({ title: t.name === t.id ? t.id : `${t.name} — ${t.id}`, value: t.id }));
+    },
+    /** Every repeat number any test ran, for the aggregate outcome columns. */
+    repeatNumbers() {
+      return [...new Set(this.tests.flatMap((t) => t.repeats.map((r) => r.repeat)))].sort((a, b) => a - b);
+    },
+    /** The benchmark's tasks in order; each policy's values line up with these. */
+    taskRows() {
+      return this.policies[0]?.tasks ?? [];
+    },
+    colorIndex() {
+      const m = {};
+      this.policies.forEach((p, i) => { m[p.key] = i % PALETTE.length; });
+      return m;
+    },
+    selectedTest() {
+      return this.tests.find((t) => t.id === this.selectedTestId) || { id: null, repeats: [], sequence: null };
+    },
+    selectedRepeatInfo() {
+      return this.selectedTest.repeats.find((r) => r.repeat === this.selectedRepeat) || null;
+    },
+    inputSequence() {
+      return this.selectedTest.sequence;
+    },
+    /** One row per policy that has the selected repeat: its outcome and that cell's metrics. */
+    perTestRows() {
+      const index = this.selectedTest.repeats.findIndex((r) => r.repeat === this.selectedRepeat);
+      if (index < 0) return [];
+      return this.policies
+        .map((p) => {
+          const outcome = this.testOf(p, this.selectedTestId).outcomes[index];
+          return outcome ? { key: p.key, outcome, metrics: outcome.cell.metrics || {} } : null;
+        })
+        .filter(Boolean);
     },
     inputEvents() {
       return (this.inputSequence?.events || []).filter((e) => e?.type === 'push');
@@ -500,65 +618,17 @@ export default {
         }
       };
     },
-    /** Saved results under benchmark_results/, newest first, as select items. */
-    runItems() {
-      return appState.savedResults.map((run) => {
-        const when = run.generatedAt ? new Date(run.generatedAt).toLocaleString() : run.file;
-        const shape = run.policyCount != null && run.testCount != null
-          ? ` — ${run.policyCount}p × ${run.testCount}t`
-          : '';
-        return { title: when + shape, value: run.file };
-      });
-    },
-    hasResults() {
-      return appState.benchmarkResults != null;
-    },
-    /** The result on show in the report shape ({ policies, tests, results }) the views below read. */
-    br() {
-      const result = appState.benchmarkResults;
-      return result?.schema === RESULT_SCHEMA ? toReport(result) : result;
-    },
-    generatedAtLabel() {
-      const g = this.br && this.br.generatedAt;
-      if (!g) return '';
-      const d = new Date(g);
-      return Number.isNaN(d.getTime()) ? String(g) : d.toLocaleString();
-    },
-    policies() {
-      return (this.br && this.br.policies) || [];
-    },
-    tests() {
-      return (this.br && this.br.tests) || [];
-    },
-    testItems() {
-      return this.tests.map((t) => ({ title: t.name || t.file, value: t.file }));
-    },
-    colorIndex() {
-      const m = {};
-      this.policies.forEach((p, i) => { m[p.id] = i % PALETTE.length; });
-      return m;
-    },
-    // rows (one per policy) for the selected test, with derived KPIs
-    perTestRows() {
-      if (!this.br || !this.selectedTestFile) return [];
-      const rows = this.br.results.filter((r) => r.testFile === this.selectedTestFile);
-      // order by policy declaration for stable colors
-      return this.policies
-        .map((p) => rows.find((r) => r.policyId === p.id))
-        .filter(Boolean)
-        .map((r) => this.deriveRow(r));
-    },
     hasPerturbations() {
-      return this.perTestRows.some((r) => r.perturbations);
+      return this.perTestRows.some((r) => r.metrics.perturbations);
     },
     hasGaitSymmetry() {
       return this.perTestRows.some((r) => (r.metrics.gaitSymmetry?.pairs || []).length);
     },
     /**
-     * Every per-test chart's data and options, built once per (run, test,
-     * policy set). Binding methods directly in the template returned fresh
-     * objects on each re-render, so Chart.js tore down and rebuilt a dozen
-     * canvases whenever anything on the page changed.
+     * Every per-test chart's data and options, built once per (result, test,
+     * repeat, policy set). Binding methods directly in the template returned
+     * fresh objects on each re-render, so Chart.js tore down and rebuilt a
+     * dozen canvases whenever anything on the page changed.
      */
     charts() {
       const data = { tracking: {}, error: {}, input: {}, axisOpts: {}, errorOpts: {} };
@@ -593,7 +663,7 @@ export default {
         datasets.push(this.pathDataset('Canonical', td.expected, '#ff8c00', { dotted: true, order: 99 }));
       }
       if (Array.isArray(td.actual) && td.actual.length) {
-        datasets.push(this.pathDataset(this.labelFor(row.policyId), td.actual, this.colorFor(row.policyId)));
+        datasets.push(this.pathDataset(this.labelFor(row.key), td.actual, this.colorFor(row.key)));
       }
       return { datasets };
     },
@@ -602,7 +672,7 @@ export default {
         const s = (r.metrics.series || {});
         const t = s.time || [];
         const d = s.drift || [];
-        return this.xyDataset(this.labelFor(r.policyId), t, d, this.colorFor(r.policyId));
+        return this.xyDataset(this.labelFor(r.key), t, d, this.colorFor(r.key));
       });
       return { datasets };
     },
@@ -621,19 +691,19 @@ export default {
     pushData() {
       const rows = this.perTestRows;
       return {
-        labels: rows.map((r) => this.labelFor(r.policyId)),
+        labels: rows.map((r) => this.labelFor(r.key)),
         datasets: [{
           label: 'Survived',
-          data: rows.map((r) => (r.perturbations ? r.perturbations.survived : 0)),
-          backgroundColor: rows.map((r) => this.colorFor(r.policyId)),
+          data: rows.map((r) => (r.metrics.perturbations ? r.metrics.perturbations.survived : 0)),
+          backgroundColor: rows.map((r) => this.colorFor(r.key)),
           borderRadius: 4,
           maxBarThickness: 48
         }]
       };
     },
     pushOpts() {
-      const totals = this.perTestRows.map((r) => (r.perturbations ? r.perturbations.total : 0));
-      const meanScores = this.perTestRows.map((r) => (r.perturbations ? r.perturbations.meanScore : null));
+      const totals = this.perTestRows.map((r) => (r.metrics.perturbations ? r.metrics.perturbations.total : 0));
+      const meanScores = this.perTestRows.map((r) => (r.metrics.perturbations ? r.metrics.perturbations.meanScore : null));
       return {
         responsive: true,
         maintainAspectRatio: false,
@@ -667,9 +737,9 @@ export default {
         const byJoint = {};
         pairs.forEach((p) => { byJoint[p.joint] = p.mirrorRmse; });
         return {
-          label: this.labelFor(r.policyId),
+          label: this.labelFor(r.key),
           data: joints.map((j) => (Number.isFinite(byJoint[j]) ? byJoint[j] : null)),
-          backgroundColor: this.colorFor(r.policyId),
+          backgroundColor: this.colorFor(r.key),
           borderRadius: 3,
           maxBarThickness: 24
         };
@@ -678,57 +748,7 @@ export default {
     },
     // ---- aggregate ----
     aggregateRows() {
-      return this.policies.map((p) => {
-        const rows = this.br.results.filter((r) => r.policyId === p.id).map((r) => this.deriveRow(r));
-        return {
-          policyId: p.id,
-          trackRmse: mean(rows.map((r) => r.trackRmse)),
-          symmetry: mean(rows.map((r) => r.symmetry)),
-          finalDrift: mean(rows.map((r) => r.finalDrift)),
-          jerk: mean(rows.map((r) => r.jerk)),
-          pushesSurvived: rows.reduce((a, r) => a + (r.perturbations ? r.perturbations.survived : 0), 0),
-          pushScore: mean(rows.map((r) => (r.perturbations ? r.perturbations.meanScore : null))),
-          maxForce: maxForceSurvived(rows)
-        };
-      });
-    },
-    // Same rows, grouped by each test's benchmark/ folder — shows whether a
-    // policy has a specific weak spot rather than one blended-away number.
-    categoryRows() {
-      return computeCategoryRollup(this.tests, this.policies, this.br.results)
-        .flatMap(({ category, categoryLabel: label, perPolicy }) => perPolicy.map((p) => ({
-          category,
-          categoryLabel: label,
-          policyId: p.policyId,
-          total: p.total,
-          upright: p.upright,
-          missedGoal: p.missedGoal,
-          trackRmse: p.trackRmse,
-          pushesLabel: p.pushTotal ? `${p.pushSurvived}/${p.pushTotal}` : 'n/a',
-          maxForce: p.maxForce
-        })))
-        .filter((row) => row.total > 0);
-    },
-    // One row per push test file/policy — a category can still lump e.g.
-    // groin/pelvis pushes with shoulder pushes, which have very different
-    // force tolerances; each push test file targets exactly one location, so
-    // this is the actual per-location max-force breakdown.
-    pushLocationRows() {
-      return this.tests
-        .filter((t) => isPushCategory(categoryOf(t.file)))
-        .flatMap((t) => this.policies.map((p) => {
-          const result = this.br.results.find((r) => r.testFile === t.file && r.policyId === p.id);
-          if (!result) return null;
-          const row = this.deriveRow(result);
-          return {
-            file: t.file,
-            name: t.name || t.file,
-            policyId: p.id,
-            pert: row.perturbations,
-            maxForce: maxForceSurvived([row])
-          };
-        }))
-        .filter(Boolean);
+      return this.policies.map((p) => ({ key: p.key, ...p.means, pushesSurvived: p.pushes ? p.pushes.survived : null }));
     }
   },
   watch: {
@@ -736,47 +756,47 @@ export default {
       immediate: true,
       handler() { this.ensureSelection(); }
     },
-    // Each test is paged independently; start at the first policy.
-    selectedTestFile: {
-      immediate: true,
-      handler() {
-        this.topDownIndex = 0;
-        this.ensureInputSequence();
-      }
+    // A test keeps the chosen repeat when it has it, else starts at its first.
+    selectedTestId() {
+      if (!this.selectedRepeatInfo) this.selectedRepeat = this.selectedTest.repeats[0]?.repeat ?? null;
+      this.topDownIndex = 0;
     }
   },
   async mounted() {
-    await this.refreshRuns();
+    await this.refreshResults();
     if (!appState.benchmarkResults && appState.savedResults.length) {
-      await this.selectRun(appState.savedResults[0].file);
+      await this.selectResult(appState.savedResults[0].file);
     }
     this.ensureSelection();
   },
   methods: {
     closeResults,
-    async refreshRuns() {
+    fmt,
+    formatTask,
+    async refreshResults() {
       try {
         appState.savedResults = await listResults();
       } catch (e) {
-        // Static host / no dev endpoint: only the in-memory run is available.
+        // Static host / no dev endpoint: only the in-memory result is available.
         appState.savedResults = [];
       }
     },
-    async selectRun(file) {
+    async selectResult(file) {
       if (!file || file === appState.benchmarkResultsFile) return;
-      this.loadingRun = true;
-      this.runError = '';
+      this.loadingResult = true;
+      this.resultError = '';
       try {
-        const run = await loadResult(file);
-        setBenchmarkResults(run, file);
-        // A different run has different tests/policies; restart the views.
-        this.selectedTestFile = null;
+        const result = await loadResult(file);
+        setBenchmarkResults(result, file);
+        // A different result has different tests/policies; restart the views.
+        this.selectedTestId = null;
+        this.selectedRepeat = null;
         this.topDownIndex = 0;
         this.ensureSelection();
       } catch (e) {
-        this.runError = `Could not load ${file}: ${e.message}`;
+        this.resultError = `Could not load ${file}: ${e.message}`;
       } finally {
-        this.loadingRun = false;
+        this.loadingResult = false;
       }
     },
     stepTopDown(delta) {
@@ -784,22 +804,33 @@ export default {
       if (n < 2) return;
       this.topDownIndex = (this.topDownIndex + delta + n) % n;
     },
-    /**
-     * Older runs stored only {file, name, duration}. Recover the command
-     * profile from disk so their input can still be inspected — flagged in the
-     * heading, since the file may have been edited since the run.
-     */
-    async ensureInputSequence() {
-      const file = this.selectedTestFile;
-      if (!file) return;
-      const test = this.tests.find((t) => t.file === file);
-      if (test?.sequence?.commands?.length) return;
-      if (this.fetchedSequences[file] !== undefined) return;
-      try {
-        this.fetchedSequences[file] = await loadTest(file);
-      } catch {
-        this.fetchedSequences[file] = null;
-      }
+    /** A policy's entry for one test (outcomes, counts, means, pushes). */
+    testOf(policy, testId) {
+      return policy.tests.find((t) => t.testId === testId) || { outcomes: [], counts: { passed: 0, total: 0 } };
+    },
+    /** Repeat `n` of test `ti` for a policy: its outcome, null if missing, undefined if the test has no such repeat. */
+    outcomeAt(policy, ti, n) {
+      const index = this.tests[ti].repeats.findIndex((r) => r.repeat === n);
+      return index < 0 ? undefined : policy.tests[ti].outcomes[index];
+    },
+    outcomeTitle(outcome) {
+      if (!outcome) return 'not in this result';
+      return [`seed ${outcome.seed}`, outcome.detail].filter(Boolean).join(' — ');
+    },
+    /** Show one repeat of one test in the per-test view. */
+    openRepeat(testId, repeat) {
+      this.selectedRepeat = repeat;
+      this.selectedTestId = testId;
+      this.viewMode = 'per-test';
+    },
+    metricOf(row, key) {
+      return MEAN_BY_KEY[key].of(row.metrics);
+    },
+    meanLabel(m) {
+      return m.unit ? `${m.label} (${m.unit})` : m.label;
+    },
+    pushesLabel(pushes) {
+      return pushes && pushes.total ? `${pushes.survived}/${pushes.total}` : 'n/a';
     },
     /**
      * Stepped, because the sequencer holds each keypoint until the next is due;
@@ -859,123 +890,32 @@ export default {
       }
       return opts;
     },
-    inputOpts(unit) {
-      return this.lineOpts(unit);
-    },
-    /**
-     * Export exactly what this page is showing: for an older run whose test
-     * JSONs were recovered from disk, fold those into the payload so the
-     * downloaded file carries the input plots too.
-     */
+    /** The same result.json as a self-contained report.html (benchmarkReport.js). */
     downloadReport() {
-      if (!this.br) return;
-      this.runError = '';
+      if (!this.view) return;
+      this.resultError = '';
       try {
-        const run = {
-          ...this.br,
-          tests: this.tests.map((test) => {
-            if (test.sequence?.commands?.length) return test;
-            const recovered = this.fetchedSequences[test.file];
-            return recovered?.commands?.length
-              ? { ...test, sequence: recovered, sequenceRecoveredFromDisk: true }
-              : test;
-          })
-        };
-        downloadBenchmarkReport(run);
+        downloadBenchmarkReport(appState.benchmarkResults);
       } catch (e) {
-        this.runError = `Could not build the report: ${e.message}`;
+        this.resultError = `Could not build the report: ${e.message}`;
       }
     },
     ensureSelection() {
-      if (this.hasResults && !this.selectedTestFile && this.tests.length) {
-        this.selectedTestFile = this.tests[0].file;
+      if (this.hasResults && !this.selectedTestId && this.tests.length) {
+        this.selectedTestId = this.tests[0].id;
       }
     },
-    colorFor(policyId) {
-      return PALETTE[this.colorIndex[policyId] ?? 0];
-    },
-    /** The outcome strip's headline: error, fell, upright but missed the end zone, or passed. */
-    outcomeText(row) {
-      if (row.error) return 'error';
-      if (row.fell) return `FELL at ${this.fmt(row.fellTime, 1)}s`;
-      if (row.missedGoal) return missedGoalText(row);
-      return row.goalReached ? 'completed upright, reached end zone' : 'completed upright';
-    },
-    /**
-     * One cell of the fall matrix: fell (with the time), stayed upright but
-     * missed the end zone, passed, or no usable result (policy failed to load,
-     * or the capture never ran).
-     */
-    fallCell(policyId, testFile) {
-      const result = this.br?.results?.find((r) => r.policyId === policyId && r.testFile === testFile);
-      if (!result) return { text: '—', cls: 'none', title: 'No result recorded' };
-      if (result.error) return { text: '—', cls: 'none', title: result.error };
-      const row = this.deriveRow(result);
-      if (!isUpright(row)) {
-        return {
-          text: `fell ${this.fmt(row.fellTime, 1)}s`,
-          cls: 'fell',
-          title: `Fell at ${this.fmt(row.fellTime, 1)}s` + (row.warning ? ` · ${row.warning}` : '')
-        };
-      }
-      if (row.missedGoal) {
-        return {
-          text: `missed end zone${row.goalMiss != null ? ` by ${this.fmt(row.goalMiss, 2)} m` : ''}`,
-          cls: 'missed',
-          title: 'Stayed upright but never reached the end zone' + (row.warning ? ` · ${row.warning}` : '')
-        };
-      }
-      return {
-        text: row.goalReached ? 'reached end zone' : 'upright',
-        cls: 'upright',
-        title: (row.goalReached ? 'Stayed upright and reached the end zone' : 'Stayed upright') + (row.warning ? ` · ${row.warning}` : '')
-      };
-    },
-    passedCount(policyId) {
-      return this.tests.filter((t) => this.fallCell(policyId, t.file).cls === 'upright').length;
+    colorFor(key) {
+      return PALETTE[this.colorIndex[key] ?? 0];
     },
     /** Trailing file name of a policy label — full text stays in a tooltip. */
-    shortLabel(policyId) {
-      const label = this.labelFor(policyId);
+    shortLabel(key) {
+      const label = this.labelFor(key);
       return String(label).split('/').pop();
     },
-    labelFor(policyId) {
-      const p = this.policies.find((x) => x.id === policyId);
-      return (p && p.label) || policyId;
-    },
-    fmt(v, digits = 2) {
-      if (v == null || Number.isNaN(v) || !Number.isFinite(v)) return 'n/a';
-      return Number(v).toFixed(digits);
-    },
-    deriveRow(r) {
-      const m = r.metrics || {};
-      const ct = (m.commandTracking && m.commandTracking.overall) || {};
-      const gs = m.gaitSymmetry || {};
-      const as = m.actionSmoothness || {};
-      const drift = m.drift || {};
-      const fell = m.fell || {};
-      const pert = m.perturbations || null;
-      return {
-        policyId: r.policyId,
-        error: r.error || null,
-        warning: r.warning || null,
-        frames: r.frames ?? m.frames ?? null,
-        expectedFrames: r.expectedFrames ?? null,
-        metrics: m,
-        trackRmse: mean([ct.vx, ct.vy, ct.wz]),
-        symmetry: gs.symmetryScorePercent,
-        finalDrift: drift.final_m,
-        jerk: as.jerkLikeScore,
-        perturbations: pert,
-        pushesLabel: pert ? `${pert.survived}/${pert.total}` : 'n/a',
-        meanDelta: as.meanAbsDelta,
-        rmsDelta: as.rmsDelta,
-        fell: !!fell.fell,
-        fellTime: fell.time,
-        goalReached: m.goal ? m.goal.reached : null,
-        goalMiss: m.goal?.miss_m ?? null,
-        missedGoal: !r.error && !fell.fell && m.goal?.reached === false
-      };
+    labelFor(key) {
+      const p = this.policies.find((x) => x.key === key);
+      return (p && p.label) || key;
     },
     // Build parallel-array line dataset as {x,y} points (time arrays may differ per policy)
     xyDataset(label, xArr, yArr, color, opts = {}) {
@@ -1025,10 +965,10 @@ export default {
         datasets: this.perTestRows.map((r) => {
           const s = r.metrics.series || {};
           return this.xyDataset(
-            this.labelFor(r.policyId),
+            this.labelFor(r.key),
             s.time || [],
             (s.actual && s.actual[axis]) || [],
-            this.colorFor(r.policyId)
+            this.colorFor(r.key)
           );
         })
       };
@@ -1038,7 +978,7 @@ export default {
         const s = r.metrics.series || {};
         const t = s.time || [];
         const err = (s.error && s.error[axis]) || [];
-        return this.xyDataset(this.labelFor(r.policyId), t, err, this.colorFor(r.policyId));
+        return this.xyDataset(this.labelFor(r.key), t, err, this.colorFor(r.key));
       });
       return { datasets };
     },
@@ -1071,11 +1011,11 @@ export default {
     aggMetricData(key) {
       const rows = this.aggregateRows;
       return {
-        labels: rows.map((r) => this.labelFor(r.policyId)),
+        labels: rows.map((r) => this.shortLabel(r.key)),
         datasets: [{
           label: key,
           data: rows.map((r) => (Number.isFinite(r[key]) ? r[key] : 0)),
-          backgroundColor: rows.map((r) => this.colorFor(r.policyId)),
+          backgroundColor: rows.map((r) => this.colorFor(r.key)),
           borderRadius: 4,
           maxBarThickness: 56
         }]
@@ -1096,10 +1036,11 @@ export default {
   font-size: 11px;
   word-break: break-all;
 }
-.run-picker {
+.result-picker {
   min-width: 260px;
   max-width: 340px;
 }
+.test-picker { flex: 0 1 360px; min-width: 220px; }
 .results-page { height: 100%; display: flex; flex-direction: column; }
 .results-body { padding: 16px 20px 40px; overflow-y: auto; }
 .empty-state {
@@ -1198,19 +1139,29 @@ export default {
   max-width: 280px;
   line-height: 1.3;
 }
-.fall-table th { white-space: nowrap; }
-.fall-cell {
+/* One repeat's outcome; a button where a click opens that repeat. */
+.outcome-pill {
   display: inline-block;
   min-width: 68px;
   padding: 1px 8px;
+  border: 1px solid transparent;
   border-radius: 10px;
   font-size: 0.74rem;
   font-weight: 500;
+  white-space: nowrap;
 }
-.fall-cell.upright { background: rgba(27, 175, 122, 0.16); color: #0b6b4a; }
-.fall-cell.fell { background: rgba(227, 73, 72, 0.16); color: #a3201f; }
-.fall-cell.missed { background: rgba(230, 150, 20, 0.18); color: #8a5300; }
-.fall-cell.none { background: rgba(0, 0, 0, 0.06); color: rgba(0, 0, 0, 0.5); }
+button.outcome-pill { cursor: pointer; }
+.outcome-pill.passed { background: rgba(27, 175, 122, 0.16); color: #0b6b4a; }
+.outcome-pill.fell, .outcome-pill.error { background: rgba(227, 73, 72, 0.16); color: #a3201f; }
+.outcome-pill.missed { background: rgba(230, 150, 20, 0.18); color: #8a5300; }
+.outcome-pill.none { background: rgba(0, 0, 0, 0.06); color: rgba(0, 0, 0, 0.5); }
+.outcome-pill.selected { border-color: currentColor; }
+.outcome-table th { white-space: nowrap; }
+.test-cell { white-space: nowrap; }
+.task-cell { min-width: 220px; }
+.total-row td { font-weight: 600; border-top: 2px solid rgba(0, 0, 0, 0.12); }
+.policy-head { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; margin-bottom: 4px; }
+.scroll { overflow-x: auto; }
 
 /* The manifest tables are plain <table>s, so they carry their own borders. */
 .manifest-grid .cmp-table {
@@ -1229,5 +1180,14 @@ export default {
   font-weight: 600;
   color: rgba(0, 0, 0, 0.6);
   white-space: nowrap;
+}
+
+/* Phone width: the same 16px gutter as the report, no horizontal page scroll. */
+@media (max-width: 600px) {
+  .results-body { padding: 12px 16px 32px; }
+  .result-picker { min-width: 0; max-width: 150px; }
+  .chart-cell, .chart-cell.wide { min-width: 0; flex-basis: 100%; }
+  .manifest-grid { grid-template-columns: minmax(0, 1fr); }
+  .test-picker { flex-basis: 100%; }
 }
 </style>
