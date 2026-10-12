@@ -7,7 +7,7 @@ import { parse as parseYaml } from 'yaml';
 import { parsePort, parseWords, rejectSwallowedNpmFlags, swallowedNpmFlags } from './cliArgs.mjs';
 import { classifyTarget } from './benchmarkTargets.mjs';
 import { MAX_ROBOTS, buildJobs, groupCells, takeNextJob, RESULT_SCHEMA } from '../src/benchmark/run.js';
-import { parseShard, shardJobs, submitHint, uploadBlockers } from './benchmarkRun.mjs';
+import { parseShard, resultTarget, shardJobs, submitHint, uploadBlockers, viewHint } from './benchmarkRun.mjs';
 import { buildEvalResultEntries, evalResultsPath, mergeEvalResults } from './hfEvalResults.mjs';
 import { commitFiles, decideCommitMode } from './hfCommit.mjs';
 import { datasetFilesToFetch } from './hfDataset.mjs';
@@ -153,6 +153,28 @@ test('the end of a run says how to submit it, or why it cannot be', () => {
   const mixed = fakeRun();
   mixed.policies.push({ ...mixed.policies[0], key: 'm1', id: 'local:p', label: 'p', source: 'local' });
   assert.match(submitHint(mixed, 'out').join('\n'), /^Submit to the Hub with.*\nNot submittable:\n {2}- p: the policy is a local folder/);
+});
+
+test('the end of a run says how to view it, in the viewer and as the report file', () => {
+  assert.deepEqual(viewHint('benchmark_results/20261012T112354', '/app/benchmark_results/20261012T112354/report.html'), [
+    'View it in the viewer with: npm run benchmark view benchmark_results/20261012T112354',
+    'Or open the report directly: /app/benchmark_results/20261012T112354/report.html',
+  ]);
+});
+
+test('view takes a result folder or its result.json, served from the folder\'s parent', () => {
+  const root = mkdtempSync(join(tmpdir(), 'hpv-view-'));
+  const dir = join(root, '20261012T112354_merged');
+  mkdirSync(dir);
+  writeFileSync(join(dir, 'result.json'), '{}');
+  for (const word of [dir, join(dir, 'result.json')]) {
+    assert.deepEqual(resultTarget(word), { dir, name: '20261012T112354_merged', resultsDir: root, file: '20261012T112354_merged/result.json' });
+  }
+  assert.throws(() => resultTarget(root), /has no result\.json/);
+  const dotted = join(root, 'my.run');
+  mkdirSync(dotted);
+  writeFileSync(join(dotted, 'result.json'), '{}');
+  assert.throws(() => resultTarget(dotted), /letters, digits, - and _/);
 });
 
 test('eval results: entries per task, re-runs replace only their own tasks', () => {

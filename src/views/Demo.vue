@@ -1380,6 +1380,7 @@ export default {
         this.policyLabel = this.demo.currentPolicyPath?.split('/').pop() ?? this.policyLabel;
         this.state = 1;
         await this.selectPolicyFromUrl();
+        await this.openResultFromUrl();
       } catch (error) {
         this.state = -1;
         this.extra_error_message = error.toString();
@@ -1397,6 +1398,19 @@ export default {
       }
       this.currentPolicy = requested;
       await this.onPolicyChange(requested);
+    },
+    // `?result=<folder>/result.json` (set by `npm run benchmark view`) opens that saved result's page.
+    async openResultFromUrl() {
+      const file = new URLSearchParams(window.location.search).get('result');
+      if (!file) return;
+      try {
+        const run = await loadResult(file);
+        setBenchmarkResults(run, file);
+        await this.refreshSavedResults();
+        openResults(run);
+      } catch (e) {
+        this.benchmark.error = `Could not load ${file}: ${e.message}`;
+      }
     },
     /** Slider bounds for the currently loaded policy, falling back to this file's original hand-tuned defaults. */
     syncCommandLimits() {

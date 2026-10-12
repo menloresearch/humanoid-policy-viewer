@@ -39,6 +39,7 @@ npm run benchmark <policy>... [<benchmark>] [tests= repeats= jobs= robots= shard
 npm run benchmark init <dir>                     new benchmark, a copy of benchmarks/default
 npm run benchmark path-end <dir> [<test id>...]  where each test's path ends, for placing an end zone
 npm run benchmark merge <result dir...> [out=]   combine shards into one result
+npm run benchmark view <result dir> [port=] [no-open]   the viewer's results page on a result (same as /?result=<folder>/result.json)
 npm run benchmark:golden [update]                check a smoke run against test/fixtures/smoke-benchmark/golden.json
 
 HUGGING FACE
@@ -120,6 +121,10 @@ marked ✎ exist only when `editable` is on.
 | `/policy-library/<path>` | GET | Policy files (`.onnx`, `env.yaml`), confined to the library roots. |
 | `/api/results[?file=]` | GET, POST ✎, DELETE ✎ | Lists `benchmark_results/*/result.json`, or reads one. POST saves a result from the in-app Run: the server writes `benchmark_results/<timestamp>/{result.json,report.html}` and adds the provenance the browser cannot know (viewer commit, clean checkout, versions). |
 | `/api/save-log` | POST ✎ | Debug dumps into `logs/`. |
+
+The app reads two query parameters when it starts (`Demo.vue`): `?policy=lib:<path>` selects a policy from the library
+(`npm run hf` opens it), and `?result=<folder>/result.json` opens that saved result's page (`npm run benchmark view`
+opens it; it works on any server that lists the result).
 
 The static build serves the same data as files: `/static-data/policies.json`, `/static-data/tests.json`,
 `/static-data/results.json` (the listing) and `/static-data/result.json` (one result).

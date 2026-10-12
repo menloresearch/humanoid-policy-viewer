@@ -3,6 +3,8 @@
 // the result.json format, summaries, merging, the report shape) is
 // src/benchmark/run.js, which the viewer's Run shares.
 
+import { existsSync } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
 import { parseBenchmark, versionedTaskId } from '../src/benchmark/settings.js';
 
 /** "2/3" -> { index: 2, count: 3 } (1-based index). */
@@ -64,6 +66,26 @@ export function submitHint(run, dir) {
     lines.push(`${lines.length ? 'Not submittable' : 'Cannot be submitted to the Hub'}:`, ...[...shared, ...own].map((r) => `  - ${r}`));
   }
   return lines;
+}
+
+/** Where to look at the result in `dir` (shown relative to the shell, as typed): the viewer's results page, or the report file. */
+export function viewHint(dir, reportPath) {
+  return [`View it in the viewer with: npm run benchmark view ${dir}`, `Or open the report directly: ${reportPath}`];
+}
+
+/**
+ * The result `npm run benchmark view` was given: a result folder or its result.json.
+ * The viewer reads results as <folder>/result.json under one directory, so that
+ * directory is the folder's parent, and the folder name is limited to what it lists.
+ */
+export function resultTarget(word) {
+  const path = resolve(word);
+  const file = basename(path) === 'result.json' ? path : join(path, 'result.json');
+  if (!existsSync(file)) throw new Error(`${word} has no result.json; give a result folder written by npm run benchmark (benchmark_results/<timestamp>) or its result.json`);
+  const dir = dirname(file);
+  const name = basename(dir);
+  if (!/^[A-Za-z0-9_-]+$/.test(name)) throw new Error(`The viewer opens result folders named with letters, digits, - and _ only; rename ${dir}`);
+  return { dir, name, resultsDir: dirname(dir), file: `${name}/result.json` };
 }
 
 /** Task values of one policy as `task: value` lines, for the console. */

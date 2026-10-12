@@ -8,6 +8,7 @@
 //                  pulled on first use into ./benchmarks/<org>__<name> (default ./benchmarks/default)
 //   policyLibrary  { dir, roots } to serve; by default the HPV_POLICY_* variables if set, else
 //                  a folder of links to ./policies and every downloaded Hugging Face policy
+//   resultsDir     where results are listed and read (default ./benchmark_results, or HPV_BENCHMARK_RESULTS_DIR)
 //   host, port, open, logLevel   passed to Vite
 //   editable       false serves the app read-only (no route that writes)
 
@@ -30,6 +31,7 @@ export async function startViewer({
   policies = [],
   benchmark = null,
   policyLibrary = null,
+  resultsDir = null,
   host = '127.0.0.1',
   port,
   open = false,
@@ -43,6 +45,7 @@ export async function startViewer({
   for (const word of policies) await fetchPolicy(word, { cacheDir, env, log });
 
   const options = serverOptionsFromEnv(env);
+  if (resultsDir) options.resultsDir = resolve(resultsDir);
   if (policyLibrary) {
     options.policyLibraryDir = resolve(policyLibrary.dir);
     options.policyRoots = policyLibrary.roots;

@@ -40,8 +40,15 @@ A bare `org/name` is always a policy; write `datasets/` for a benchmark. Without
 protocol, asimov-1 commit, mujoco-js / onnxruntime-web / Chromium versions), the benchmark.yaml and test rows that
 ran, the policy (Hub commit, sha256 of the ONNX and env.yaml), and for every **cell** (one test, one repeat) the
 seed, the action delay drawn, the commands actually sent if a policy's command range clamped them, and the full
-metrics. `<out>/report.html` is the readable report. The run ends by printing the `npm run hf submit <out>` command,
-or why the result cannot be submitted.
+metrics. `<out>/report.html` is the readable report. The run ends by printing how to look at the result
+(`npm run benchmark view <out>`, and the path of `report.html` to open directly) and the `npm run hf submit <out>`
+command, or why the result cannot be submitted.
+
+To look at a result again later, run `npm run benchmark view <out>` (the folder or its `result.json`; add `no-open` to
+skip the browser, `port=<n>` to pick the port). It serves the viewer read-only and opens its results page on that
+result until you press Ctrl+C. Any running viewer does the same for the URL `/?result=<folder>/result.json`, for example
+`http://localhost:3000/?result=20261012T112354/result.json` on `npm run dev` for a result in `benchmark_results/`.
+Result folders are named with letters, digits, `-` and `_`.
 
 The results have three layers, and only the last is squashed into single numbers:
 

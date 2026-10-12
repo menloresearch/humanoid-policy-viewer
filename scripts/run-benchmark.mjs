@@ -21,10 +21,10 @@ import { rowToSequence } from '../src/benchmark/testRow.js';
 import { buildBenchmarkReportHtml } from '../src/simulation/benchmarkReport.js';
 import { runJobs } from './benchmarkBrowser.mjs';
 import { collectProvenance, policyFileHashes } from './benchmarkProvenance.mjs';
-import { formatOutcomes, formatTasks, parseShard, shardJobs, submitHint } from './benchmarkRun.mjs';
+import { formatOutcomes, formatTasks, parseShard, resultTarget, shardJobs, submitHint, viewHint } from './benchmarkRun.mjs';
 import { classifyTarget, describeTarget } from './benchmarkTargets.mjs';
 import { checkPolicyDir, readReferenceJointNames } from './policyChecks.mjs';
-import { parseWords, rejectSwallowedNpmFlags } from './cliArgs.mjs';
+import { parsePort, parseWords, rejectSwallowedNpmFlags } from './cliArgs.mjs';
 import { ensureDataset } from './hfDataset.mjs';
 import { ensurePolicy } from './hfPolicy.mjs';
 import { findLocalPolicy } from './localPolicy.mjs';
@@ -34,8 +34,8 @@ import { initBenchmark } from './benchmarkInit.mjs';
 
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-const KEYS = ['benchmark', 'policy', 'tests', 'repeats', 'jobs', 'robots', 'shard', 'out'];
-const FLAGS = ['force', 'watch', 'verbose', 'help'];
+const KEYS = ['benchmark', 'policy', 'tests', 'repeats', 'jobs', 'robots', 'shard', 'out', 'port'];
+const FLAGS = ['force', 'watch', 'verbose', 'help', 'no-open'];
 // Words this command took before submitting moved to `npm run hf submit`.
 const SUBMIT_MOVED = 'results are submitted separately now: npm run hf submit <result dir> [pr] [dry-run]';
 const RETIRED = ['upload', 'no-upload', 'pr', 'dry-run'];
@@ -44,10 +44,14 @@ const HINTS = Object.fromEntries(RETIRED.map((word) => [word, SUBMIT_MOVED]));
 const USAGE = `Usage:
   npm run benchmark <policy...> [<benchmark>] [key=value...] [flags...]
   npm run benchmark merge <result dir...>
+  npm run benchmark view <result dir | result.json> [port=<n>] [no-open]
   npm run benchmark init <dir>
   npm run benchmark path-end <dir> [<test id>...]
 
   merge                combine the out dirs of a sharded run (shard=)
+  view                 open a result on the viewer's results page, in your browser
+                       (the same page as http://localhost:<port>/?result=<folder>/result.json
+                       on a running \`npm run dev\`); Ctrl+C stops it
   init                 new benchmark: a copy of benchmarks/default (three example tests)
   path-end             where each test's commands end the path (x, y in m, 2 decimals) and
                        whether its end zone contains / is crossed by the path; JSON lines,
@@ -166,7 +170,9 @@ function printSummary(run, outDir) {
     if (outcomes) console.log(`  ${outcomes}`);
   }
   console.log('');
-  for (const line of submitHint(run, relative(process.cwd(), outDir) || '.')) console.log(line);
+  const dir = relative(process.cwd(), outDir) || '.';
+  for (const line of viewHint(dir, join(outDir, 'report.html'))) console.log(line);
+  for (const line of submitHint(run, dir)) console.log(line);
 }
 
 async function runBenchmarkCommand(args) {
@@ -298,6 +304,29 @@ async function mergeCommand(args) {
   return merged.cells.every((cell) => !cell.error);
 }
 
+/** Serves the viewer on one saved result and opens its results page; runs until Ctrl+C. */
+async function viewCommand({ positionals, options, flags }) {
+  if (!positionals[1]) throw new Error('view needs a result folder or its result.json');
+  if (positionals.length > 2) throw new Error('view takes one result');
+  const target = resultTarget(positionals[1]);
+  const path = `/?result=${encodeURIComponent(target.file)}`;
+  const { startViewer } = await import('./startViewer.mjs');
+  const { server } = await startViewer({
+    resultsDir: target.resultsDir,
+    port: parsePort(options.port),
+    open: flags.has('no-open') ? false : path,
+    editable: false,
+    logLevel: 'warn',
+  });
+  console.log(`Viewing ${join(target.dir, 'result.json')}`);
+  for (const url of server.resolvedUrls?.local ?? []) console.log(`  ➜  ${new URL(path, url)}`);
+  console.log(`Report file: ${join(target.dir, 'report.html')}\nCtrl+C to stop.`);
+  // Keeps running: the open server holds the process; a signal ends it.
+  return new Promise((done) => {
+    for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => server.close().then(() => done(true)));
+  });
+}
+
 function initCommand({ positionals }) {
   if (!positionals[1]) throw new Error('init needs <dir>');
   initBenchmark(resolve(positionals[1]));
@@ -311,7 +340,7 @@ function pathEndCommand({ positionals }) {
   return true;
 }
 
-const COMMANDS = { merge: mergeCommand, init: initCommand, 'path-end': pathEndCommand };
+const COMMANDS = { merge: mergeCommand, view: viewCommand, init: initCommand, 'path-end': pathEndCommand };
 
 async function main() {
   rejectSwallowedNpmFlags(process.env, { keys: KEYS, flags: FLAGS, hints: HINTS });
