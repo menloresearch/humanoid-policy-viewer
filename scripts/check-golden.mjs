@@ -9,7 +9,7 @@
 // if only task values moved (a new metric or metric version), just `update`.
 
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -38,6 +38,7 @@ export function goldenView(run) {
 
 function main() {
   const out = mkdtempSync(join(tmpdir(), 'hpv-golden-'));
+  process.on('exit', () => rmSync(out, { recursive: true, force: true }));
   const result = spawnSync(process.execPath, [join(appDir, 'scripts/run-benchmark.mjs'), POLICY, BENCHMARK, 'jobs=1', `out=${out}`], { cwd: appDir, stdio: 'inherit' });
   if (result.status !== 0) {
     console.error('The smoke run failed; see above.');

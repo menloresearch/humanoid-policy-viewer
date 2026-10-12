@@ -139,7 +139,7 @@ export function compatibilityProblems(benchmark, { protocol = BENCHMARK_PROTOCOL
   const problems = [];
   if (benchmark.harness.protocol !== protocol) {
     const commit = benchmark.harness.tested_commit ? ` (it was validated on viewer commit ${benchmark.harness.tested_commit})` : '';
-    problems.push(`the benchmark needs protocol${benchmark.harness.protocol}, this viewer implements ${protocol}${commit}`);
+    problems.push(`the benchmark needs protocol ${benchmark.harness.protocol}, this viewer implements ${protocol}${commit}`);
   }
   const robot = benchmark.requires?.robot?.name ?? benchmark.requires?.robot;
   if (robot && !ROBOTS.includes(robot)) problems.push(`robot "${robot}" is not supported (supported: ${ROBOTS.join(', ')})`);
