@@ -111,8 +111,9 @@ keeps its loaded policy and is handed that policy's cells first, and the longest
 
 A cell's result depends only on the policy files, the test, its seed and the viewer commit. The seed comes from the
 benchmark seed, the test id and the repeat index, never from run order, so `jobs=1`, `jobs=4` and merged shards give
-identical cells. Each extra page costs some start-up time (loading MuJoCo and the policy), so for a short benchmark
-fewer pages can be faster.
+identical cells. Each extra page costs some start-up time (loading MuJoCo, the robot's scene folder and the policy),
+so for a short benchmark fewer pages can be faster. A headless page never draws: Chromium's WebGL is
+software there, and drawing while the page loaded made start-up several times slower.
 
 A test's repeats are one policy with one simulation state per repeat, stepped in turn inside a page, up to
 `robots=` of them (a test with more repeats is split into groups). Each repeat keeps its own seed, so the cells are

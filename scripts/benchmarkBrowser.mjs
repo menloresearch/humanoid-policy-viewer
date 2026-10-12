@@ -61,6 +61,8 @@ export async function runJobs({
 }) {
   const { chromium } = await import('@playwright/test');
   const queue = jobs.slice();
+  // The page draws only when someone watches: a visible browser or a real-time run (as runBenchmarkGroupOnPage).
+  const draw = !headless || realtime;
   const browser = await chromium.launch({ headless, args: CHROMIUM_ARGS });
   const browserVersion = browser.version();
   try {
@@ -68,6 +70,8 @@ export async function runJobs({
     const openPage = async () => {
       const id = ++pageCount;
       const page = await browser.newPage();
+      // Nothing a run measures depends on drawing, and a page that draws while it loads is several times slower.
+      if (!draw) await page.addInitScript(() => { globalThis.__hpvNoDraw = true; });
       page.on('console', (msg) => {
         if (!verbose && msg.type() !== 'error') return;
         // Chromium's "Failed to load resource" lines do not say which resource; the location does.

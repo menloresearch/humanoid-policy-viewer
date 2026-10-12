@@ -164,7 +164,9 @@ export class MuJoCoDemo {
     this.showIdealMarker = true;
     this._buildIdealMarker();
 
-    this.renderer.setAnimationLoop(this.render.bind(this));
+    // A headless benchmark page (benchmarkBrowser.mjs) sets __hpvNoDraw before the app loads: drawing
+    // with software WebGL while the scene and policy load made that take ~45 s instead of ~10 s.
+    if (!globalThis.__hpvNoDraw) this.renderer.setAnimationLoop(this.render.bind(this));
 
     this.reloadScene = reloadScene.bind(this);
     this.reloadPolicy = reloadPolicy.bind(this);
