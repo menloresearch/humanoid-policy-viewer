@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 // npm run hf <org/name[@rev] | folder | file.onnx> [benchmark=<...>] [port=<n>] [no-open]
-// npm run hf pull|diff|baseline|publish|release ...
+// npm run hf pull|diff|baseline|publish|release|submit ...
 //
 // The Hugging Face command. With a policy it downloads the policy (or links one
 // from disk) and starts the viewer with it selected. Its verbs work on a
-// benchmark dataset on the Hub (scripts/hfBenchmark.mjs).
+// benchmark dataset on the Hub (scripts/hfBenchmark.mjs), or submit benchmark
+// results to the policies' model repos (scripts/hfSubmit.mjs).
 // Run with no arguments for the usage text.
 // Nothing here may import an npm dependency before setup() has installed them.
 
@@ -36,13 +37,23 @@ it. Example: npm run hf ./my-policy
 
 Verbs, for a benchmark dataset on the Hub:
   pull <dataset>[@rev|@refs/pr/<n>] <dir>  working copy of a Hub dataset (e.g. datasets/org/bench@refs/pr/3)
-  diff <dir>                               what changed since the pulled revision
-  baseline <dir> [policy=<policy>...]      run reference policies on the working copy and on the pulled
-                                           revision; writes <dir>/baseline.md
-  publish <dir> [repo=<org/name>] [pr] [create] [dry-run]
-                                           check, build eval.yaml + the dataset card, then commit (owner) or
-                                           open a pull request; "create" makes a new PRIVATE dataset repo
-  release <dataset> rev=<commit>           tag a merged revision v<version>
+  diff <dir> [repo=] [base=]               what changed compared with the dataset's main (or base=<rev>)
+  baseline <dir> [repo=] [base=] [policy=<policy>...]
+                                           run reference policies on the folder and on main (or base=);
+                                           writes <dir>/baseline.md
+  publish <dir> [repo=<org/name>] [base=<rev>] [pr] [create] [dry-run]
+                                           check against main (or base=, which must still be main), build
+                                           eval.yaml + the dataset card, then commit and tag v<version>
+                                           (owner) or open a pull request; "create" makes a new PRIVATE
+                                           dataset repo
+  release <dataset> rev=<commit>           tag a revision v<version> (a merged pull request)
+
+  repo= is the dataset (org/name); it can be left out for a folder made by pull.
+
+For benchmark results:
+  submit <result dir> [pr] [dry-run]       add the results of \`npm run benchmark\` to each policy's model
+                                           repo (.eval_results + eval_logs): a commit if you own it, else
+                                           (or with pr) a pull request. Only reproducible results.
 
 Write options as key=value and flags as plain words, without "--".
 
@@ -53,10 +64,11 @@ Environment:
 
 const VERBS = {
   pull: {},
-  diff: {},
-  baseline: { keys: ['policy'], repeatable: ['policy'] },
-  publish: { keys: ['repo'], flags: ['pr', 'create', 'dry-run'] },
+  diff: { keys: ['repo', 'base'] },
+  baseline: { keys: ['policy', 'repo', 'base'], repeatable: ['policy'] },
+  publish: { keys: ['repo', 'base'], flags: ['pr', 'create', 'dry-run'] },
   release: { keys: ['rev'] },
+  submit: { flags: ['pr', 'dry-run'] },
 };
 const VIEW = { keys: ['benchmark', 'port'], flags: ['no-open'] };
 // Names the old `npm run hf` took as --flags, spelled the new way.
@@ -75,17 +87,21 @@ function needDir(verb, dir) {
 }
 
 async function runVerb(verb, argv) {
-  if (verb === 'submit') throw new Error('npm run hf submit is not yet implemented.');
   const { positionals, options, flags } = words(argv, VERBS[verb]);
   if (flags.has('help')) return console.log(USAGE);
   const [a, b] = positionals;
+  const { repo, base } = options;
   setup();
+  if (verb === 'submit') {
+    const { submit } = await import('./hfSubmit.mjs');
+    return submit(needDir(verb, a), { pr: flags.has('pr'), dryRun: flags.has('dry-run') });
+  }
   const hub = await import('./hfBenchmark.mjs');
   switch (verb) {
     case 'pull': return hub.pull(a, b && resolve(b));
-    case 'diff': return hub.diff(needDir(verb, a));
-    case 'baseline': return hub.baseline(needDir(verb, a), options.policy ?? []);
-    case 'publish': return hub.publish(needDir(verb, a), { repo: options.repo, pr: flags.has('pr'), create: flags.has('create'), dryRun: flags.has('dry-run') });
+    case 'diff': return hub.diff(needDir(verb, a), { repo, base });
+    case 'baseline': return hub.baseline(needDir(verb, a), options.policy ?? [], { repo, base });
+    case 'publish': return hub.publish(needDir(verb, a), { repo, base, pr: flags.has('pr'), create: flags.has('create'), dryRun: flags.has('dry-run') });
     case 'release': return hub.release(a, options.rev);
   }
 }
@@ -155,7 +171,7 @@ async function view(argv) {
 export function command(argv) {
   const first = argv[0];
   if (first === undefined || first === 'help') return 'help';
-  if (first === 'submit' || Object.hasOwn(VERBS, first)) return first;
+  if (Object.hasOwn(VERBS, first)) return first;
   return 'view';
 }
 

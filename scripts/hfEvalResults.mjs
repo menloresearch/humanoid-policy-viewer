@@ -1,4 +1,4 @@
-// Builds the files a benchmark run adds to a model repo on the Hub:
+// Builds the files `npm run hf submit` adds to a model repo on the Hub:
 //
 //   .eval_results/<dataset org>__<dataset name>.yaml
 //       Hugging Face eval results (https://huggingface.co/docs/hub/eval-results):
@@ -70,7 +70,7 @@ export function mergeEvalResults(existingText, entries) {
   }
   const replaced = new Set(entries.map((entry) => `${entry.dataset.id}|${entry.dataset.task_id}`));
   const kept = existing.filter((entry) => !replaced.has(`${entry?.dataset?.id}|${entry?.dataset?.task_id}`));
-  const header = '# Benchmark results written by humanoid-policy-viewer (npm run benchmark).\n'
+  const header = '# Benchmark results written by humanoid-policy-viewer (npm run hf submit).\n'
     + '# Format: https://huggingface.co/docs/hub/eval-results\n';
   // The spec wants `date` as a quoted string (unquoted, YAML 1.1 readers turn
   // it into a timestamp); no anchors/aliases for repeated values; no folded lines.

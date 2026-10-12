@@ -1,5 +1,5 @@
-// Fetches a benchmark dataset (benchmark.yaml + data/**/test.jsonl, see benchmarkDir.mjs)
-// from Hugging Face into <cache>/hf-datasets/<org>__<name>/<sha>/. A commit
+// Fetches a benchmark dataset (benchmark.yaml, data/*/test.jsonl and the other
+// published files, see benchmarkDir.mjs) from Hugging Face into <cache>/hf-datasets/<org>__<name>/<sha>/. A commit
 // never changes, so a revision already in the cache is used as is, and a run
 // always records the exact dataset commit it used.
 
@@ -9,12 +9,16 @@ import { defaultCacheDir, downloadFile } from './hfPolicy.mjs';
 
 export const DATASET_META_FILE = '.hf-dataset.json';
 
-// Only what the runner and benchmark tooling read; never large data files.
+// The files of a benchmark folder that `hf publish` uploads as they are. It also
+// uploads eval.yaml and README.md, which it builds (benchmarkDir.mjs hubFiles).
+export const BENCHMARK_FILES = [
+  /^benchmark\.yaml$/, /^[A-Z_]+\.md$/, /^data\/[^/]+\/test\.jsonl$/, /^calibration\/[^/]+\.json$/,
+  /^tools\/[^/]+\.(mjs|js|py)$/, // optional scripts that generate the tests, kept for reviewers
+];
+
+// Everything `hf publish` uploads, so a pulled copy publishes back unchanged; never large data files.
 export function datasetFilesToFetch(files) {
-  return files.filter((file) => file === 'benchmark.yaml'
-    || file === 'eval.yaml'
-    || file === 'README.md'
-    || /^data\/[^/]+\/test\.jsonl$/.test(file));
+  return files.filter((file) => file === 'eval.yaml' || BENCHMARK_FILES.some((re) => re.test(file)));
 }
 
 export function hubSettings(env = process.env) {
@@ -29,7 +33,8 @@ export async function fetchDatasetInfo(id, revision, { endpoint, token, fetchImp
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
   if (response.status === 401 || response.status === 404) {
-    throw new Error(`Hugging Face dataset ${id}@${revision} was not found, or it is private (set HF_TOKEN to use a private dataset)`);
+    const error = new Error(`Hugging Face dataset ${id}@${revision} was not found, or it is private (set HF_TOKEN to use a private dataset)`);
+    throw Object.assign(error, { status: response.status });
   }
   if (!response.ok) throw new Error(`Hugging Face API returned ${response.status} for dataset ${id}@${revision}`);
   const info = await response.json();

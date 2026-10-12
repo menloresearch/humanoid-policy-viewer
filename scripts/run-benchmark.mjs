@@ -1,17 +1,17 @@
 #!/usr/bin/env node
 // npm run benchmark <policy...> [benchmark] [options]
-// npm run benchmark merge <dir...> [upload] [pr] [dry-run]
+// npm run benchmark merge <dir...>
 // npm run benchmark init <dir> | path-end <dir> [<test id>...]
 //
 // Benchmarks policies against a benchmark (a Hugging Face benchmark
 // dataset or a local folder; see scripts/benchmarkDir.mjs) in headless
-// Chromium, writes result.json + report.html + the .eval_results entries, and,
-// when the run is shareable, uploads them to each policy's Hub repo.
+// Chromium and writes result.json + report.html. It never uploads: a result
+// that can be reproduced is submitted afterwards with `npm run hf submit <dir>`.
 // Run with no arguments for the full usage text.
 
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmdirSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { availableParallelism, tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compatibilityProblems, expandCells, selectTests } from '../src/benchmark/settings.js';
 import { rowToSequence } from '../src/benchmark/testRow.js';
@@ -19,28 +19,30 @@ import { buildBenchmarkReportHtml } from '../src/simulation/benchmarkReport.js';
 import { runJobs } from './benchmarkBrowser.mjs';
 import { collectProvenance, policyFileHashes } from './benchmarkProvenance.mjs';
 import {
-  MAX_ROBOTS, RESULT_SCHEMA, buildJobs, formatOutcomes, formatTasks, isComplete, mergeResults, parseShard, resultForPolicy, shardJobs, summarizeRun, toReportRun, uploadBlockers,
+  MAX_ROBOTS, RESULT_SCHEMA, buildJobs, formatOutcomes, formatTasks, isComplete, mergeResults, parseShard, shardJobs, submitHint, summarizeRun, toReportRun,
 } from './benchmarkRun.mjs';
 import { classifyTarget, describeTarget } from './benchmarkTargets.mjs';
 import { checkPolicyDir, readReferenceJointNames } from './policyChecks.mjs';
 import { parseWords, rejectSwallowedNpmFlags } from './cliArgs.mjs';
-import { commitFiles, readRepoText } from './hfCommit.mjs';
 import { ensureDataset } from './hfDataset.mjs';
-import { buildEvalResultEntries, evalLogsDir, evalResultsPath, mergeEvalResults } from './hfEvalResults.mjs';
 import { ensurePolicy } from './hfPolicy.mjs';
 import { findLocalPolicy } from './localPolicy.mjs';
 import { assertTestsRunnable, pathEnds } from './benchmarkCheck.mjs';
-import { loadBenchmarkDir } from './benchmarkDir.mjs';
+import { defaultBenchmarkDir, loadBenchmarkDir } from './benchmarkDir.mjs';
 import { initBenchmark } from './benchmarkInit.mjs';
 
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 const KEYS = ['benchmark', 'policy', 'tests', 'repeats', 'jobs', 'robots', 'shard', 'out'];
-const FLAGS = ['pr', 'dry-run', 'no-upload', 'upload', 'force', 'watch', 'verbose', 'help'];
+const FLAGS = ['force', 'watch', 'verbose', 'help'];
+// Words this command took before submitting moved to `npm run hf submit`.
+const SUBMIT_MOVED = 'results are submitted separately now: npm run hf submit <result dir> [pr] [dry-run]';
+const RETIRED = ['upload', 'no-upload', 'pr', 'dry-run'];
+const HINTS = Object.fromEntries(RETIRED.map((word) => [word, SUBMIT_MOVED]));
 
 const USAGE = `Usage:
   npm run benchmark <policy...> [<benchmark>] [key=value...] [flags...]
-  npm run benchmark merge <result dir...> [upload] [pr] [dry-run]
+  npm run benchmark merge <result dir...>
   npm run benchmark init <dir>
   npm run benchmark path-end <dir> [<test id>...]
 
@@ -52,8 +54,8 @@ const USAGE = `Usage:
 
 A policy is a Hugging Face model repo (org/name, org/name@rev or its URL) or a local
 folder / .onnx file. A benchmark is a Hub dataset (datasets/org/name[@rev] or
-its URL) or a local folder with a benchmark.yaml. Without one, the released
-default (src/benchmark/default-suite.json) is used.
+its URL) or a local folder with a benchmark.yaml. Without one, ./benchmarks/default
+is used.
 
 Options (no "--" needed):
   benchmark=<dir|id>   the benchmark, if not given as a word
@@ -67,22 +69,20 @@ Options (no "--" needed):
   out=<dir>            where to write results (default: benchmark_results/<timestamp>)
 
 Flags:
-  dry-run              do everything except write to the Hub; shows what would be written
-  no-upload            never upload
-  pr                   upload as a pull request even if you could commit directly
   force                run even if this viewer does not match the benchmark (local-only)
   watch                show the browser and run in real time, one page (a test's
                        repeats walk side by side as see-through robots)
   verbose              print all browser console output
 
-Results are uploaded only when they can be reproduced: Hub policy + Hub benchmark,
-a clean viewer checkout implementing the benchmark's protocol, the whole benchmark, and
-no failed cells. Uploading needs HF_TOKEN (or \`hf auth login\`).
+Nothing is uploaded. A result that can be reproduced (Hub policy + Hub benchmark
+pinned to a commit, a clean viewer checkout implementing the benchmark's protocol,
+the whole benchmark, no failed cells) is submitted to each policy's Hub repo with
+\`npm run hf submit <result dir> [pr] [dry-run]\`; the run says whether it can be.
 
 Examples:
   npm run benchmark menloresearch/asimov1-loco
   npm run benchmark ./policies/model_Aug_18_1 benchmark=./benchmarks/default
-  npm run benchmark menloresearch/asimov1-loco datasets/<org>/<name>@v1 pr
+  npm run benchmark menloresearch/asimov1-loco datasets/<org>/<name>@v1
   npm run benchmark menloresearch/asimov1-loco test/fixtures/smoke-benchmark jobs=2`;
 
 function timestamp() {
@@ -100,14 +100,7 @@ function defaultJobs() {
   return Math.max(1, Math.floor(availableParallelism() / 2));
 }
 
-async function resolveBenchmark(target, log) {
-  if (!target) {
-    const fallback = JSON.parse(readFileSync(join(appDir, 'src/benchmark/default-suite.json'), 'utf8'));
-    if (!fallback.dataset || !fallback.revision) {
-      throw new Error(`No default benchmark has been released yet (src/benchmark/default-suite.json). Give one: a local folder (e.g. test/fixtures/smoke-benchmark) or datasets/<org>/<name>.`);
-    }
-    target = { kind: 'benchmark', source: 'hub', id: fallback.dataset, revision: fallback.revision };
-  }
+async function resolveBenchmark(target = { kind: 'benchmark', source: 'local', path: defaultBenchmarkDir(appDir) }, log) {
   if (target.source === 'local') {
     return { ...loadBenchmarkDir(target.path), info: { source: 'local', path: target.path } };
   }
@@ -163,69 +156,16 @@ function writeOutputs(outDir, run) {
   writeFileSync(join(outDir, 'report.html'), buildBenchmarkReportHtml(toReportRun(run)));
 }
 
-function slug(text) {
-  return text.replace(/^local:/, '').replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^_+/, '').slice(-80);
-}
-
-/** Writes each policy's .eval_results preview locally and uploads where allowed. */
-async function publishResults(run, outDir, { upload, dryRun, forcePr }) {
-  let failed = false;
+/** Each policy's scores, then whether the result can be submitted to the Hub. */
+function printSummary(run, outDir) {
   for (const policy of run.policies) {
     console.log(`\n${policy.label}`);
     for (const line of formatTasks(run, policy.key)) console.log(`  ${line}`);
     const outcomes = formatOutcomes(run, policy.key);
     if (outcomes) console.log(`  ${outcomes}`);
-    const blockers = uploadBlockers(run, policy.key);
-    const logsDir = run.benchmark.id ? evalLogsDir(run.benchmark.id, run.benchmark.raw.version) : null;
-    const sourceUrl = policy.repo && logsDir ? `https://huggingface.co/${policy.repo}/blob/main/${logsDir}/report.html` : null;
-    const entries = run.benchmark.id ? buildEvalResultEntries(run, policy.key, { sourceUrl }) : [];
-    const policyOut = join(outDir, 'policies', slug(policy.id));
-    mkdirSync(policyOut, { recursive: true });
-    if (entries.length) writeFileSync(join(policyOut, 'eval_results.yaml'), mergeEvalResults(null, entries));
-
-    if (blockers.length) {
-      if (upload) {
-        console.log('  Not uploaded:');
-        for (const reason of blockers) console.log(`    - ${reason}`);
-      }
-      continue;
-    }
-    if (!upload) {
-      console.log('  Shareable; not uploaded (no-upload).');
-      continue;
-    }
-    const policyResult = resultForPolicy(run, policy.key);
-    const repo = { type: 'model', name: policy.repo };
-    const resultsPath = evalResultsPath(run.benchmark.id);
-    const existing = await readRepoText({ repo, path: resultsPath, revision: policy.sha }).catch(() => null);
-    const files = [
-      { path: resultsPath, content: mergeEvalResults(existing, entries) },
-      { path: `${logsDir}/result.json`, content: JSON.stringify(policyResult) },
-      { path: `${logsDir}/report.html`, content: buildBenchmarkReportHtml(toReportRun(policyResult)) },
-    ];
-    if (dryRun) {
-      console.log(`  dry-run: would write to ${policy.repo}: ${files.map((f) => f.path).join(', ')}`);
-      for (const file of files) writeFileSync(join(policyOut, file.path.replace(/\//g, '__')), file.content);
-      console.log(`  (copies in ${policyOut})`);
-      continue;
-    }
-    try {
-      const result = await commitFiles({
-        repo,
-        files,
-        title: `Add ${run.benchmark.raw.name} v${run.benchmark.raw.version} benchmark results`,
-        description: `Results of \`npm run benchmark\` (humanoid-policy-viewer ${run.provenance.hpv.commit}, protocol ${run.provenance.hpv.protocol}) on datasets/${run.benchmark.id} at ${run.benchmark.sha}.`,
-        parentCommit: policy.sha,
-        forcePr,
-        log: (line) => console.log(`  ${line}`),
-      });
-      console.log(`  Uploaded (${result.mode === 'pr' ? 'pull request' : 'commit'}): ${result.url}`);
-    } catch (error) {
-      failed = true;
-      console.error(`  Upload failed: ${error.message}`);
-    }
   }
-  return !failed;
+  console.log('');
+  for (const line of submitHint(run, relative(process.cwd(), outDir) || '.')) console.log(line);
 }
 
 async function runBenchmarkCommand(args) {
@@ -250,7 +190,7 @@ async function runBenchmarkCommand(args) {
   const loaded = await resolveBenchmark(benchmarks[0], log);
   const problems = compatibilityProblems(loaded.benchmark);
   if (problems.length && !flags.has('force')) {
-    throw new Error(`This viewer cannot run ${describeTarget(benchmarks[0] ?? { source: 'hub', kind: 'benchmark', id: loaded.info.id })}:\n${problems.map((p) => `  - ${p}`).join('\n')}\n(add "force" to run it anyway; the results will be local-only)`);
+    throw new Error(`This viewer cannot run ${describeTarget(benchmarks[0] ?? { kind: 'benchmark', ...loaded.info })}:\n${problems.map((p) => `  - ${p}`).join('\n')}\n(add "force" to run it anyway; the results will be local-only)`);
   }
   // Every test must load before any browser starts, so a broken test fails in a second, not mid-run.
   assertTestsRunnable(loaded);
@@ -353,17 +293,13 @@ async function runBenchmarkCommand(args) {
     console.log(`Shard ${shard.index}/${shard.count} done. When every shard has finished: npm run benchmark merge <their out dirs...>`);
     return errors.length === 0;
   }
-  const uploaded = await publishResults(run, outDir, {
-    upload: !flags.has('no-upload'),
-    dryRun: flags.has('dry-run'),
-    forcePr: flags.has('pr'),
-  });
+  printSummary(run, outDir);
   if (errors.length) console.error(`\n${errors.length} cell(s) failed; see result.json.`);
-  return errors.length === 0 && uploaded;
+  return errors.length === 0;
 }
 
 async function mergeCommand(args) {
-  const { positionals, options, flags } = args;
+  const { positionals, options } = args;
   const dirs = positionals.slice(1);
   if (!dirs.length) throw new Error('merge needs the out directories of every shard');
   const runs = dirs.map((dir) => {
@@ -374,12 +310,8 @@ async function mergeCommand(args) {
   const outDir = resolve(options.out ?? join(appDir, 'benchmark_results', `${timestamp()}_merged`));
   writeOutputs(outDir, merged);
   console.log(`Merged ${runs.length} shards into ${join(outDir, 'result.json')}`);
-  const ok = await publishResults(merged, outDir, {
-    upload: flags.has('upload') && !flags.has('no-upload'),
-    dryRun: flags.has('dry-run'),
-    forcePr: flags.has('pr'),
-  });
-  return ok && merged.cells.every((cell) => !cell.error);
+  printSummary(merged, outDir);
+  return merged.cells.every((cell) => !cell.error);
 }
 
 function initCommand({ positionals }) {
@@ -398,8 +330,10 @@ function pathEndCommand({ positionals }) {
 const COMMANDS = { merge: mergeCommand, init: initCommand, 'path-end': pathEndCommand };
 
 async function main() {
-  rejectSwallowedNpmFlags(process.env, { keys: KEYS, flags: FLAGS });
-  const args = parseWords(process.argv.slice(2), { keys: KEYS, flags: FLAGS, repeatable: ['policy'] });
+  rejectSwallowedNpmFlags(process.env, { keys: KEYS, flags: FLAGS, hints: HINTS });
+  const args = parseWords(process.argv.slice(2), { keys: KEYS, flags: FLAGS, repeatable: ['policy'], hints: HINTS });
+  const retired = args.positionals.filter((word) => RETIRED.includes(word));
+  if (retired.length) throw new Error(`"${retired.join(' ')}": ${SUBMIT_MOVED}`);
   if (args.flags.has('help') || (!args.positionals.length && !args.options.policy)) {
     console.log(USAGE);
     return args.flags.has('help');

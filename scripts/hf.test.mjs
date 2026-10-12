@@ -43,8 +43,9 @@ test('old --flags fail with the words form to write instead', () => {
   assert.match(run.stderr, /org\/name@rev/);
 });
 
-test('verbs check their own words, and submit is reserved', () => {
-  assert.match(hf('submit').stderr, /not yet implemented/);
+test('verbs check their own words', () => {
+  assert.match(hf('submit').stderr, /submit needs <dir>/);
+  assert.match(hf('submit', 'x', 'base=main').stderr, /Unknown option "base="/);
   assert.match(hf('diff', 'port=3').stderr, /Unknown option "port="/);
   assert.match(hf('release', '--rev=abc').stderr, /write rev=abc/);
   const usage = hf();

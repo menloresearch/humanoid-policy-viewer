@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { parsePort, parseWords, rejectSwallowedNpmFlags, swallowedNpmFlags } from './cliArgs.mjs';
 import { classifyTarget } from './benchmarkTargets.mjs';
-import { MAX_ROBOTS, buildJobs, groupCells, mergeResults, parseShard, shardJobs, takeNextJob, uploadBlockers, RESULT_SCHEMA } from './benchmarkRun.mjs';
+import { MAX_ROBOTS, buildJobs, groupCells, mergeResults, parseShard, shardJobs, submitHint, takeNextJob, uploadBlockers, RESULT_SCHEMA } from './benchmarkRun.mjs';
 import { buildEvalResultEntries, evalResultsPath, mergeEvalResults } from './hfEvalResults.mjs';
 import { commitFiles, decideCommitMode } from './hfCommit.mjs';
 import { datasetFilesToFetch } from './hfDataset.mjs';
@@ -131,6 +131,27 @@ test('only reproducible, complete, error-free runs may be uploaded', () => {
   assert.match(uploadBlockers(fakeRun({ overrides: { tests: ['a/x'], repeats: null, force: false } }), 'm0').join(), /tests=/);
   assert.match(uploadBlockers(fakeRun({ cells: [] }), 'm0').join(), /missing/);
   assert.match(uploadBlockers(fakeRun({ cells: [{ policyKey: 'm0', cellId: 'a/x#0', testId: 'a/x', error: 'boom' }] }), 'm0').join(), /boom/);
+  assert.match(uploadBlockers(fakeRun({ benchmark: { ...fakeRun().benchmark, sha: null } }), 'm0').join(), /not pinned/);
+  const protocol = fakeRun();
+  protocol.provenance.hpv.protocol = 2;
+  assert.match(uploadBlockers(protocol, 'm0').join(), /needs protocol 1.*implements 2/);
+  const unknown = fakeRun();
+  delete unknown.provenance.hpv.dirty;
+  assert.match(uploadBlockers(unknown, 'm0').join(), /uncommitted/);
+  assert.match(uploadBlockers(fakeRun({ shard: { index: 1, count: 2 } }), 'm0').join(), /merge the shards/);
+});
+
+test('the end of a run says how to submit it, or why it cannot be', () => {
+  assert.deepEqual(submitHint(fakeRun(), 'out'), ['Submit to the Hub with: npm run hf submit out [pr] [dry-run]']);
+  const local = fakeRun({ benchmark: { ...fakeRun().benchmark, source: 'local' } });
+  local.policies.push({ ...local.policies[0], key: 'm1', id: 'local:p', label: 'p', source: 'local' });
+  const lines = submitHint(local, 'out');
+  assert.equal(lines[0], 'Cannot be submitted to the Hub:');
+  assert.equal(lines.filter((line) => /benchmark is a local folder/.test(line)).length, 1);
+  assert.ok(lines.includes('  - p: the policy is a local folder, not a Hugging Face model repo'));
+  const mixed = fakeRun();
+  mixed.policies.push({ ...mixed.policies[0], key: 'm1', id: 'local:p', label: 'p', source: 'local' });
+  assert.match(submitHint(mixed, 'out').join('\n'), /^Submit to the Hub with.*\nNot submittable:\n {2}- p: the policy is a local folder/);
 });
 
 test('merge needs every shard of the same run exactly once', () => {
@@ -220,8 +241,8 @@ test('a refused direct commit is retried as a pull request', async () => {
 
 test('only benchmark files are fetched from a dataset', () => {
   assert.deepEqual(
-    datasetFilesToFetch(['benchmark.yaml', 'eval.yaml', 'README.md', 'suites/smoke.yaml', 'data/push/test.jsonl', 'data/push/big.parquet', 'calibration/v1.json']),
-    ['benchmark.yaml', 'eval.yaml', 'README.md', 'data/push/test.jsonl'],
+    datasetFilesToFetch(['benchmark.yaml', 'eval.yaml', 'README.md', 'CHANGELOG.md', 'suites/smoke.yaml', 'data/push/test.jsonl', 'data/push/big.parquet', 'calibration/v1.json', 'tools/gen.py', 'tools/x/deep.py']),
+    ['benchmark.yaml', 'eval.yaml', 'README.md', 'CHANGELOG.md', 'data/push/test.jsonl', 'calibration/v1.json', 'tools/gen.py'],
   );
 });
 

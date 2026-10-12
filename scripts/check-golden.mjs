@@ -38,7 +38,7 @@ export function goldenView(run) {
 
 function main() {
   const out = mkdtempSync(join(tmpdir(), 'hpv-golden-'));
-  const result = spawnSync(process.execPath, [join(appDir, 'scripts/run-benchmark.mjs'), POLICY, BENCHMARK, 'jobs=1', 'no-upload', `out=${out}`], { cwd: appDir, stdio: 'inherit' });
+  const result = spawnSync(process.execPath, [join(appDir, 'scripts/run-benchmark.mjs'), POLICY, BENCHMARK, 'jobs=1', `out=${out}`], { cwd: appDir, stdio: 'inherit' });
   if (result.status !== 0) {
     console.error('The smoke run failed; see above.');
     process.exit(1);
