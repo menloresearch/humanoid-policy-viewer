@@ -1,20 +1,20 @@
 // The parts of a benchmark run that do not need a browser: which jobs a shard
-// runs and in what order, the run.json format, per-model summaries, whether a
+// runs and in what order, the result.json format, per-policy summaries, whether a
 // result may be uploaded, and merging shard outputs. run-benchmark.mjs wires
 // these to the browser pool (benchmarkBrowser.mjs).
 //
-// run.json (schema "hpv-benchmark-run/1") is self-contained: it embeds the
-// suite.yaml and test rows it ran, so it can be summarised, merged and turned
-// into a report without the dataset or the models.
+// result.json (schema "hpv-benchmark-result/1") is self-contained: it embeds the
+// benchmark.yaml and test rows it ran, so it can be summarised, merged and turned
+// into a report without the benchmark or the policies.
 
-import { parseSuite, selectTests, versionedTaskId } from '../src/benchmark/suite.js';
+import { parseBenchmark, selectTests, versionedTaskId } from '../src/benchmark/settings.js';
 import { computeTasks, summarizeTests } from '../src/benchmark/summary.js';
 import { rowToSequence } from '../src/benchmark/testRow.js';
 import { MAX_ROBOTS } from '../src/simulation/benchmarkRunner.js';
 
 export { MAX_ROBOTS };
 
-export const RUN_SCHEMA = 'hpv-benchmark-run/1';
+export const RESULT_SCHEMA = 'hpv-benchmark-result/1';
 
 /**
  * The repeats of each test in groups of at most `maxRobots`, in repeat order
@@ -36,17 +36,17 @@ export function groupCells(cells, maxRobots = MAX_ROBOTS) {
 }
 
 /**
- * Every (model, group of cells) job, in the order a shard partition and the
+ * Every (policy, group of cells) job, in the order a shard partition and the
  * queue use. A job runs one test's repeats (up to `maxRobots`) on one page.
  */
-export function buildJobs(models, cells, { maxRobots = MAX_ROBOTS } = {}) {
+export function buildJobs(policies, cells, { maxRobots = MAX_ROBOTS } = {}) {
   const jobs = [];
-  for (const model of models) for (const group of groupCells(cells, maxRobots)) jobs.push({ modelKey: model.key, cells: group });
+  for (const policy of policies) for (const group of groupCells(cells, maxRobots)) jobs.push({ policyKey: policy.key, cells: group });
   // Most work first (test length x robots), so a long job never starts last
   // and holds up the whole run.
   const work = (job) => job.cells[0].duration * job.cells.length;
   return jobs.sort((a, b) => work(b) - work(a)
-    || a.modelKey.localeCompare(b.modelKey)
+    || a.policyKey.localeCompare(b.policyKey)
     || a.cells[0].cellId.localeCompare(b.cells[0].cellId));
 }
 
@@ -65,30 +65,30 @@ export function shardJobs(jobs, shard) {
   return jobs.filter((_, i) => i % shard.count === shard.index - 1);
 }
 
-/** Next job for a page that last ran `lastModelKey`; prefers the same model to avoid a reload. */
-export function takeNextJob(queue, lastModelKey) {
+/** Next job for a page that last ran `lastPolicyKey`; prefers the same policy to avoid a reload. */
+export function takeNextJob(queue, lastPolicyKey) {
   if (!queue.length) return null;
-  let index = queue.findIndex((job) => job.modelKey === lastModelKey);
+  let index = queue.findIndex((job) => job.policyKey === lastPolicyKey);
   if (index < 0) index = 0;
   return queue.splice(index, 1)[0];
 }
 
-export function cellKey(modelKey, cellId) {
-  return `${modelKey}|${cellId}`;
+export function cellKey(policyKey, cellId) {
+  return `${policyKey}|${cellId}`;
 }
 
-/** Per-model summaries and task values; only meaningful for a complete run. */
+/** Per-policy summaries and task values; only meaningful for a complete run. */
 export function summarizeRun(run) {
-  const suite = parseSuite(run.suite.raw);
+  const benchmark = parseBenchmark(run.benchmark.raw);
   // run.tests holds only the tests that ran (tests=<id> narrows it), so some selectors may match nothing.
-  const selected = selectTests(suite, run.tests, { requireMatches: false });
+  const selected = selectTests(benchmark, run.tests, { requireMatches: false });
   const wanted = new Set(run.tests.map((row) => row.id));
   const perTest = {};
   const tasks = {};
-  for (const model of run.models) {
-    const cells = run.cells.filter((cell) => cell.modelKey === model.key && wanted.has(cell.testId));
-    perTest[model.key] = summarizeTests(cells, selected.filter(({ row }) => cells.some((cell) => cell.testId === row.id)));
-    tasks[model.key] = computeTasks(suite, perTest[model.key]);
+  for (const policy of run.policies) {
+    const cells = run.cells.filter((cell) => cell.policyKey === policy.key && wanted.has(cell.testId));
+    perTest[policy.key] = summarizeTests(cells, selected.filter(({ row }) => cells.some((cell) => cell.testId === row.id)));
+    tasks[policy.key] = computeTasks(benchmark, perTest[policy.key]);
   }
   return { perTest, tasks };
 }
@@ -98,17 +98,17 @@ export function isComplete(run) {
 }
 
 /**
- * Why the results of `modelKey` may not be uploaded (empty = they may).
- * Results are shared only when they can be reproduced: a released suite, a Hub
- * model, a clean viewer commit implementing the suite's protocol, the whole
- * suite as specified, and no errors.
+ * Why the results of `policyKey` may not be uploaded (empty = they may).
+ * Results are shared only when they can be reproduced: a released benchmark, a Hub
+ * policy, a clean viewer commit implementing the benchmark's protocol, the whole
+ * benchmark as specified, and no errors.
  */
-export function uploadBlockers(run, modelKey) {
+export function uploadBlockers(run, policyKey) {
   const reasons = [];
-  const model = run.models.find((m) => m.key === modelKey);
-  if (run.suite.source !== 'hub') reasons.push('the suite is a local folder, not a Hugging Face benchmark dataset');
-  if (model?.source !== 'hub') reasons.push('the model is a local folder, not a Hugging Face model repo');
-  if (run.suite.problems?.length) reasons.push(`this viewer cannot run the suite as published: ${run.suite.problems.join('; ')}`);
+  const policy = run.policies.find((p) => p.key === policyKey);
+  if (run.benchmark.source !== 'hub') reasons.push('the benchmark is a local folder, not a Hugging Face benchmark dataset');
+  if (policy?.source !== 'hub') reasons.push('the policy is a local folder, not a Hugging Face model repo');
+  if (run.benchmark.problems?.length) reasons.push(`this viewer cannot run the benchmark as published: ${run.benchmark.problems.join('; ')}`);
   if (run.provenance.hpv.dirty) reasons.push('the viewer checkout has uncommitted changes, so the commit does not identify the code that ran');
   if (!run.provenance.hpv.commit) reasons.push('the viewer commit is unknown (not a git checkout)');
   if (run.overrides.tests) reasons.push('only some tests were run (tests=)');
@@ -116,7 +116,7 @@ export function uploadBlockers(run, modelKey) {
   if (run.overrides.force) reasons.push('the run was forced past a compatibility check (force)');
   if (run.shard) reasons.push(`this is shard ${run.shard.index}/${run.shard.count}; merge the shards first (npm run benchmark merge ...)`);
   else if (run.cells.length !== run.expectedCells) reasons.push(`${run.expectedCells - run.cells.length} of ${run.expectedCells} cells are missing`);
-  const errors = run.cells.filter((cell) => cell.modelKey === modelKey && cell.error);
+  const errors = run.cells.filter((cell) => cell.policyKey === policyKey && cell.error);
   if (errors.length) reasons.push(`${errors.length} cell(s) failed to run, e.g. ${errors[0].cellId}: ${errors[0].error}`);
   return reasons;
 }
@@ -127,28 +127,28 @@ function mergeIdentity(run) {
     schema: run.schema,
     hpv: run.provenance.hpv,
     asimov1: run.provenance.asimov1,
-    suite: { source: run.suite.source, id: run.suite.id, sha: run.suite.sha, path: run.suite.path, suiteFile: run.suite.suiteFile, raw: run.suite.raw },
+    benchmark: { source: run.benchmark.source, id: run.benchmark.id, sha: run.benchmark.sha, path: run.benchmark.path, raw: run.benchmark.raw },
     tests: run.tests.map((row) => row.id),
     overrides: run.overrides,
-    models: run.models.map(({ key, id, sha, files }) => ({ key, id, sha, files })),
+    policies: run.policies.map(({ key, id, sha, files }) => ({ key, id, sha, files })),
     expectedCells: run.expectedCells,
   });
 }
 
-/** Merges shard outputs of one run; refuses mismatched runs or missing cells. */
-export function mergeRuns(runs) {
+/** Merges the shard results of one run; refuses mismatched runs or missing cells. */
+export function mergeResults(runs) {
   if (!runs.length) throw new Error('Nothing to merge');
   const identity = mergeIdentity(runs[0]);
   runs.forEach((run, i) => {
-    if (run.schema !== RUN_SCHEMA) throw new Error(`input ${i + 1} is not a ${RUN_SCHEMA} file`);
+    if (run.schema !== RESULT_SCHEMA) throw new Error(`input ${i + 1} is not a ${RESULT_SCHEMA} file`);
     if (mergeIdentity(run) !== identity) {
-      throw new Error(`input ${i + 1} is from a different run (viewer commit, suite, models or options differ) and cannot be merged`);
+      throw new Error(`input ${i + 1} is from a different run (viewer commit, benchmark, policies or options differ) and cannot be merged`);
     }
   });
   const byKey = new Map();
   for (const run of runs) {
     for (const cell of run.cells) {
-      const key = cellKey(cell.modelKey, cell.cellId);
+      const key = cellKey(cell.policyKey, cell.cellId);
       if (byKey.has(key)) throw new Error(`cell ${key} appears in more than one input`);
       byKey.set(key, cell);
     }
@@ -167,15 +167,15 @@ export function mergeRuns(runs) {
   return { ...merged, ...summarizeRun(merged) };
 }
 
-/** A copy of the run with only one model's cells and summaries, for that model's repo. */
-export function runForModel(run, modelKey) {
+/** A copy of the result with only one policy's cells and summaries, for that policy's repo. */
+export function resultForPolicy(run, policyKey) {
   return {
     ...run,
-    models: run.models.filter((model) => model.key === modelKey),
-    cells: run.cells.filter((cell) => cell.modelKey === modelKey),
-    expectedCells: run.expectedCells / run.models.length,
-    perTest: run.perTest ? { [modelKey]: run.perTest[modelKey] } : undefined,
-    tasks: run.tasks ? { [modelKey]: run.tasks[modelKey] } : undefined,
+    policies: run.policies.filter((policy) => policy.key === policyKey),
+    cells: run.cells.filter((cell) => cell.policyKey === policyKey),
+    expectedCells: run.expectedCells / run.policies.length,
+    perTest: run.perTest ? { [policyKey]: run.perTest[policyKey] } : undefined,
+    tasks: run.tasks ? { [policyKey]: run.tasks[policyKey] } : undefined,
   };
 }
 
@@ -197,10 +197,10 @@ export function toReportRun(run) {
   }
   return {
     generatedAt: run.generatedAt,
-    policies: run.models.map((model) => ({ id: model.key, label: model.label, configPath: null, onnxPath: null })),
+    policies: run.policies.map((policy) => ({ id: policy.key, label: policy.label, configPath: null, onnxPath: null })),
     tests: [...tests.values()],
     results: run.cells.map((cell) => ({
-      policyId: cell.modelKey,
+      policyId: cell.policyKey,
       testFile: label(cell),
       frames: cell.frames,
       expectedFrames: cell.expectedFrames,
@@ -211,11 +211,11 @@ export function toReportRun(run) {
   };
 }
 
-/** Task values of one model as `task: value` lines, for the console. */
-export function formatTasks(run, modelKey) {
-  const suite = parseSuite(run.suite.raw);
-  return (run.tasks?.[modelKey] ?? []).map((task) => {
-    const definition = suite.tasks.find((t) => versionedTaskId(suite, t) === task.taskId);
+/** Task values of one policy as `task: value` lines, for the console. */
+export function formatTasks(run, policyKey) {
+  const benchmark = parseBenchmark(run.benchmark.raw);
+  return (run.tasks?.[policyKey] ?? []).map((task) => {
+    const definition = benchmark.tasks.find((t) => versionedTaskId(benchmark, t) === task.taskId);
     const direction = task.higherIsBetter ? '' : ' (lower is better)';
     const value = task.value === null ? 'n/a (nothing in scope)' : `${task.value}${task.ci95 ? `  [${task.ci95[0]}, ${task.ci95[1]}]` : ''}`;
     const counts = task.value === null ? '' : `  (${task.tests} tests, ${task.cells} runs)`;
@@ -223,9 +223,9 @@ export function formatTasks(run, modelKey) {
   });
 }
 
-/** How one model's runs ended, keeping a fall apart from staying upright but missing the end zone. */
-export function formatOutcomes(run, modelKey) {
-  const tests = run.perTest?.[modelKey] ?? [];
+/** How one policy's runs ended, keeping a fall apart from staying upright but missing the end zone. */
+export function formatOutcomes(run, policyKey) {
+  const tests = run.perTest?.[policyKey] ?? [];
   const runs = tests.reduce((sum, test) => sum + test.repeats, 0);
   if (!runs) return null;
   const errors = tests.reduce((sum, test) => sum + test.errors, 0);

@@ -1,16 +1,16 @@
-// Edits a benchmark's suite.yaml for the viewer's Benchmark settings dialog
-// (the dev server's /api/suite, vite.config.mjs). The dialog either sends the
+// Edits a benchmark's benchmark.yaml for the viewer's Benchmark settings dialog
+// (the dev server's /api/benchmark, vite.config.mjs). The dialog either sends the
 // form's fields, which are patched into the file so its comments and layout
 // survive, or the whole file as text. Either way the result is checked the way
 // `npm run benchmark` checks it before anything is written.
 
 import { parseDocument } from 'yaml';
-import { SUITE_DEFAULTS, compatibilityProblems, parseSuite, selectTests } from '../src/benchmark/suite.js';
+import { BENCHMARK_DEFAULTS, compatibilityProblems, parseBenchmark, selectTests } from '../src/benchmark/settings.js';
 
 const isPlainObject = (value) => !!value && typeof value === 'object' && !Array.isArray(value);
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
-// The "  - problem" lines of a parseSuite / selectTests error.
+// The "  - problem" lines of a parseBenchmark / selectTests error.
 function listed(error) {
   const lines = String(error?.message ?? error).split('\n').filter((line) => line.startsWith('  - '));
   return lines.length ? lines.map((line) => line.slice(4)) : [String(error?.message ?? error)];
@@ -18,23 +18,23 @@ function listed(error) {
 
 function parseText(text) {
   const doc = parseDocument(text);
-  if (doc.errors.length) throw new Error(`suite.yaml is not valid YAML: ${doc.errors[0].message}`);
+  if (doc.errors.length) throw new Error(`benchmark.yaml is not valid YAML: ${doc.errors[0].message}`);
   return doc;
 }
 
 /** The settings the form shows, filled in with what the parser assumes when a key is left out; null if `raw` is not a mapping. */
-export function suiteFormFields(raw) {
+export function benchmarkFormFields(raw) {
   if (!isPlainObject(raw)) return null;
   const defaults = isPlainObject(raw.defaults) ? raw.defaults : {};
   const randomize = isPlainObject(defaults.randomize) ? defaults.randomize : {};
   return {
-    suite: raw.suite ?? '',
+    name: raw.name ?? '',
     title: raw.title ?? '',
     description: raw.description ?? '',
     version: raw.version ?? 1,
-    repeats: defaults.repeats ?? SUITE_DEFAULTS.repeats,
-    seed: defaults.seed ?? SUITE_DEFAULTS.seed,
-    timeout_s: defaults.timeout_s ?? SUITE_DEFAULTS.timeout_s,
+    repeats: defaults.repeats ?? BENCHMARK_DEFAULTS.repeats,
+    seed: defaults.seed ?? BENCHMARK_DEFAULTS.seed,
+    timeout_s: defaults.timeout_s ?? BENCHMARK_DEFAULTS.timeout_s,
     action_delay: randomize.action_delay ?? null,
     initial_joint_noise_rad: randomize.initial_joint_noise_rad ?? 0,
     tests: Array.isArray(raw.tests) ? raw.tests : raw.tests ? [raw.tests] : [],
@@ -42,24 +42,24 @@ export function suiteFormFields(raw) {
   };
 }
 
-/** Problems with a suite.yaml text: errors make `npm run benchmark` refuse it, warnings are about this dataset's tests. */
-export function checkSuiteText(text, rows) {
+/** Problems with a benchmark.yaml text: errors make `npm run benchmark` refuse it, warnings are about this benchmark's tests. */
+export function checkBenchmarkText(text, rows) {
   let raw;
   try {
     raw = parseText(text).toJS();
   } catch (error) {
     return { raw: null, errors: [error.message], warnings: [] };
   }
-  let suite;
+  let benchmark;
   try {
-    suite = parseSuite(raw);
+    benchmark = parseBenchmark(raw);
   } catch (error) {
     return { raw, errors: listed(error), warnings: [] };
   }
-  const warnings = compatibilityProblems(suite);
+  const warnings = compatibilityProblems(benchmark);
   try {
     // A benchmark with no tests yet is fine; one whose selectors miss its tests is not.
-    selectTests(suite, rows, { requireMatches: rows.length > 0 });
+    selectTests(benchmark, rows, { requireMatches: rows.length > 0 });
   } catch (error) {
     warnings.push(...listed(error));
   }
@@ -82,13 +82,13 @@ function cleanEntry(entry) {
 }
 
 /**
- * suite.yaml `text` with the form's `fields` written in. Keys the form did not
+ * benchmark.yaml `text` with the form's `fields` written in. Keys the form did not
  * change keep their values and comments (the yaml library re-spaces trailing
  * comments); with no change at all the text comes back untouched.
  */
-export function patchSuiteYaml(text, fields) {
+export function patchBenchmarkYaml(text, fields) {
   const doc = parseText(text);
-  const before = suiteFormFields(doc.toJS()) ?? {};
+  const before = benchmarkFormFields(doc.toJS()) ?? {};
   let changed = false;
   const set = (path, value) => {
     changed = true;
@@ -127,14 +127,14 @@ export function patchSuiteYaml(text, fields) {
 
 /**
  * Applies an edit from the dialog, `{ fields }` or `{ text }`, to the current
- * suite.yaml `text`. Throws (listing every problem) if `npm run benchmark`
+ * benchmark.yaml `text`. Throws (listing every problem) if `npm run benchmark`
  * would refuse the result; otherwise returns the new text and any warnings.
  */
-export function applySuiteEdit(text, edit, rows) {
-  const next = typeof edit?.text === 'string' ? edit.text : patchSuiteYaml(text, edit?.fields ?? {});
-  const { errors, warnings } = checkSuiteText(next, rows);
+export function applyBenchmarkEdit(text, edit, rows) {
+  const next = typeof edit?.text === 'string' ? edit.text : patchBenchmarkYaml(text, edit?.fields ?? {});
+  const { errors, warnings } = checkBenchmarkText(next, rows);
   if (errors.length) {
-    const error = new Error(`Not saved, suite.yaml would be invalid:\n${errors.map((e) => `  - ${e}`).join('\n')}`);
+    const error = new Error(`Not saved, benchmark.yaml would be invalid:\n${errors.map((e) => `  - ${e}`).join('\n')}`);
     error.problems = errors;
     throw error;
   }

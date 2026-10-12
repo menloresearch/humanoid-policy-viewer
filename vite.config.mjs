@@ -9,11 +9,11 @@ import { defineConfig } from 'vite'
 import { fileURLToPath, URL } from 'node:url'
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { basename, dirname, extname, relative, resolve } from 'node:path'
-import { listModelRoots, listModels as discoverModels } from './scripts/modelDiscovery.mjs'
-import { getBenchmarkRunsDir, getModelLibrary } from './scripts/modelLibraryConfig.mjs'
-import { initSuite } from './scripts/suiteInit.mjs'
-import { SUITE_FILE, defaultSuiteDir, readRows, readYamlFile, writeRows } from './scripts/suiteDir.mjs'
-import { applySuiteEdit, checkSuiteText, suiteFormFields } from './scripts/suiteEdit.mjs'
+import { discoverPolicies, listPolicyRoots } from './scripts/policyDiscovery.mjs'
+import { getBenchmarkResultsDir, getPolicyLibrary } from './scripts/policyLibraryConfig.mjs'
+import { initBenchmark } from './scripts/benchmarkInit.mjs'
+import { BENCHMARK_FILE, defaultBenchmarkDir, readRows, readYamlFile, writeRows } from './scripts/benchmarkDir.mjs'
+import { applyBenchmarkEdit, benchmarkFormFields, checkBenchmarkText } from './scripts/benchmarkEdit.mjs'
 import { OPT_IN_METRICS, rowToSequence, sequenceToRow, validateGoal, validateTestRow } from './src/benchmark/testRow.js'
 import { validateTerrain } from './src/simulation/terrainGen.js'
 
@@ -39,8 +39,8 @@ function dropGitPointerFiles() {
 
 function humanoidDevPlugin() {
   const appDir = dirname(fileURLToPath(import.meta.url));
-  const { baseDir: modelLibraryDir, roots: modelRootNames } = getModelLibrary();
-  const modelRoots = listModelRoots(modelLibraryDir, modelRootNames);
+  const { baseDir: policyLibraryDir, roots: policyRootNames } = getPolicyLibrary();
+  const policyRoots = listPolicyRoots(policyLibraryDir, policyRootNames);
 
   function isWithinDirectory(directory, filePath) {
     const pathFromDirectory = relative(directory, filePath);
@@ -70,17 +70,16 @@ function humanoidDevPlugin() {
     });
   }
 
-  // ---- Trajectory sequence persistence (/api/sequences) ----
+  // ---- Test persistence (/api/tests) ----
   // The trajectory editor and the in-app benchmark read and write the tests of
-  // a benchmark dataset working copy (see scripts/suiteDir.mjs): HPV_SUITE_DIR
-  // (`npm run dev suite=<dir>`), by default ./benchmark_datasets/default
-  // (gitignored), or another
-  // benchmark the request names (see /api/suites below). Run outputs live under
-  // ./benchmark_runs. All are outside public/, so writing them never triggers a
+  // a benchmark working copy (see scripts/benchmarkDir.mjs): HPV_SUITE_DIR
+  // (`npm run dev benchmark=<dir>`), by default ./benchmarks/default, or
+  // another benchmark the request names (see /api/benchmarks below). Results live under
+  // ./benchmark_results. All are outside public/, so writing them never triggers a
   // page reload.
-  const BENCH_DIR = getBenchmarkRunsDir(appDir);
+  const RESULTS_DIR = getBenchmarkResultsDir(appDir);
   const MAX_DURATION = 600;
-  // Saved benchmark run names; nested subfolders allowed.
+  // Saved benchmark result names; nested subfolders allowed.
   const FILENAME_RE = /^(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+\.json$/;
 
   function round3(v) {
@@ -90,10 +89,10 @@ function humanoidDevPlugin() {
 
   function validateSequence(parsed) {
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      throw new Error('Sequence must be a JSON object');
+      throw new Error('A test must be a JSON object');
     }
     if (!Array.isArray(parsed.commands) || parsed.commands.length === 0) {
-      throw new Error('Sequence "commands" must be a non-empty array');
+      throw new Error('A test\'s "commands" must be a non-empty array');
     }
     let lastT = 0;
     const commands = parsed.commands.map((entry, i) => {
@@ -113,7 +112,7 @@ function humanoidDevPlugin() {
     if (duration > MAX_DURATION) {
       throw new Error(`Duration ${duration}s exceeds ${MAX_DURATION}s limit`);
     }
-    const name = typeof parsed.name === 'string' && parsed.name ? parsed.name : 'sequence';
+    const name = typeof parsed.name === 'string' && parsed.name ? parsed.name : 'test';
     const clean = { name, duration };
     if (parsed.limits && typeof parsed.limits === 'object') {
       const limits = {};
@@ -141,42 +140,42 @@ function humanoidDevPlugin() {
       const events = [];
       for (const ev of parsed.events) {
         if (!ev || typeof ev !== 'object') {
-          console.warn('[sequences] dropping malformed event (not an object)');
+          console.warn('[tests] dropping malformed event (not an object)');
           continue;
         }
         const t = round3(ev.t);
         if (!Number.isFinite(t) || t < 0 || t > MAX_DURATION) {
-          console.warn('[sequences] dropping event with invalid "t"');
+          console.warn('[tests] dropping event with invalid "t"');
           continue;
         }
         if (ev.type !== 'push') {
-          console.warn(`[sequences] dropping event with unsupported "type" (${ev.type})`);
+          console.warn(`[tests] dropping event with unsupported "type" (${ev.type})`);
           continue;
         }
         // dir accepts 2 (legacy, z=0) or 3 elements — full 3D force direction.
         const dxyz = [Number(ev.dir?.[0]), Number(ev.dir?.[1]), Number(ev.dir?.[2] ?? 0)];
         if (!Array.isArray(ev.dir) || (ev.dir.length !== 2 && ev.dir.length !== 3)
           || dxyz.some((v) => !Number.isFinite(v)) || Math.hypot(...dxyz) === 0) {
-          console.warn('[sequences] dropping push event with invalid "dir"');
+          console.warn('[tests] dropping push event with invalid "dir"');
           continue;
         }
         const force = Number(ev.force);
         // Force is a magnitude in Newtons — direction lives in "dir" — so a
         // non-positive value is an authoring mistake, not a valid reverse-push.
         if (!Number.isFinite(force) || force <= 0) {
-          console.warn('[sequences] dropping push event with invalid "force"');
+          console.warn('[tests] dropping push event with invalid "force"');
           continue;
         }
         const duration = Number(ev.duration);
         if (!Number.isFinite(duration) || duration <= 0) {
-          console.warn('[sequences] dropping push event with invalid "duration"');
+          console.warn('[tests] dropping push event with invalid "duration"');
           continue;
         }
         // Optional torque, must be both-present or both-absent.
         const hasTorqueAxis = ev.torqueAxis !== undefined;
         const hasTorqueMag = ev.torqueMag !== undefined;
         if (hasTorqueAxis !== hasTorqueMag) {
-          console.warn('[sequences] dropping push event: torqueAxis/torqueMag must be both present or both absent');
+          console.warn('[tests] dropping push event: torqueAxis/torqueMag must be both present or both absent');
           continue;
         }
         let torqueAxis = null;
@@ -184,12 +183,12 @@ function humanoidDevPlugin() {
         if (hasTorqueAxis) {
           if (!Array.isArray(ev.torqueAxis) || ev.torqueAxis.length !== 3
             || ev.torqueAxis.some((v) => !Number.isFinite(Number(v)))) {
-            console.warn('[sequences] dropping push event with invalid "torqueAxis"');
+            console.warn('[tests] dropping push event with invalid "torqueAxis"');
             continue;
           }
           torqueMag = Number(ev.torqueMag);
           if (!Number.isFinite(torqueMag)) {
-            console.warn('[sequences] dropping push event with invalid "torqueMag"');
+            console.warn('[tests] dropping push event with invalid "torqueMag"');
             continue;
           }
           torqueAxis = ev.torqueAxis.map((v) => round3(Number(v)));
@@ -246,22 +245,22 @@ function humanoidDevPlugin() {
 
   // Each row of data/<category>/test.jsonl shows up as "<category>/<name>.json";
   // saving writes the row back, and a new category gets its own file.
-  const SUITE_DIR = resolve(process.env.HPV_SUITE_DIR || defaultSuiteDir(appDir));
+  const SESSION_BENCHMARK_DIR = resolve(process.env.HPV_SUITE_DIR || defaultBenchmarkDir(appDir));
   const TEST_ID_RE = /^[a-z0-9][a-z0-9_]*\/[a-z0-9][a-z0-9_.-]*$/;
   const rowFile = (row) => `${row.id}.json`;
 
-  // ---- Benchmarks (/api/suites) ----
+  // ---- Benchmarks (/api/benchmarks) ----
   // The viewer lists every benchmark dataset folder it can find: the session's
-  // (SUITE_DIR, what a request without ?suite= reads and writes) and each
+  // (SESSION_BENCHMARK_DIR, what a request without ?benchmark= reads and writes) and each
   // folder of BENCHMARKS_DIR (the default benchmark, Hub working copies pulled
-  // by `npm run dev suite=datasets/...`, and the benchmarks "New benchmark" makes).
+  // by `npm run dev benchmark=datasets/...`, and the benchmarks "New benchmark" makes).
   // A request names one by its key; only listed folders are accepted.
-  const BENCHMARKS_DIR = resolve(process.env.HPV_BENCHMARKS_DIR || resolve(appDir, 'benchmark_datasets'));
-  const SUITE_NAME_RE = /^[a-z0-9][a-z0-9-]*$/;
-  const suiteKey = (dir) => (isWithinDirectory(appDir, dir) ? relative(appDir, dir) : dir);
+  const BENCHMARKS_DIR = resolve(process.env.HPV_BENCHMARKS_DIR || resolve(appDir, 'benchmarks'));
+  const BENCHMARK_NAME_RE = /^[a-z0-9][a-z0-9-]*$/;
+  const benchmarkKey = (dir) => (isWithinDirectory(appDir, dir) ? relative(appDir, dir) : dir);
 
-  function listSuites() {
-    const dirs = [SUITE_DIR];
+  function listBenchmarks() {
+    const dirs = [SESSION_BENCHMARK_DIR];
     const others = [];
     try {
       for (const entry of readdirSync(BENCHMARKS_DIR, { withFileTypes: true })) {
@@ -270,32 +269,32 @@ function humanoidDevPlugin() {
     } catch {}
     const seen = new Set();
     return [...dirs, ...others.sort()]
-      .filter((dir) => !seen.has(dir) && seen.add(dir) && existsSync(resolve(dir, SUITE_FILE)))
+      .filter((dir) => !seen.has(dir) && seen.add(dir) && existsSync(resolve(dir, BENCHMARK_FILE)))
       .map((dir) => {
         let raw = {};
-        try { raw = readYamlFile(resolve(dir, SUITE_FILE)) || {}; } catch {}
+        try { raw = readYamlFile(resolve(dir, BENCHMARK_FILE)) || {}; } catch {}
         return {
-          key: suiteKey(dir),
+          key: benchmarkKey(dir),
           dir,
-          title: String(raw.title || raw.suite || basename(dir)),
+          title: String(raw.title || raw.name || basename(dir)),
           description: typeof raw.description === 'string' ? raw.description : '',
           testCount: readRows(dir).rows.length,
-          session: dir === SUITE_DIR,
+          session: dir === SESSION_BENCHMARK_DIR,
         };
       });
   }
 
-  /** The folder a request's ?suite= names (default: the session's); null if it isn't a listed benchmark. */
-  function requestSuiteDir(url) {
-    const key = url.searchParams.get('suite');
-    if (!key) return SUITE_DIR;
-    return listSuites().find((suite) => suite.key === key)?.dir ?? null;
+  /** The folder a request's ?benchmark= names (default: the session's); null if it isn't a listed benchmark. */
+  function requestBenchmarkDir(url) {
+    const key = url.searchParams.get('benchmark');
+    if (!key) return SESSION_BENCHMARK_DIR;
+    return listBenchmarks().find((benchmark) => benchmark.key === key)?.dir ?? null;
   }
 
-  async function handleSuites(req, res) {
+  async function handleBenchmarks(req, res) {
     try {
       if (req.method === 'GET') {
-        sendJson(res, 200, { suites: listSuites(), benchmarksDir: BENCHMARKS_DIR });
+        sendJson(res, 200, { benchmarks: listBenchmarks(), benchmarksDir: BENCHMARKS_DIR });
         return;
       }
       if (req.method === 'POST') {
@@ -307,18 +306,18 @@ function humanoidDevPlugin() {
           return;
         }
         const name = String(body?.name ?? '');
-        if (!SUITE_NAME_RE.test(name)) {
+        if (!BENCHMARK_NAME_RE.test(name)) {
           sendJson(res, 400, { error: 'A benchmark name is lower case letters, digits and -' });
           return;
         }
         const dir = resolve(BENCHMARKS_DIR, name);
         if (existsSync(dir)) {
-          sendJson(res, 409, { error: `${suiteKey(dir)} already exists` });
+          sendJson(res, 409, { error: `${benchmarkKey(dir)} already exists` });
           return;
         }
         const title = typeof body.title === 'string' && body.title.trim() ? body.title.trim() : null;
-        initSuite(dir, { title, exampleTest: false, log: () => {} });
-        sendJson(res, 201, { ok: true, suite: listSuites().find((suite) => suite.dir === dir) });
+        initBenchmark(dir, { title, exampleTest: false, log: () => {} });
+        sendJson(res, 201, { ok: true, benchmark: listBenchmarks().find((benchmark) => benchmark.dir === dir) });
         return;
       }
       sendJson(res, 405, { error: 'Method not allowed' });
@@ -327,16 +326,16 @@ function humanoidDevPlugin() {
     }
   }
 
-  // ---- Benchmark settings (/api/suite) ----
-  // The suite.yaml of the benchmark ?suite= names, for the Benchmark settings
+  // ---- Benchmark settings (/api/benchmark) ----
+  // The benchmark.yaml of the benchmark ?benchmark= names, for the Benchmark settings
   // dialog: GET returns the text and the form's fields; PUT takes { fields } or
   // { text }, plus the text it was based on (`base`), and refuses an edit
-  // `npm run benchmark` would reject (scripts/suiteEdit.mjs).
-  function describeSuiteFile(text, rows) {
-    const { raw, errors, warnings } = checkSuiteText(text, rows);
+  // `npm run benchmark` would reject (scripts/benchmarkEdit.mjs).
+  function describeBenchmarkFile(text, rows) {
+    const { raw, errors, warnings } = checkBenchmarkText(text, rows);
     return {
       text,
-      fields: suiteFormFields(raw),
+      fields: benchmarkFormFields(raw),
       errors,
       warnings,
       configs: [...new Set(rows.map((row) => row.config))].sort(),
@@ -344,18 +343,18 @@ function humanoidDevPlugin() {
     };
   }
 
-  async function handleSuiteFile(req, res) {
+  async function handleBenchmarkFile(req, res) {
     try {
-      const dir = requestSuiteDir(new URL(req.url, 'http://localhost'));
+      const dir = requestBenchmarkDir(new URL(req.url, 'http://localhost'));
       if (!dir) {
         sendJson(res, 404, { error: 'Unknown benchmark' });
         return;
       }
-      const path = resolve(dir, SUITE_FILE);
+      const path = resolve(dir, BENCHMARK_FILE);
       const current = readFileSync(path, 'utf8');
       const { rows } = readRows(dir);
       if (req.method === 'GET') {
-        sendJson(res, 200, describeSuiteFile(current, rows));
+        sendJson(res, 200, describeBenchmarkFile(current, rows));
         return;
       }
       if (req.method === 'PUT') {
@@ -367,18 +366,18 @@ function humanoidDevPlugin() {
           return;
         }
         if (typeof body.base === 'string' && body.base !== current) {
-          sendJson(res, 409, { error: 'suite.yaml changed on disk since you opened it; reopen the settings to see the new version.' });
+          sendJson(res, 409, { error: 'benchmark.yaml changed on disk since you opened it; reopen the settings to see the new version.' });
           return;
         }
         let result;
         try {
-          result = applySuiteEdit(current, body, rows);
+          result = applyBenchmarkEdit(current, body, rows);
         } catch (e) {
           sendJson(res, 400, { error: e.message, problems: e.problems ?? [] });
           return;
         }
         if (result.text !== current) writeFileSync(path, result.text);
-        sendJson(res, 200, { ok: true, ...describeSuiteFile(result.text, rows) });
+        sendJson(res, 200, { ok: true, ...describeBenchmarkFile(result.text, rows) });
         return;
       }
       sendJson(res, 405, { error: 'Method not allowed' });
@@ -387,10 +386,10 @@ function humanoidDevPlugin() {
     }
   }
 
-  function listSequences(suiteDir) {
-    return readRows(suiteDir).rows.map((row) => ({
+  function listTests(benchmarkDir) {
+    return readRows(benchmarkDir).rows.map((row) => ({
       file: rowFile(row),
-      folder: row.config,
+      config: row.config,
       name: row.name,
       duration: row.duration,
       keypointCount: row.commands.length,
@@ -400,17 +399,17 @@ function humanoidDevPlugin() {
     })).sort((a, b) => a.file.localeCompare(b.file));
   }
 
-  async function handleSequences(req, res) {
+  async function handleTests(req, res) {
     const url = new URL(req.url, 'http://localhost');
     const file = url.searchParams.get('file');
     try {
-      const suiteDir = requestSuiteDir(url);
-      if (!suiteDir) {
-        sendJson(res, 404, { error: `No benchmark ${url.searchParams.get('suite')}` });
+      const benchmarkDir = requestBenchmarkDir(url);
+      if (!benchmarkDir) {
+        sendJson(res, 404, { error: `No benchmark ${url.searchParams.get('benchmark')}` });
         return;
       }
       if (req.method === 'GET' && !file) {
-        sendJson(res, 200, { files: listSequences(suiteDir), suiteDir });
+        sendJson(res, 200, { files: listTests(benchmarkDir), benchmarkDir });
         return;
       }
       const id = file?.replace(/\.json$/, '');
@@ -418,7 +417,7 @@ function humanoidDevPlugin() {
         sendJson(res, 400, { error: 'A test is saved as <category>/<name>: lower case letters, digits and _' });
         return;
       }
-      const { rows } = readRows(suiteDir);
+      const { rows } = readRows(benchmarkDir);
       const index = rows.findIndex((row) => row.id === id);
       if (req.method === 'GET') {
         if (index < 0) { sendJson(res, 404, { error: 'Not found' }); return; }
@@ -441,17 +440,17 @@ function humanoidDevPlugin() {
           return;
         }
         if (index >= 0) rows[index] = row; else rows.push(row);
-        writeRows(suiteDir, rows.filter((r) => r.config === row.config));
-        sendJson(res, 200, { ok: true, file, entry: listSequences(suiteDir).find((f) => f.file === file) });
+        writeRows(benchmarkDir, rows.filter((r) => r.config === row.config));
+        sendJson(res, 200, { ok: true, file, entry: listTests(benchmarkDir).find((f) => f.file === file) });
         return;
       }
       if (req.method === 'DELETE') {
         if (index < 0) { sendJson(res, 404, { error: 'Not found' }); return; }
         const [removed] = rows.splice(index, 1);
         const left = rows.filter((r) => r.config === removed.config);
-        writeRows(suiteDir, left, { configs: [removed.config] });
+        writeRows(benchmarkDir, left, { configs: [removed.config] });
         // The last test of a category takes its file (and dataset config) with it.
-        if (!left.length) rmSync(resolve(suiteDir, 'data', removed.config), { recursive: true, force: true });
+        if (!left.length) rmSync(resolve(benchmarkDir, 'data', removed.config), { recursive: true, force: true });
         sendJson(res, 200, { ok: true, file });
         return;
       }
@@ -475,16 +474,16 @@ function humanoidDevPlugin() {
     }
   }
 
-  // ---- Model catalog (/api/models): ONNX checkpoints for benchmarking ----
-  function listModels() {
-    return discoverModels(modelLibraryDir, modelRootNames);
+  // ---- Policy catalog (/api/policies): ONNX policies for benchmarking ----
+  function listPolicies() {
+    return discoverPolicies(policyLibraryDir, policyRootNames);
   }
 
-  // ---- Benchmark results (/api/benchmarks): saved run reports ----
-  function listBenchmarks() {
-    if (!existsSync(BENCH_DIR)) return [];
+  // ---- Benchmark results (/api/results): saved results ----
+  function listResults() {
+    if (!existsSync(RESULTS_DIR)) return [];
     const out = [];
-    walkJson(BENCH_DIR, '', (rel, full) => {
+    walkJson(RESULTS_DIR, '', (rel, full) => {
       let meta = {};
       try {
         const p = JSON.parse(readFileSync(full, 'utf8'));
@@ -499,14 +498,14 @@ function humanoidDevPlugin() {
     return out.sort((a, b) => b.file.localeCompare(a.file));
   }
 
-  async function handleBenchmarks(req, res) {
+  async function handleResults(req, res) {
     const url = new URL(req.url, 'http://localhost');
     const file = url.searchParams.get('file');
     try {
-      if (req.method === 'GET' && !file) { sendJson(res, 200, { files: listBenchmarks() }); return; }
+      if (req.method === 'GET' && !file) { sendJson(res, 200, { files: listResults() }); return; }
       if (file && !FILENAME_RE.test(file)) { sendJson(res, 400, { error: 'Invalid filename' }); return; }
-      const filePath = file ? resolve(BENCH_DIR, file) : null;
-      if (filePath && !isWithinDirectory(BENCH_DIR, filePath)) { sendJson(res, 400, { error: 'Invalid path' }); return; }
+      const filePath = file ? resolve(RESULTS_DIR, file) : null;
+      if (filePath && !isWithinDirectory(RESULTS_DIR, filePath)) { sendJson(res, 400, { error: 'Invalid path' }); return; }
       if (req.method === 'GET') {
         if (!existsSync(filePath)) { sendJson(res, 404, { error: 'Not found' }); return; }
         res.statusCode = 200;
@@ -538,18 +537,18 @@ function humanoidDevPlugin() {
       sendJson(res, 500, { error: String(e?.message ?? e) });
     }
   }
-  // ---- end sequences ----
+  // ---- end tests ----
 
   return {
     name: 'humanoid-dev-endpoints',
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
         const { pathname } = new URL(req.url || '/', 'http://localhost');
-        if (pathname.startsWith('/model-library/')) {
-          const relativeModelPath = pathname.slice('/model-library/'.length);
-          const filePath = modelLibraryDir ? resolve(modelLibraryDir, relativeModelPath) : null;
+        if (pathname.startsWith('/policy-library/')) {
+          const relativePolicyPath = pathname.slice('/policy-library/'.length);
+          const filePath = policyLibraryDir ? resolve(policyLibraryDir, relativePolicyPath) : null;
           const resolvedFilePath = filePath && existsSync(filePath) ? realpathSync(filePath) : null;
-          if (!resolvedFilePath || !modelRoots.some((modelRoot) => isWithinDirectory(modelRoot.realDirectory, resolvedFilePath)) || !statSync(resolvedFilePath).isFile()) {
+          if (!resolvedFilePath || !policyRoots.some((policyRoot) => isWithinDirectory(policyRoot.realDirectory, resolvedFilePath)) || !statSync(resolvedFilePath).isFile()) {
             res.statusCode = 404;
             res.end('Not found');
             return;
@@ -560,24 +559,24 @@ function humanoidDevPlugin() {
           res.end(readFileSync(resolvedFilePath));
           return;
         }
-        if (pathname === '/api/suites') {
-          await handleSuites(req, res);
-          return;
-        }
-        if (pathname === '/api/suite') {
-          await handleSuiteFile(req, res);
-          return;
-        }
-        if (pathname === '/api/sequences') {
-          await handleSequences(req, res);
-          return;
-        }
-        if (pathname === '/api/models') {
-          sendJson(res, 200, { models: listModels() });
-          return;
-        }
         if (pathname === '/api/benchmarks') {
           await handleBenchmarks(req, res);
+          return;
+        }
+        if (pathname === '/api/benchmark') {
+          await handleBenchmarkFile(req, res);
+          return;
+        }
+        if (pathname === '/api/tests') {
+          await handleTests(req, res);
+          return;
+        }
+        if (pathname === '/api/policies') {
+          sendJson(res, 200, { policies: listPolicies() });
+          return;
+        }
+        if (pathname === '/api/results') {
+          await handleResults(req, res);
           return;
         }
         next();
@@ -660,7 +659,7 @@ export default defineConfig({
       // Saving trajectory/benchmark JSON must not trigger a full page reload.
       // Anchored to the app folder: a bare **/benchmark/** would also stop
       // edits to src/benchmark/ from hot-reloading.
-      ignored: ['benchmark', 'benchmark_datasets', 'benchmark_runs']
+      ignored: ['benchmarks', 'benchmark_results']
         .map((folder) => fileURLToPath(new URL(`./${folder}/**`, import.meta.url))),
     },
   },

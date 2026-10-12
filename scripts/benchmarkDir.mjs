@@ -1,7 +1,7 @@
 // Reads and writes a benchmark dataset laid out on disk the way it is on the
 // Hugging Face Hub:
 //
-//   suite.yaml                 what runs and how it is scored (src/benchmark/suite.js)
+//   benchmark.yaml             what runs and how it is scored (src/benchmark/settings.js)
 //   data/<config>/test.jsonl   one test per line (src/benchmark/testRow.js)
 //   README.md                  optional notes; becomes the dataset card
 //
@@ -10,21 +10,22 @@
 // benchmark is published, and are never written to a working copy.
 //
 // The same layout is used for a local working copy, a downloaded revision and
-// the test fixture in test/fixtures/smoke-suite/.
+// the test fixture in test/fixtures/smoke-benchmark/.
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
-import { buildEvalYaml, parseSuite } from '../src/benchmark/suite.js';
+import { buildEvalYaml, parseBenchmark } from '../src/benchmark/settings.js';
 import { ALL_CONFIG, rowFeaturesYaml, validateTestRow } from '../src/benchmark/testRow.js';
 
-export const SUITE_FILE = 'suite.yaml';
+export const BENCHMARK_FILE = 'benchmark.yaml';
 export const DATA_DIR = 'data';
 export const ROWS_FILE = 'test.jsonl';
 
-// Local benchmarks live in ./benchmark_datasets (gitignored): the one plain
-// `npm run dev` opens, the ones "New benchmark" makes and Hub working copies.
-export const defaultSuiteDir = (appDir) => join(appDir, 'benchmark_datasets', 'default');
+// Local benchmarks live in ./benchmarks: default/ (tracked; the one plain
+// `npm run dev` opens and the one new benchmarks are copied from), and,
+// gitignored, the ones "New benchmark" makes and Hub working copies.
+export const defaultBenchmarkDir = (appDir) => join(appDir, 'benchmarks', 'default');
 
 export function readYamlFile(path) {
   return parseYaml(readFileSync(path, 'utf8'));
@@ -67,15 +68,15 @@ export function readRows(dir) {
   return { rows, problems };
 }
 
-/** Loads suite.yaml + rows; throws if either is invalid. `suiteFile` picks another suite in the dataset. */
-export function loadSuiteDir(dir, { suiteFile = SUITE_FILE } = {}) {
-  const suitePath = join(dir, suiteFile);
-  if (!existsSync(suitePath)) throw new Error(`${dir} has no ${suiteFile}; is it a benchmark dataset?`);
-  const rawSuite = readYamlFile(suitePath);
-  const suite = parseSuite(rawSuite);
+/** Loads benchmark.yaml + rows; throws if either is invalid. */
+export function loadBenchmarkDir(dir) {
+  const settingsPath = join(dir, BENCHMARK_FILE);
+  if (!existsSync(settingsPath)) throw new Error(`${dir} has no ${BENCHMARK_FILE}; is it a benchmark?`);
+  const rawBenchmark = readYamlFile(settingsPath);
+  const benchmark = parseBenchmark(rawBenchmark);
   const { rows, problems } = readRows(dir);
   if (problems.length) throw new Error(`Invalid tests in ${dir}:\n${problems.map((p) => `  - ${p}`).join('\n')}`);
-  return { dir, suiteFile, rawSuite, suite, rows };
+  return { dir, rawBenchmark, benchmark, rows };
 }
 
 /** Writes data/<config>/test.jsonl for every config in `rows`, plus `configs` (emptied if no rows). */
@@ -119,7 +120,7 @@ export function withFrontMatter(readme, frontMatter) {
 }
 
 /**
- * Keeps the task ids of earlier suite versions that the Hub's eval.yaml already
+ * Keeps the task ids of earlier benchmark versions that the Hub's eval.yaml already
  * lists, so results uploaded for them keep resolving after a version bump.
  */
 export function mergeEvalTasks(previous, generated) {
@@ -129,19 +130,19 @@ export function mergeEvalTasks(previous, generated) {
 }
 
 /**
- * The Hugging Face files for publishing: eval.yaml built from suite.yaml, and
+ * The Hugging Face files for publishing: eval.yaml built from benchmark.yaml, and
  * README.md with the dataset card front matter (configs, tags) put in front of
  * the working copy's README. `previousEvalYaml` is the eval.yaml already on the
- * Hub, whose task ids for earlier suite versions are kept. Nothing is written.
+ * Hub, whose task ids for earlier benchmark versions are kept. Nothing is written.
  */
-export function hubFiles({ dir, suite, rows, rawSuite }, { previousEvalYaml = null } = {}) {
-  const name = rawSuite.title ?? suite.suite;
-  const description = (rawSuite.description ?? '').trim() || `Benchmark suite ${suite.suite}, run with humanoid-policy-viewer.`;
-  const evalYaml = mergeEvalTasks(previousEvalYaml, buildEvalYaml(suite, { name, description }));
+export function hubFiles({ dir, benchmark, rows, rawBenchmark }, { previousEvalYaml = null } = {}) {
+  const name = rawBenchmark.title ?? benchmark.name;
+  const description = (rawBenchmark.description ?? '').trim() || `Benchmark ${benchmark.name}, run with humanoid-policy-viewer.`;
+  const evalYaml = mergeEvalTasks(previousEvalYaml, buildEvalYaml(benchmark, { name, description }));
   const readmePath = join(dir, 'README.md');
   const readme = existsSync(readmePath) ? readFileSync(readmePath, 'utf8') : `\n# ${name}\n`;
   return [
-    { path: 'eval.yaml', content: `# Generated from suite.yaml by \`npm run suite publish\`; do not edit by hand.\n${stringifyYaml(evalYaml)}` },
+    { path: 'eval.yaml', content: `# Generated from benchmark.yaml by \`npm run suite publish\`; do not edit by hand.\n${stringifyYaml(evalYaml)}` },
     { path: 'README.md', content: withFrontMatter(readme, cardFrontMatter(rows, { prettyName: name })) },
   ];
 }

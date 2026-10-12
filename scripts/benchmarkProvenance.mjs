@@ -1,6 +1,6 @@
 // What produced a benchmark result: viewer commit (and whether the checkout had
 // uncommitted changes), protocol, robot model commit, runtime versions and the
-// hashes of the policy files. Recorded in every run.json; a result whose
+// hashes of the policy files. Recorded in every result.json; a result whose
 // viewer checkout was dirty cannot be uploaded (see uploadBlockers).
 
 import { execFileSync } from 'node:child_process';
@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { BENCHMARK_PROTOCOL } from '../src/benchmark/protocol.js';
-import { checkpointFileCandidates } from '../src/simulation/envPolicyConfig.js';
+import { policyFileCandidates } from '../src/simulation/envPolicyConfig.js';
 
 export const HPV_REPO = 'https://github.com/menloresearch/humanoid-policy-viewer';
 const ASIMOV_1 = 'public/examples/scenes/asimov-1';
@@ -56,10 +56,10 @@ export function collectProvenance(appDir) {
 }
 
 /** sha256 of the policy ONNX and of the env.yaml the viewer will read beside it. */
-export function policyFileHashes(modelDir, primary) {
-  const env = checkpointFileCandidates('env.yaml').find((file) => existsSync(join(modelDir, file)));
+export function policyFileHashes(policyDir, primary) {
+  const env = policyFileCandidates('env.yaml').find((file) => existsSync(join(policyDir, file)));
   return {
-    onnx: sha256File(join(modelDir, primary)),
-    envYaml: env ? sha256File(join(modelDir, env)) : null,
+    onnx: sha256File(join(policyDir, primary)),
+    envYaml: env ? sha256File(join(policyDir, env)) : null,
   };
 }

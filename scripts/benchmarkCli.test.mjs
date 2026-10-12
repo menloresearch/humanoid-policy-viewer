@@ -6,19 +6,19 @@ import { join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { parseWords, swallowedNpmFlags } from './cliArgs.mjs';
 import { classifyTarget } from './benchmarkTargets.mjs';
-import { MAX_ROBOTS, buildJobs, groupCells, mergeRuns, parseShard, shardJobs, takeNextJob, uploadBlockers, RUN_SCHEMA } from './benchmarkRun.mjs';
+import { MAX_ROBOTS, buildJobs, groupCells, mergeResults, parseShard, shardJobs, takeNextJob, uploadBlockers, RESULT_SCHEMA } from './benchmarkRun.mjs';
 import { buildEvalResultEntries, evalResultsPath, mergeEvalResults } from './hfEvalResults.mjs';
 import { commitFiles, decideCommitMode } from './hfCommit.mjs';
 import { datasetFilesToFetch } from './hfDataset.mjs';
-import { mergeEvalTasks } from './suiteDir.mjs';
+import { mergeEvalTasks } from './benchmarkDir.mjs';
 import { scoredContentHash } from './suite.mjs';
 
 test('words, key=value options and flags', () => {
-  const parsed = parseWords(['org/a', 'suite=../s', 'model=b/c', 'model=d/e', 'pr', '--jobs=3', '--dry-run'], {
-    keys: ['suite', 'model', 'jobs'], flags: ['pr', 'dry-run'], repeatable: ['model'],
+  const parsed = parseWords(['org/a', 'benchmark=../s', 'policy=b/c', 'policy=d/e', 'pr', '--jobs=3', '--dry-run'], {
+    keys: ['benchmark', 'policy', 'jobs'], flags: ['pr', 'dry-run'], repeatable: ['policy'],
   });
   assert.deepEqual(parsed.positionals, ['org/a']);
-  assert.deepEqual(parsed.options, { suite: '../s', model: ['b/c', 'd/e'], jobs: '3' });
+  assert.deepEqual(parsed.options, { benchmark: '../s', policy: ['b/c', 'd/e'], jobs: '3' });
   assert.deepEqual([...parsed.flags].sort(), ['dry-run', 'pr']);
   assert.throws(() => parseWords(['jbos=2'], { keys: ['jobs'] }), /Unknown option "jbos="/);
   assert.throws(() => parseWords(['jobs=1', 'jobs=2'], { keys: ['jobs'] }), /twice/);
@@ -27,25 +27,25 @@ test('words, key=value options and flags', () => {
   assert.deepEqual(swallowedNpmFlags({ npm_config_pr: 'true', npm_config_no_upload: '' }, ['pr', 'no-upload', 'watch']), ['pr', 'no-upload']);
 });
 
-test('targets: models, suites, revisions and local paths', () => {
+test('targets: policies, benchmarks, revisions and local paths', () => {
   const dir = mkdtempSync(join(tmpdir(), 'hpv-targets-'));
-  mkdirSync(join(dir, 'suite'));
-  writeFileSync(join(dir, 'suite', 'suite.yaml'), 'suite: x\n');
+  mkdirSync(join(dir, 'benchmark'));
+  writeFileSync(join(dir, 'benchmark', 'benchmark.yaml'), 'name: x\n');
   mkdirSync(join(dir, 'model'));
-  assert.deepEqual(classifyTarget('org/name'), { kind: 'model', source: 'hub', id: 'org/name', revision: null });
-  assert.deepEqual(classifyTarget('org/name@v2'), { kind: 'model', source: 'hub', id: 'org/name', revision: 'v2' });
-  assert.deepEqual(classifyTarget('https://huggingface.co/org/name/tree/abc123'), { kind: 'model', source: 'hub', id: 'org/name', revision: 'abc123' });
-  assert.deepEqual(classifyTarget('datasets/org/bench@v1'), { kind: 'suite', source: 'hub', id: 'org/bench', revision: 'v1' });
-  assert.deepEqual(classifyTarget('https://huggingface.co/datasets/org/bench'), { kind: 'suite', source: 'hub', id: 'org/bench', revision: null });
-  assert.equal(classifyTarget('suite', { cwd: dir }).kind, 'suite');
-  assert.equal(classifyTarget('model', { cwd: dir }).kind, 'model');
+  assert.deepEqual(classifyTarget('org/name'), { kind: 'policy', source: 'hub', id: 'org/name', revision: null });
+  assert.deepEqual(classifyTarget('org/name@v2'), { kind: 'policy', source: 'hub', id: 'org/name', revision: 'v2' });
+  assert.deepEqual(classifyTarget('https://huggingface.co/org/name/tree/abc123'), { kind: 'policy', source: 'hub', id: 'org/name', revision: 'abc123' });
+  assert.deepEqual(classifyTarget('datasets/org/bench@v1'), { kind: 'benchmark', source: 'hub', id: 'org/bench', revision: 'v1' });
+  assert.deepEqual(classifyTarget('https://huggingface.co/datasets/org/bench'), { kind: 'benchmark', source: 'hub', id: 'org/bench', revision: null });
+  assert.equal(classifyTarget('benchmark', { cwd: dir }).kind, 'benchmark');
+  assert.equal(classifyTarget('model', { cwd: dir }).kind, 'policy');
   assert.throws(() => classifyTarget('./missing', { cwd: dir }), /does not exist/);
   assert.throws(() => classifyTarget('https://huggingface.co/spaces/a/b'), /Space/);
 });
 
 const cell = (id, duration, repeat = 0) => ({ cellId: `${id}#${repeat}`, testId: id, repeat, duration, seed: repeat, timeoutS: 60 });
 
-test('jobs run the most work first, shards partition them, pages keep their model', () => {
+test('jobs run the most work first, shards partition them, pages keep their policy', () => {
   const jobs = buildJobs([{ key: 'm0' }, { key: 'm1' }], [cell('a/x', 5), cell('a/long', 100), cell('a/y', 10)]);
   assert.deepEqual(jobs.slice(0, 2).map((j) => j.cells[0].testId), ['a/long', 'a/long']);
   const shards = [1, 2, 3].map((index) => shardJobs(jobs, { index, count: 3 }));
@@ -55,8 +55,8 @@ test('jobs run the most work first, shards partition them, pages keep their mode
   assert.throws(() => parseShard('4/3'), /shard=/);
 
   const queue = jobs.slice();
-  assert.equal(takeNextJob(queue, null).modelKey, 'm0');
-  assert.equal(takeNextJob(queue, 'm1').modelKey, 'm1');
+  assert.equal(takeNextJob(queue, null).policyKey, 'm0');
+  assert.equal(takeNextJob(queue, 'm1').policyKey, 'm1');
 });
 
 test('a test\'s repeats run in groups of at most MAX_ROBOTS robots', () => {
@@ -70,22 +70,22 @@ test('a test\'s repeats run in groups of at most MAX_ROBOTS robots', () => {
   assert.ok(groups.every((g) => new Set(g.map((c) => c.testId)).size === 1));
   assert.deepEqual(groupCells(cells, 1).map((g) => g.length), cells.map(() => 1));
 
-  const models = [{ key: 'm0' }, { key: 'm1' }];
-  const jobs = buildJobs(models, cells);
+  const policies = [{ key: 'm0' }, { key: 'm1' }];
+  const jobs = buildJobs(policies, cells);
   assert.equal(jobs.length, 2 * groups.length);
   // Ordered by test length x robots: a/one (100), then a/long x2 (60), then a/x x5 (50).
   assert.deepEqual(jobs.slice(0, 4).map((j) => [j.cells[0].testId, j.cells.length]), [['a/one', 1], ['a/one', 1], ['a/long', 2], ['a/long', 2]]);
   for (const count of [1, 2, 3, 4]) {
     const shards = Array.from({ length: count }, (_, i) => shardJobs(jobs, { index: i + 1, count }));
-    const seen = shards.flat().flatMap((job) => job.cells.map((c) => `${job.modelKey}|${c.cellId}`));
-    assert.equal(seen.length, models.length * cells.length, `shards of ${count}`);
+    const seen = shards.flat().flatMap((job) => job.cells.map((c) => `${job.policyKey}|${c.cellId}`));
+    assert.equal(seen.length, policies.length * cells.length, `shards of ${count}`);
     assert.equal(new Set(seen).size, seen.length, `shards of ${count}: every cell exactly once`);
   }
 });
 
 function fakeRun(overrides = {}) {
   const raw = {
-    suite: 'smoke', version: 1, harness: { protocol: 1 }, requires: {},
+    name: 'smoke', version: 1, harness: { protocol: 1 }, requires: {},
     tests: [{ config: 'a' }], tasks: [{ id: 'survival_rate', metric: 'survival_rate@1' }],
   };
   const row = {
@@ -93,16 +93,16 @@ function fakeRun(overrides = {}) {
     commands: [{ t: 0, vx: 0, vy: 0, wz: 0 }], events: [], limits: null, foot_friction: null, terrain: null, metrics_opt_in: [],
   };
   return {
-    schema: RUN_SCHEMA,
+    schema: RESULT_SCHEMA,
     generatedAt: '2026-10-02T00:00:00.000Z',
     provenance: { hpv: { commit: 'c'.repeat(40), dirty: false, protocol: 1 }, asimov1: { commit: 'a'.repeat(40) }, runtime: {} },
-    suite: { source: 'hub', id: 'org/bench', sha: 'd'.repeat(40), suiteFile: 'suite.yaml', raw, problems: [] },
+    benchmark: { source: 'hub', id: 'org/bench', sha: 'd'.repeat(40), raw, problems: [] },
     overrides: { tests: null, repeats: null, force: false },
     shard: null,
-    models: [{ key: 'm0', id: 'org/model', label: 'org/model', source: 'hub', repo: 'org/model', sha: 'e'.repeat(40), files: {} }],
+    policies: [{ key: 'm0', id: 'org/model', label: 'org/model', source: 'hub', repo: 'org/model', sha: 'e'.repeat(40), files: {} }],
     tests: [row],
     expectedCells: 1,
-    cells: [{ modelKey: 'm0', cellId: 'a/x#0', testId: 'a/x', repeat: 0, metrics: { fell: { fell: false } } }],
+    cells: [{ policyKey: 'm0', cellId: 'a/x#0', testId: 'a/x', repeat: 0, metrics: { fell: { fell: false } } }],
     ...overrides,
   };
 }
@@ -112,24 +112,24 @@ test('only reproducible, complete, error-free runs may be uploaded', () => {
   const dirty = fakeRun();
   dirty.provenance.hpv.dirty = true;
   assert.match(uploadBlockers(dirty, 'm0').join(), /uncommitted/);
-  assert.match(uploadBlockers(fakeRun({ suite: { ...fakeRun().suite, source: 'local' } }), 'm0').join(), /local folder/);
+  assert.match(uploadBlockers(fakeRun({ benchmark: { ...fakeRun().benchmark, source: 'local' } }), 'm0').join(), /local folder/);
   assert.match(uploadBlockers(fakeRun({ overrides: { tests: ['a/x'], repeats: null, force: false } }), 'm0').join(), /tests=/);
   assert.match(uploadBlockers(fakeRun({ cells: [] }), 'm0').join(), /missing/);
-  assert.match(uploadBlockers(fakeRun({ cells: [{ modelKey: 'm0', cellId: 'a/x#0', testId: 'a/x', error: 'boom' }] }), 'm0').join(), /boom/);
+  assert.match(uploadBlockers(fakeRun({ cells: [{ policyKey: 'm0', cellId: 'a/x#0', testId: 'a/x', error: 'boom' }] }), 'm0').join(), /boom/);
 });
 
 test('merge needs every shard of the same run exactly once', () => {
   const base = fakeRun({ expectedCells: 2, tests: fakeRun().tests });
   const s1 = { ...base, shard: { index: 1, count: 2 }, cells: [{ ...base.cells[0], cellId: 'a/x#0' }] };
   const s2 = { ...base, shard: { index: 2, count: 2 }, cells: [{ ...base.cells[0], cellId: 'a/x#1', repeat: 1 }] };
-  const merged = mergeRuns([s1, s2]);
+  const merged = mergeResults([s1, s2]);
   assert.equal(merged.cells.length, 2);
   assert.equal(merged.shard, null);
   assert.ok(merged.tasks.m0);
-  assert.throws(() => mergeRuns([s1]), /shards 1\.\.2|cells/);
-  assert.throws(() => mergeRuns([s1, s1]), /more than one input/);
+  assert.throws(() => mergeResults([s1]), /shards 1\.\.2|cells/);
+  assert.throws(() => mergeResults([s1, s1]), /more than one input/);
   const other = { ...s2, provenance: { ...s2.provenance, hpv: { ...s2.provenance.hpv, commit: 'f'.repeat(40) } } };
-  assert.throws(() => mergeRuns([s1, other]), /different run/);
+  assert.throws(() => mergeResults([s1, other]), /different run/);
 });
 
 test('eval results: entries per task, re-runs replace only their own tasks', () => {
@@ -140,7 +140,7 @@ test('eval results: entries per task, re-runs replace only their own tasks', () 
   const entries = buildEvalResultEntries(run, 'm0', { sourceUrl: 'https://example/report.html' });
   assert.equal(entries.length, 1);
   assert.deepEqual(entries[0].dataset, { id: 'org/bench', task_id: 'survival_rate_v1', revision: 'd'.repeat(40) });
-  assert.match(entries[0].notes, /^metric=survival_rate@1 95%CI=\[0\.3, 0\.7\] tests=4 runs=20 hpv@cccccccccccc protocol=1 suite=smoke v1/);
+  assert.match(entries[0].notes, /^metric=survival_rate@1 95%CI=\[0\.3, 0\.7\] tests=4 runs=20 hpv@cccccccccccc protocol=1 benchmark=smoke v1/);
   assert.equal(evalResultsPath('org/bench'), '.eval_results/org__bench.yaml');
 
   const existing = mergeEvalResults(null, [
@@ -159,10 +159,10 @@ test('eval results: entries per task, re-runs replace only their own tasks', () 
   const text = mergeEvalResults(null, [...entries, { ...entries[0], dataset: { ...entries[0].dataset, task_id: 'b_v1' } }]);
   assert.match(text, /date: "2026-10-02T00:00:00.000Z"/);
   assert.doesNotMatch(text, /[&*]a\d/); // no YAML anchors/aliases
-  assert.match(text, /notes: metric=\S+ 95%CI=\[[\d.]+, [\d.]+\] tests=\d+ runs=\d+ hpv@\S+ protocol=1 suite=smoke v1 asimov-1@\S+ model@\S+\n/);
+  assert.match(text, /notes: metric=\S+ 95%CI=\[[\d.]+, [\d.]+\] tests=\d+ runs=\d+ hpv@\S+ protocol=1 benchmark=smoke v1 asimov-1@\S+ policy@\S+\n/);
 });
 
-test('eval.yaml keeps task ids of earlier suite versions', () => {
+test('eval.yaml keeps task ids of earlier benchmark versions', () => {
   const merged = mergeEvalTasks({ tasks: [{ id: 'x_v1' }, { id: 'y_v2' }] }, { name: 'n', tasks: [{ id: 'y_v2', config: 'a' }] });
   assert.deepEqual(merged.tasks, [{ id: 'y_v2', config: 'a' }, { id: 'x_v1' }]);
 });
@@ -203,19 +203,19 @@ test('a refused direct commit is retried as a pull request', async () => {
   await assert.rejects(() => commitFiles({ repo: { type: 'model', name: 'jiaqi/model' }, files: [], title: 't', env: {}, hub }), /token/);
 });
 
-test('only suite files are fetched from a dataset', () => {
+test('only benchmark files are fetched from a dataset', () => {
   assert.deepEqual(
-    datasetFilesToFetch(['suite.yaml', 'eval.yaml', 'README.md', 'suites/smoke.yaml', 'data/push/test.jsonl', 'data/push/big.parquet', 'calibration/v1.json']),
-    ['suite.yaml', 'eval.yaml', 'README.md', 'suites/smoke.yaml', 'data/push/test.jsonl'],
+    datasetFilesToFetch(['benchmark.yaml', 'eval.yaml', 'README.md', 'suites/smoke.yaml', 'data/push/test.jsonl', 'data/push/big.parquet', 'calibration/v1.json']),
+    ['benchmark.yaml', 'eval.yaml', 'README.md', 'data/push/test.jsonl'],
   );
 });
 
 test('the scored-content hash ignores prose, version and tested_commit', () => {
-  const suite = { suite: 's', title: 'T', version: 1, harness: { protocol: 1, tested_commit: 'abc' }, tests: [{ all: true }] };
+  const benchmark = { name: 's', title: 'T', version: 1, harness: { protocol: 1, tested_commit: 'abc' }, tests: [{ all: true }] };
   const rows = [{ id: 'loco/a', duration: 10 }];
-  const hash = scoredContentHash(suite, rows);
-  assert.equal(scoredContentHash({ ...suite, title: 'U', version: 2, harness: { protocol: 1, tested_commit: 'def' } }, rows), hash);
-  assert.notEqual(scoredContentHash({ ...suite, harness: { protocol: 2 } }, rows), hash);
-  assert.notEqual(scoredContentHash(suite, [{ id: 'loco/a', duration: 11 }]), hash);
+  const hash = scoredContentHash(benchmark, rows);
+  assert.equal(scoredContentHash({ ...benchmark, title: 'U', version: 2, harness: { protocol: 1, tested_commit: 'def' } }, rows), hash);
+  assert.notEqual(scoredContentHash({ ...benchmark, harness: { protocol: 2 } }, rows), hash);
+  assert.notEqual(scoredContentHash(benchmark, [{ id: 'loco/a', duration: 11 }]), hash);
 });
 

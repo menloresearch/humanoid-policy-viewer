@@ -1,18 +1,18 @@
 // Works out what a word on the `npm run benchmark` command line refers to:
 //
-//   menloresearch/asimov1-loco[@rev]              Hub model
-//   https://huggingface.co/org/name[/tree/rev]    Hub model
-//   datasets/org/name[@rev]                       Hub benchmark dataset (suite)
-//   https://huggingface.co/datasets/org/name[...] Hub benchmark dataset (suite)
-//   ./path/to/folder-with-suite.yaml              local suite
-//   ./path/to/model-folder | file.onnx            local model
+//   menloresearch/asimov1-loco[@rev]              Hub policy (model repo)
+//   https://huggingface.co/org/name[/tree/rev]    Hub policy (model repo)
+//   datasets/org/name[@rev]                       Hub benchmark dataset
+//   https://huggingface.co/datasets/org/name[...] Hub benchmark dataset
+//   ./path/to/folder-with-benchmark.yaml          local benchmark
+//   ./path/to/policy-folder | file.onnx           local policy
 //
-// A bare org/name is always a model: the same id can name both a model and a
-// dataset, so a suite must be written with datasets/ (or given as suite=).
+// A bare org/name is always a policy: the same id can name both a model repo and a
+// dataset, so a benchmark must be written with datasets/ (or given as benchmark=).
 
 import { existsSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { isLocalModel } from './localModel.mjs';
+import { isLocalPolicy } from './localPolicy.mjs';
 
 const ID = '[A-Za-z0-9][A-Za-z0-9._-]*\\/[A-Za-z0-9][A-Za-z0-9._-]*';
 const HUB_URL = /^https?:\/\/(?:www\.)?(?:huggingface\.co|hf\.co)\//;
@@ -26,33 +26,33 @@ function splitRevision(rest) {
   return null;
 }
 
-/** @returns {{kind:'model'|'suite', source:'hub'|'local', id?, revision?, path?}} */
+/** @returns {{kind:'policy'|'benchmark', source:'hub'|'local', id?, revision?, path?}} */
 export function classifyTarget(word, { cwd = process.cwd() } = {}) {
   const text = String(word).trim();
   const local = resolve(cwd, text);
   if (existsSync(local)) {
-    if (statSync(local).isDirectory() && existsSync(join(local, 'suite.yaml'))) return { kind: 'suite', source: 'local', path: local };
-    return { kind: 'model', source: 'local', path: local };
+    if (statSync(local).isDirectory() && existsSync(join(local, 'benchmark.yaml'))) return { kind: 'benchmark', source: 'local', path: local };
+    return { kind: 'policy', source: 'local', path: local };
   }
-  if (isLocalModel(text) && !HUB_URL.test(text)) throw new Error(`${text} does not exist`);
+  if (isLocalPolicy(text) && !HUB_URL.test(text)) throw new Error(`${text} does not exist`);
 
   let rest = text.replace(HUB_URL, '').replace(/^hf:\/\//, '');
-  let kind = 'model';
+  let kind = 'policy';
   if (/^datasets\//.test(rest)) {
-    kind = 'suite';
+    kind = 'benchmark';
     rest = rest.slice('datasets/'.length);
   } else if (/^models\//.test(rest)) {
     rest = rest.slice('models/'.length);
   } else if (/^spaces\//.test(rest)) {
-    throw new Error(`${text} is a Space, not a model or a benchmark dataset`);
+    throw new Error(`${text} is a Space, not a policy (model repo) or a benchmark dataset`);
   }
   const parsed = splitRevision(rest);
-  if (!parsed) throw new Error(`"${text}" is not a local path, a Hugging Face model (org/name) or a benchmark dataset (datasets/org/name)`);
+  if (!parsed) throw new Error(`"${text}" is not a local path, a Hugging Face policy (model repo org/name) or a benchmark dataset (datasets/org/name)`);
   return { kind, source: 'hub', ...parsed };
 }
 
 /** Human-readable form of a classified target, e.g. for logs. */
 export function describeTarget(target) {
   if (target.source === 'local') return target.path;
-  return `${target.kind === 'suite' ? 'datasets/' : ''}${target.id}${target.revision ? `@${target.revision}` : ''}`;
+  return `${target.kind === 'benchmark' ? 'datasets/' : ''}${target.id}${target.revision ? `@${target.revision}` : ''}`;
 }

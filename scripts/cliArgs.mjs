@@ -7,9 +7,9 @@ export function splitCsv(value) {
 // words, because npm passes those to the script untouched but swallows anything
 // starting with "--" unless the user types a bare "--" first:
 //
-//   npm run benchmark menloresearch/asimov1-loco suite=../my-suite jobs=2 pr
+//   npm run benchmark menloresearch/asimov1-loco benchmark=../my-benchmark jobs=2 pr
 //
-//   <word>         positional (a model, a suite, a sub-command...)
+//   <word>         positional (a policy, a benchmark, a sub-command...)
 //   key=value      option; keys listed in `repeatable` may be given several times
 //   flag           a known bare word, e.g. pr, dry-run
 //

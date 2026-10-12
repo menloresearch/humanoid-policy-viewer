@@ -1,20 +1,19 @@
-// Fetches a benchmark dataset (suite.yaml + data/**/test.jsonl, see suiteDir.mjs)
+// Fetches a benchmark dataset (benchmark.yaml + data/**/test.jsonl, see benchmarkDir.mjs)
 // from Hugging Face into <cache>/hf-datasets/<org>__<name>/<sha>/. A commit
 // never changes, so a revision already in the cache is used as is, and a run
 // always records the exact dataset commit it used.
 
 import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
-import { defaultCacheDir, downloadFile } from './hfModel.mjs';
+import { defaultCacheDir, downloadFile } from './hfPolicy.mjs';
 
 export const DATASET_META_FILE = '.hf-dataset.json';
 
-// Only what the runner and suite tooling read; never large data files.
+// Only what the runner and benchmark tooling read; never large data files.
 export function datasetFilesToFetch(files) {
-  return files.filter((file) => file === 'suite.yaml'
+  return files.filter((file) => file === 'benchmark.yaml'
     || file === 'eval.yaml'
     || file === 'README.md'
-    || /^suites\/[^/]+\.ya?ml$/.test(file)
     || /^data\/[^/]+\/test\.jsonl$/.test(file));
 }
 
@@ -53,7 +52,7 @@ export async function ensureDataset(id, {
     return { dir, id: info.id, sha: info.sha, revision };
   }
   const wanted = datasetFilesToFetch(info.files);
-  if (!wanted.includes('suite.yaml')) throw new Error(`datasets/${info.id}@${revision} has no suite.yaml, so it is not a humanoid-policy-viewer benchmark`);
+  if (!wanted.includes('benchmark.yaml')) throw new Error(`datasets/${info.id}@${revision} has no benchmark.yaml, so it is not a humanoid-policy-viewer benchmark`);
   const staging = `${dir}.tmp-${process.pid}`;
   rmSync(staging, { recursive: true, force: true });
   try {

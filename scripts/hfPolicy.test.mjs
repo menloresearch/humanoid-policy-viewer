@@ -3,20 +3,20 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { ensureModel, normalizeRepoId, parseArgs, selectFiles } from './hfModel.mjs';
+import { ensurePolicy, normalizeRepoId, parseArgs, selectFiles } from './hfPolicy.mjs';
 
-test('parseArgs accepts --model forms, a bare positional, and options', () => {
-  assert.equal(parseArgs(['--model', 'Menlo/x']).model, 'Menlo/x');
-  assert.equal(parseArgs(['--model=Menlo/x']).model, 'Menlo/x');
-  assert.equal(parseArgs(['Menlo/x']).model, 'Menlo/x');
+test('parseArgs accepts --policy forms, a bare positional, and options', () => {
+  assert.equal(parseArgs(['--policy', 'Menlo/x']).policy, 'Menlo/x');
+  assert.equal(parseArgs(['--policy=Menlo/x']).policy, 'Menlo/x');
+  assert.equal(parseArgs(['Menlo/x']).policy, 'Menlo/x');
   const args = parseArgs(['Menlo/x', '--revision=v1', '--port', '4000', '--no-open']);
   assert.deepEqual([args.revision, args.port, args.open], ['v1', 4000, false]);
 });
 
 test('parseArgs rejects unknown flags, missing values and bad ports', () => {
   assert.throws(() => parseArgs(['--nope']), /Unknown argument/);
-  assert.throws(() => parseArgs(['--model']), /needs a value/);
-  assert.throws(() => parseArgs(['--model', '--no-open']), /needs a value/);
+  assert.throws(() => parseArgs(['--policy']), /needs a value/);
+  assert.throws(() => parseArgs(['--policy', '--no-open']), /needs a value/);
   assert.throws(() => parseArgs(['--port', 'abc']), /--port/);
 });
 
@@ -50,16 +50,16 @@ function fakeHub(state) {
   return { fetchImpl, calls };
 }
 
-test('ensureModel downloads into a model library layout, then reuses and refreshes the cache', async () => {
+test('ensurePolicy downloads into a policy library layout, then reuses and refreshes the cache', async () => {
   const cacheDir = mkdtempSync(join(tmpdir(), 'hpv-hf-'));
   try {
     const state = { sha: 'a'.repeat(40), libraryName: 'asimov', files: ['README.md', 'env.yaml', 'agent.yaml', 'policy.onnx'] };
     const hub = fakeHub(state);
     const opts = { cacheDir, env: {}, fetchImpl: hub.fetchImpl };
 
-    const first = await ensureModel('Menlo/demo', opts);
+    const first = await ensurePolicy('Menlo/demo', opts);
     assert.equal(first.cached, false);
-    assert.equal(first.policyValue, 'ckpt:hf/Menlo__demo/policy.onnx');
+    assert.equal(first.policyValue, 'lib:hf/Menlo__demo/policy.onnx');
     assert.equal(first.libraryName, 'asimov');
     assert.deepEqual(first.files, ['policy.onnx', 'env.yaml', 'agent.yaml']);
     assert.equal(readFileSync(join(cacheDir, 'hf/Menlo__demo/policy.onnx'), 'utf8'), `${state.sha}:policy.onnx`);
@@ -68,15 +68,15 @@ test('ensureModel downloads into a model library layout, then reuses and refresh
 
     const downloads = () => hub.calls.filter((u) => u.includes('/resolve/')).length;
     assert.equal(downloads(), 3);
-    assert.equal((await ensureModel('Menlo/demo', opts)).cached, true);
+    assert.equal((await ensurePolicy('Menlo/demo', opts)).cached, true);
     assert.equal(downloads(), 3);
 
     state.libraryName = 'other';
-    assert.equal((await ensureModel('Menlo/demo', opts)).libraryName, 'other');
+    assert.equal((await ensurePolicy('Menlo/demo', opts)).libraryName, 'other');
     state.libraryName = 'asimov';
 
     state.offline = true;
-    const offline = await ensureModel('Menlo/demo', opts);
+    const offline = await ensurePolicy('Menlo/demo', opts);
     assert.equal(offline.cached, true);
     assert.equal(offline.libraryName, 'asimov');
     state.offline = false;
@@ -85,12 +85,12 @@ test('ensureModel downloads into a model library layout, then reuses and refresh
     const metaPath = join(cacheDir, 'hf/Menlo__demo/.hf-meta.json');
     const { files: _dropped, ...oldMeta } = JSON.parse(readFileSync(metaPath, 'utf8'));
     writeFileSync(metaPath, JSON.stringify(oldMeta));
-    assert.equal((await ensureModel('Menlo/demo', opts)).cached, false);
+    assert.equal((await ensurePolicy('Menlo/demo', opts)).cached, false);
     assert.equal(downloads(), 6);
 
     state.sha = 'b'.repeat(40);
     state.files = ['policy.onnx'];
-    const updated = await ensureModel('Menlo/demo', opts);
+    const updated = await ensurePolicy('Menlo/demo', opts);
     assert.equal(updated.cached, false);
     assert.deepEqual(updated.files, ['policy.onnx']);
     assert.equal(existsSync(join(cacheDir, 'hf/Menlo__demo/env.yaml')), false);
@@ -99,24 +99,24 @@ test('ensureModel downloads into a model library layout, then reuses and refresh
   }
 });
 
-test('ensureModel keys the cache on the Hub\'s spelling of the repo id, whatever case was typed', async () => {
+test('ensurePolicy keys the cache on the Hub\'s spelling of the repo id, whatever case was typed', async () => {
   const cacheDir = mkdtempSync(join(tmpdir(), 'hpv-hf-'));
   try {
     const hub = fakeHub({ id: 'Menlo/demo', sha: 'c'.repeat(40), files: ['policy.onnx'] });
     const opts = { cacheDir, env: {}, fetchImpl: hub.fetchImpl };
-    const typed = await ensureModel('menlo/DEMO', opts);
-    assert.equal(typed.policyValue, 'ckpt:hf/Menlo__demo/policy.onnx');
-    assert.equal((await ensureModel('Menlo/demo', opts)).cached, true);
+    const typed = await ensurePolicy('menlo/DEMO', opts);
+    assert.equal(typed.policyValue, 'lib:hf/Menlo__demo/policy.onnx');
+    assert.equal((await ensurePolicy('Menlo/demo', opts)).cached, true);
   } finally {
     rmSync(cacheDir, { recursive: true, force: true });
   }
 });
 
-test('ensureModel explains a missing or private repo and leaves no cache behind', async () => {
+test('ensurePolicy explains a missing or private repo and leaves no cache behind', async () => {
   const cacheDir = mkdtempSync(join(tmpdir(), 'hpv-hf-'));
   try {
     const hub = fakeHub({ missing: true });
-    await assert.rejects(ensureModel('Menlo/nope', { cacheDir, env: {}, fetchImpl: hub.fetchImpl }), /HF_TOKEN/);
+    await assert.rejects(ensurePolicy('Menlo/nope', { cacheDir, env: {}, fetchImpl: hub.fetchImpl }), /HF_TOKEN/);
     assert.equal(existsSync(join(cacheDir, 'hf')), false);
   } finally {
     rmSync(cacheDir, { recursive: true, force: true });

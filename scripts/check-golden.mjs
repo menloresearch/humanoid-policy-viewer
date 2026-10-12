@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // npm run benchmark:golden [update]
 //
-// Guards BENCHMARK_PROTOCOL (src/benchmark/protocol.js): runs the smoke suite
-// (test/fixtures/smoke-suite) on the bundled policy and compares the key
-// per-cell numbers with test/fixtures/smoke-suite/golden.json. Run it before
+// Guards BENCHMARK_PROTOCOL (src/benchmark/protocol.js): runs the smoke benchmark
+// (test/fixtures/smoke-benchmark) on the bundled policy and compares the key
+// per-cell numbers with test/fixtures/smoke-benchmark/golden.json. Run it before
 // merging any change to the sim, the metrics or the runner. If per-run numbers
 // moved on purpose, bump BENCHMARK_PROTOCOL and refresh the file with `update`;
 // if only task values moved (a new metric or metric version), just `update`.
@@ -16,9 +16,9 @@ import { fileURLToPath } from 'node:url';
 import { BENCHMARK_PROTOCOL } from '../src/benchmark/protocol.js';
 
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const SUITE = join(appDir, 'test/fixtures/smoke-suite');
-const GOLDEN = join(SUITE, 'golden.json');
-const MODEL = join(appDir, 'public/examples/checkpoints/asimov/model_aug_18_1');
+const BENCHMARK = join(appDir, 'test/fixtures/smoke-benchmark');
+const GOLDEN = join(BENCHMARK, 'golden.json');
+const POLICY = join(appDir, 'public/examples/checkpoints/asimov/model_aug_18_1');
 
 /** The numbers that must not move without a protocol bump. */
 export function goldenView(run) {
@@ -38,12 +38,12 @@ export function goldenView(run) {
 
 function main() {
   const out = mkdtempSync(join(tmpdir(), 'hpv-golden-'));
-  const result = spawnSync(process.execPath, [join(appDir, 'scripts/run-benchmark.mjs'), MODEL, SUITE, 'jobs=1', 'no-upload', `out=${out}`], { cwd: appDir, stdio: 'inherit' });
+  const result = spawnSync(process.execPath, [join(appDir, 'scripts/run-benchmark.mjs'), POLICY, BENCHMARK, 'jobs=1', 'no-upload', `out=${out}`], { cwd: appDir, stdio: 'inherit' });
   if (result.status !== 0) {
     console.error('The smoke run failed; see above.');
     process.exit(1);
   }
-  const view = goldenView(JSON.parse(readFileSync(join(out, 'run.json'), 'utf8')));
+  const view = goldenView(JSON.parse(readFileSync(join(out, 'result.json'), 'utf8')));
   if (process.argv.includes('update')) {
     writeFileSync(GOLDEN, JSON.stringify(view, null, 2) + '\n');
     console.log(`Updated ${GOLDEN}`);
@@ -56,7 +56,7 @@ function main() {
   }
   const changed = Object.keys(view.cells).filter((id) => JSON.stringify(view.cells[id]) !== JSON.stringify(golden.cells?.[id]));
   if (!changed.length && Object.keys(golden.cells ?? {}).length === Object.keys(view.cells).length) {
-    // Per-run numbers held; only the smoke suite's tasks or a metric definition moved.
+    // Per-run numbers held; only the smoke benchmark's tasks or a metric definition moved.
     console.error('Only leaderboard task values changed; every per-run number is unchanged, so no protocol bump.');
     console.error('Adding a metric (or a new @version) is fine: npm run benchmark:golden update.');
     console.error('Never change what a published metric version computes; add the next version instead.');

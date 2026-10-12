@@ -1,12 +1,12 @@
-// Sanity checks for a downloaded checkpoint before it is run or benchmarked: a
-// checkpoint must ship an env.yaml the viewer can read (with explicit gains and torque limits)
+// Sanity checks for a downloaded policy before it is run or benchmarked: a
+// policy must ship an env.yaml the viewer can read (with explicit gains and torque limits)
 // and an agent.yaml. Without them the viewer silently falls back to the bundled
-// reference gains and unclamped torque, so every checkpoint would be benchmarked
+// reference gains and unclamped torque, so every policy would be benchmarked
 // with the same gains.
 
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { checkpointFileCandidates, parseEnvPolicySettings } from '../src/simulation/envPolicyConfig.js';
+import { policyFileCandidates, parseEnvPolicySettings } from '../src/simulation/envPolicyConfig.js';
 
 export const EXPECTED_LIBRARY_NAME = 'asimov';
 
@@ -22,7 +22,7 @@ export function basicYamlSanityCheck(text) {
 // envYaml / agentYaml are the file contents, or null when the file is absent.
 // A missing env.yaml is an error (the run must not start: the policy's gains,
 // action scale and torque limits would be guessed); everything else is a warning.
-export function checkpointProblems({ envYaml, agentYaml, jointNames }) {
+export function policyProblems({ envYaml, agentYaml, jointNames }) {
   const errors = [];
   const warnings = [];
 
@@ -55,23 +55,23 @@ export function checkpointProblems({ envYaml, agentYaml, jointNames }) {
   return { errors, warnings };
 }
 
-export function readCheckpointFile(dir, name) {
-  for (const candidate of checkpointFileCandidates(name)) {
+export function readPolicyFile(dir, name) {
+  for (const candidate of policyFileCandidates(name)) {
     const path = join(dir, candidate);
     if (existsSync(path)) return readFileSync(path, 'utf8');
   }
   return null;
 }
 
-export function checkCheckpointDir(dir, jointNames) {
-  return checkpointProblems({
-    envYaml: readCheckpointFile(dir, 'env.yaml'),
-    agentYaml: readCheckpointFile(dir, 'agent.yaml'),
+export function checkPolicyDir(dir, jointNames) {
+  return policyProblems({
+    envYaml: readPolicyFile(dir, 'env.yaml'),
+    agentYaml: readPolicyFile(dir, 'agent.yaml'),
     jointNames,
   });
 }
 
-// Returns a warning when the repo's model-card metadata does not say it is an Asimov model.
+// Returns a warning when the repo's model-card metadata does not say it is an Asimov policy.
 export function libraryNameWarning(libraryName) {
   if (String(libraryName ?? '').toLowerCase() === EXPECTED_LIBRARY_NAME) return null;
   const found = libraryName ? `library_name: ${libraryName}` : 'no library_name';

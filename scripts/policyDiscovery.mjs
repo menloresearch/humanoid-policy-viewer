@@ -1,16 +1,16 @@
-// Shared ONNX checkpoint discovery for the model root folders named in
-// HPV_MODEL_ROOTS (see modelLibraryConfig.mjs).
+// Shared ONNX policy discovery for the policy root folders named in
+// HPV_POLICY_ROOTS (see policyLibraryConfig.mjs).
 //
-// Used by vite.config.mjs (to serve /api/models to the browser),
+// Used by vite.config.mjs (to serve /api/policies to the browser),
 // scripts/run-benchmark.mjs (to build the default policy list), and by any
 // embedding repo's tooling, so they never drift on what counts as a
-// discoverable model.
+// discoverable policy.
 
 import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { HF_META_FILE } from './hfModel.mjs';
+import { HF_META_FILE } from './hfPolicy.mjs';
 
-// A model downloaded by `npm run hf` is labelled by its Hugging Face repo id,
+// A policy downloaded by `npm run hf` is labelled by its Hugging Face repo id,
 // with the file name added when it is not the repo's primary policy.
 function hfLabel(dir, fileName) {
   let meta;
@@ -19,7 +19,7 @@ function hfLabel(dir, fileName) {
   return fileName === meta.primary ? meta.repo : `${meta.repo} (${fileName})`;
 }
 
-export function listModelRoots(baseDir, roots) {
+export function listPolicyRoots(baseDir, roots) {
   if (!baseDir) return [];
   return roots
     .map((root) => ({ root, directory: resolve(baseDir, root) }))
@@ -27,10 +27,10 @@ export function listModelRoots(baseDir, roots) {
     .map((entry) => ({ ...entry, realDirectory: realpathSync(entry.directory) }));
 }
 
-export function listModels(baseDir, roots) {
-  const modelRoots = listModelRoots(baseDir, roots);
+export function discoverPolicies(baseDir, roots) {
+  const policyRoots = listPolicyRoots(baseDir, roots);
   const out = [];
-  for (const mr of modelRoots) {
+  for (const pr of policyRoots) {
     const walkOnnx = (dir, prefix) => {
       let entries;
       try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
@@ -40,16 +40,16 @@ export function listModels(baseDir, roots) {
         if (entry.isDirectory()) walkOnnx(resolve(dir, entry.name), rel);
         else if (entry.isFile() && entry.name.toLowerCase().endsWith('.onnx')) {
           out.push({
-            root: mr.root,
-            path: `${mr.root}/${rel}`,
-            url: `/model-library/${mr.root}/${rel}`,
-            label: hfLabel(dir, entry.name) ?? `${mr.root}/${rel}`,
+            root: pr.root,
+            path: `${pr.root}/${rel}`,
+            url: `/policy-library/${pr.root}/${rel}`,
+            label: hfLabel(dir, entry.name) ?? `${pr.root}/${rel}`,
             name: entry.name,
           });
         }
       }
     };
-    walkOnnx(mr.realDirectory, '');
+    walkOnnx(pr.realDirectory, '');
   }
   return out.sort((a, b) => a.path.localeCompare(b.path));
 }

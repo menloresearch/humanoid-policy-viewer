@@ -1,7 +1,7 @@
 // Runs benchmark jobs in headless Chromium: one Vite dev server, one browser,
 // `concurrency` pages. Each page is its own renderer process (its own core) and
 // hosts one MuJoCo demo; a page keeps its loaded policy, so the queue hands it
-// jobs for the same model when it can (see takeNextJob). A job is one test's
+// jobs for the same policy when it can (see takeNextJob). A job is one test's
 // repeats (up to MAX_ROBOTS), run at once as that many robots in the scene.
 //
 // The first page is loaded alone so Vite compiles the app once; the others then
@@ -22,8 +22,8 @@ const CHROMIUM_ARGS = [
 
 export async function startViewerServer({ appDir, libraryDir, libraryRoots }) {
   // vite.config.mjs reads these when it loads, so they must be set first.
-  process.env.HPV_MODEL_LIBRARY_DIR = libraryDir;
-  process.env.HPV_MODEL_ROOTS = libraryRoots;
+  process.env.HPV_POLICY_LIBRARY_DIR = libraryDir;
+  process.env.HPV_POLICY_ROOTS = libraryRoots;
   const { createServer } = await import('vite');
   const server = await createServer({
     root: appDir,
@@ -43,8 +43,8 @@ function withTimeout(promise, ms, message) {
 }
 
 /**
- * @param jobs        [{ modelKey, cells }] in queue order (buildJobs)
- * @param policies    modelKey -> { onnxPath } as the page should load it
+ * @param jobs        [{ policyKey, cells }] in queue order (buildJobs)
+ * @param policies    policyKey -> { onnxPath } as the page should load it
  * @param sequences   testId -> sequence object (rowToSequence)
  * @param onResult    called with (job, cell, result) for each cell as its job finishes
  */
@@ -90,13 +90,13 @@ export async function runJobs({
 
     const worker = async (firstPage) => {
       let page = firstPage;
-      let lastModelKey = null;
-      for (let job = takeNextJob(queue, lastModelKey); job; job = takeNextJob(queue, lastModelKey)) {
+      let lastPolicyKey = null;
+      for (let job = takeNextJob(queue, lastPolicyKey); job; job = takeNextJob(queue, lastPolicyKey)) {
         const started = Date.now();
         const { cells } = job;
         const finish = (perCell) => cells.forEach((cell, i) => onResult(job, cell, perCell(i)));
-        if (unloadable.has(job.modelKey)) {
-          finish(() => ({ error: unloadable.get(job.modelKey), metrics: null, wallMs: 0 }));
+        if (unloadable.has(job.policyKey)) {
+          finish(() => ({ error: unloadable.get(job.policyKey), metrics: null, wallMs: 0 }));
           continue;
         }
         // The robots of a group step one after another, so its budget grows with them.
@@ -105,7 +105,7 @@ export async function runJobs({
         try {
           outcome = await withTimeout(
             page.evaluate(([policy, payload]) => window.__runBenchmarkGroup(policy, payload), [
-              policies[job.modelKey],
+              policies[job.policyKey],
               {
                 sequence: sequences[cells[0].testId],
                 cells: cells.map((cell) => ({ seed: cell.seed, randomize: cell.randomize })),
@@ -116,10 +116,10 @@ export async function runJobs({
             timeoutS * 1000 + 120_000,
             `no answer from the page within ${timeoutS + 120}s`,
           );
-          lastModelKey = job.modelKey;
+          lastPolicyKey = job.policyKey;
           if (outcome.policyLoadError) {
-            unloadable.set(job.modelKey, outcome.error);
-            lastModelKey = null;
+            unloadable.set(job.policyKey, outcome.error);
+            lastPolicyKey = null;
           }
         } catch (error) {
           // Playwright prefixes "page.evaluate: " and appends the browser stack.
@@ -128,7 +128,7 @@ export async function runJobs({
           // The page may be wedged or have lost its policy; start a fresh one.
           await page.close().catch(() => {});
           page = await openPage();
-          lastModelKey = null;
+          lastPolicyKey = null;
         }
         // A group shares its wall time; each cell is charged its share.
         const wallMs = Math.round((Date.now() - started) / cells.length);

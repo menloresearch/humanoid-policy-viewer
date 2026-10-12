@@ -1,16 +1,16 @@
-// Fetches a policy checkpoint from Hugging Face into a local cache laid out as
-// a viewer model library (see modelLibraryConfig.mjs): <cache>/hf/<org>__<name>/.
-// The dev server then serves it under /model-library/hf/<org>__<name>/ and
-// lists it in /api/models, with no HF-specific code in the browser.
+// Fetches a policy from Hugging Face into a local cache laid out as a viewer
+// policy library (see policyLibraryConfig.mjs): <cache>/hf/<org>__<name>/.
+// The dev server then serves it under /policy-library/hf/<org>__<name>/ and
+// lists it in /api/policies, with no HF-specific code in the browser.
 
 import { createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { checkpointFileCandidates } from '../src/simulation/envPolicyConfig.js';
+import { policyFileCandidates } from '../src/simulation/envPolicyConfig.js';
 
-export const HF_MODEL_ROOT = 'hf';
+export const HF_POLICY_ROOT = 'hf';
 export const HF_META_FILE = '.hf-meta.json';
 const REPO_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
@@ -46,7 +46,7 @@ export function normalizeRepoId(input) {
 }
 
 export function parseArgs(argv) {
-  const args = { model: null, revision: 'main', port: null, open: true, help: false };
+  const args = { policy: null, revision: 'main', port: null, open: true, help: false };
   for (let i = 0; i < argv.length; i++) {
     const [flag, inline] = argv[i].startsWith('--') ? argv[i].split(/=(.*)/s) : [argv[i]];
     const value = () => {
@@ -54,14 +54,14 @@ export function parseArgs(argv) {
       if (v === undefined || v.startsWith('--')) throw new Error(`${flag} needs a value`);
       return v;
     };
-    if (flag === '--model') args.model = value();
+    if (flag === '--policy') args.policy = value();
     else if (flag === '--revision') args.revision = value();
     else if (flag === '--port') {
       args.port = Number(value());
       if (!Number.isInteger(args.port) || args.port < 1 || args.port > 65535) throw new Error('--port must be 1-65535');
     } else if (flag === '--no-open') args.open = false;
     else if (flag === '--help' || flag === '-h') args.help = true;
-    else if (!flag.startsWith('-') && args.model === null) args.model = flag;
+    else if (!flag.startsWith('-') && args.policy === null) args.policy = flag;
     else throw new Error(`Unknown argument: ${argv[i]}`);
   }
   return args;
@@ -73,12 +73,12 @@ export function defaultCacheDir(env = process.env) {
 }
 
 // Every ONNX in the repo, plus the training config (env.yaml supplies the gains,
-// agent.yaml is only checked for presence) and, when present, the checkpoint's
+// agent.yaml is only checked for presence) and, when present, the policy's
 // tracking_policy.json (its overrides of the base policy config).
 export function selectFiles(files) {
   const onnx = files.filter((f) => f.toLowerCase().endsWith('.onnx')).sort();
   if (onnx.length === 0) throw new Error('The repo contains no .onnx file');
-  const present = (name) => checkpointFileCandidates(name).filter((f) => files.includes(f));
+  const present = (name) => policyFileCandidates(name).filter((f) => files.includes(f));
   return {
     onnx,
     env: present('env.yaml'),
@@ -88,8 +88,8 @@ export function selectFiles(files) {
   };
 }
 
-function readMeta(modelDir) {
-  try { return JSON.parse(readFileSync(join(modelDir, HF_META_FILE), 'utf8')); } catch { return null; }
+function readMeta(policyDir) {
+  try { return JSON.parse(readFileSync(join(policyDir, HF_META_FILE), 'utf8')); } catch { return null; }
 }
 
 async function fetchRepoInfo(repo, revision, { endpoint, token, fetchImpl }) {
@@ -122,7 +122,7 @@ export async function downloadFile(url, destination, { token, fetchImpl = fetch 
  * ONNX to run. Re-downloads only when the revision's commit changed; if the Hub
  * is unreachable, a previous download is used instead.
  */
-export async function ensureModel(repo, {
+export async function ensurePolicy(repo, {
   revision = 'main',
   cacheDir = defaultCacheDir(),
   env = process.env,
@@ -133,18 +133,18 @@ export async function ensureModel(repo, {
   const token = env.HF_TOKEN || env.HUGGING_FACE_HUB_TOKEN || null;
   const layout = (id) => {
     const dirName = id.replace('/', '__');
-    return { dirName, modelDir: join(cacheDir, HF_MODEL_ROOT, dirName) };
+    return { dirName, policyDir: join(cacheDir, HF_POLICY_ROOT, dirName) };
   };
   const result = (id, meta, cached) => {
-    const { dirName, modelDir } = layout(id);
-    return { cacheDir, modelDir, ...meta, cached, policyValue: `ckpt:${HF_MODEL_ROOT}/${dirName}/${meta.primary}` };
+    const { dirName, policyDir } = layout(id);
+    return { cacheDir, policyDir, ...meta, cached, policyValue: `lib:${HF_POLICY_ROOT}/${dirName}/${meta.primary}` };
   };
 
   let info;
   try {
     info = await fetchRepoInfo(repo, revision, { endpoint, token, fetchImpl });
   } catch (error) {
-    const previous = readMeta(layout(repo).modelDir);
+    const previous = readMeta(layout(repo).policyDir);
     // A TypeError is fetch's "could not reach the server"; HTTP errors are not retried from cache.
     if (error instanceof TypeError && previous) {
       log(`Hugging Face is unreachable; using the cached copy of ${repo} (${previous.sha.slice(0, 7)})`);
@@ -155,8 +155,8 @@ export async function ensureModel(repo, {
 
   // The Hub matches repo ids case-insensitively; key the cache on its spelling.
   const id = info.id;
-  const { modelDir } = layout(id);
-  const previous = readMeta(modelDir);
+  const { policyDir } = layout(id);
+  const previous = readMeta(policyDir);
   const { onnx, env: envFiles, agent: agentFiles, policyConfig, primary } = selectFiles(info.files);
   const wanted = [...onnx, ...envFiles, ...agentFiles, ...policyConfig];
   // A copy cached by an older version may lack files that are wanted now.
@@ -165,7 +165,7 @@ export async function ensureModel(repo, {
     return result(id, { ...previous, libraryName: info.libraryName }, true);
   }
 
-  const staging = `${modelDir}.tmp-${process.pid}`;
+  const staging = `${policyDir}.tmp-${process.pid}`;
   rmSync(staging, { recursive: true, force: true });
   try {
     for (const file of wanted) {
@@ -177,8 +177,8 @@ export async function ensureModel(repo, {
     }
     const meta = { repo: id, revision, sha: info.sha, libraryName: info.libraryName, primary, onnx, files: wanted };
     writeFileSync(join(staging, HF_META_FILE), JSON.stringify(meta, null, 2) + '\n');
-    rmSync(modelDir, { recursive: true, force: true });
-    renameSync(staging, modelDir);
+    rmSync(policyDir, { recursive: true, force: true });
+    renameSync(staging, policyDir);
     return result(id, meta, false);
   } catch (error) {
     rmSync(staging, { recursive: true, force: true });
