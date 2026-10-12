@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { DragStateManager } from './utils/DragStateManager.js';
-import { createSimulationWrapper, downloadExampleScenesFolder, getPosition, getQuaternion, toMujocoPos, reloadScene, reloadPolicy } from './mujocoUtils.js';
+import { createSimulationWrapper, getPosition, getQuaternion, toMujocoPos, reloadScene, reloadPolicy } from './mujocoUtils.js';
 import { commandSequencer } from './commandSequencer.js';
 import { asimovCommandState } from './observationHelpers.js';
 import { IdealPathTracker, yawFromQuat } from './idealPath.js';
@@ -217,8 +217,7 @@ export class MuJoCoDemo {
 
   async init() {
     this.defaultScenePath = defaultScene;
-    await downloadExampleScenesFolder(this.mujoco);
-    await this.reloadScene(defaultScene);
+    await this.reloadScene(defaultScene); // stages the scene's folder first (stageSceneFolder)
     commandSequencer.bindSim(this);
     this.updateFollowBodyId();
     await this.reloadPolicy(defaultPolicy);

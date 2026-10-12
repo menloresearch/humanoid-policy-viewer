@@ -3,6 +3,9 @@
 MJCF files + meshes staged into MuJoCo's in-browser filesystem. Every file
 used by a scene must be listed in `files.json` (regenerate it with
 `python3 generate_index.py` after adding files) or the loader won't fetch it.
+A scene must keep everything it uses inside its top folder (`asimov-1/`, `g1/`):
+loading a scene fetches only that folder (`stageSceneFolder` in
+`src/simulation/mujocoUtils.js`), once.
 
 ## `asimov-1/` — the Asimov robot (git submodule)
 
