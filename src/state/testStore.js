@@ -128,6 +128,19 @@ export async function saveBenchmarkSettings(benchmark, edit, base) {
   return response.json();
 }
 
+/**
+ * What a Run plans from, for benchmark `benchmark` (a key; null: the server's
+ * default): { dir, raw (benchmark.yaml parsed), rows, problems }, the files
+ * `npm run benchmark` loads.
+ */
+export async function loadBenchmarkDataset(benchmark) {
+  if (STATIC) throw new Error("Static deployments can't run benchmarks.");
+  const url = benchmark ? `${BENCHMARK_API}/dataset?${new URLSearchParams({ benchmark })}` : `${BENCHMARK_API}/dataset`;
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(await parseError(response));
+  return response.json();
+}
+
 export async function loadTest(file) {
   if (STATIC) {
     const catalog = await loadStaticCatalog();

@@ -23,7 +23,7 @@ export const appState = reactive({
   bodyNames: [], // loaded model's real body names, for the push-event target-body picker
   currentBenchmark: null, // key of the benchmark open in the browser (see testStore); null = the server's default
   benchmarkSelection: [], // test files of currentBenchmark checked to run in the benchmark
-  benchmarkResults: null, // the result currently loaded in memory (see benchmarkRunner)
+  benchmarkResults: null, // the result currently loaded in memory: a result.json (src/benchmark/run.js)
   benchmarkResultsFile: null, // which saved result that is, if it came from disk
   savedResults: [] // metadata for the results saved under benchmark_results/, newest first
 });

@@ -1,6 +1,6 @@
-// Client for the /api/results dev endpoint (served by humanoidDevPlugin in
-// vite.config.mjs): saved benchmark results, stored as JSON under
-// ./benchmark_results so they survive a reload. The policy catalog's client is
+// Client for the /api/results endpoint (scripts/viewerServer.mjs): benchmark
+// results, each a <timestamp>/result.json under ./benchmark_results, from the
+// viewer's Run or `npm run benchmark` alike. The policy catalog's client is
 // policyStore.js.
 //
 // In static mode (vite build --mode static, VITE_VIEWER_MODE=static), the
@@ -51,14 +51,19 @@ export async function loadResult(file) {
   return response.json();
 }
 
-export async function saveResult(file, results) {
-  const response = await fetch(`${RESULTS_API}?file=${encodeURIComponent(file)}`, {
-    method: 'PUT',
+/**
+ * Saves a Run's result (the result.json shape of src/benchmark/run.js) as a new
+ * <timestamp>/result.json; the server adds provenance and policy file hashes.
+ * Returns that file's name.
+ */
+export async function postResult(result) {
+  const response = await fetch(RESULTS_API, {
+    method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(results)
+    body: JSON.stringify(result)
   });
   if (!response.ok) throw new Error(await parseError(response));
-  return response.json();
+  return (await response.json()).file;
 }
 
 export async function deleteResult(file) {
@@ -67,10 +72,4 @@ export async function deleteResult(file) {
   });
   if (!response.ok) throw new Error(await parseError(response));
   return response.json();
-}
-
-/** `run_20260902T101500.json` — matches the endpoint's filename rules. */
-export function resultFilename(date = new Date()) {
-  const stamp = date.toISOString().slice(0, 19).replace(/[-:]/g, '');
-  return `run_${stamp}.json`;
 }

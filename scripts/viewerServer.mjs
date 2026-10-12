@@ -6,19 +6,22 @@
 //
 //   benchmarksDir     where benchmark folders are listed and "New benchmark" creates them
 //   openBenchmark     the benchmark the app opens first (what a request without ?benchmark= uses)
-//   resultsDir        where saved results are listed, read and written
+//   resultsDir        where results are listed, read and saved (<timestamp>/result.json, as `npm run benchmark` writes)
 //   policyLibraryDir  the folder holding the policy roots, served under /policy-library/
 //   policyRoots       folder names under policyLibraryDir to list (empty: no library)
 //   editable          false drops every route that writes (the headless benchmark runner)
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, rmdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, dirname, extname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { discoverPolicies, listPolicyRoots } from './policyDiscovery.mjs';
 import { initBenchmark } from './benchmarkInit.mjs';
 import { BENCHMARK_FILE, readRows, readYamlFile, writeRows } from './benchmarkDir.mjs';
+import { collectProvenance, policyFileHashes } from './benchmarkProvenance.mjs';
 import { applyBenchmarkEdit, benchmarkFormFields, checkBenchmarkText } from './benchmarkEdit.mjs';
+import { RESULT_SCHEMA, isComplete, summarize, toReport } from '../src/benchmark/run.js';
 import { OPT_IN_METRICS, rowToSequence, sequenceToRow, validateGoal, validateTestRow } from '../src/benchmark/testRow.js';
+import { buildBenchmarkReportHtml } from '../src/simulation/benchmarkReport.js';
 import { validateTerrain } from '../src/simulation/terrainGen.js';
 
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -71,8 +74,9 @@ export function viewerServer({
   // page reload.
   const RESULTS_DIR = resultsDir;
   const MAX_DURATION = 600;
-  // Saved benchmark result names; nested subfolders allowed.
-  const FILENAME_RE = /^(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+\.json$/;
+  // A result is <timestamp>/result.json, the folder `npm run benchmark` writes.
+  const RESULT_FILE = 'result.json';
+  const RESULT_FILE_RE = /^[A-Za-z0-9_-]+\/result\.json$/;
 
   function round3(v) {
     const n = v === undefined ? 0 : Number(v);
@@ -378,6 +382,35 @@ export function viewerServer({
     }
   }
 
+  // ---- Benchmark dataset (/api/benchmark/dataset) ----
+  // benchmark.yaml as parsed YAML plus every row, what the viewer's Run plans
+  // its cells from (src/benchmark/run.js), the same files `npm run benchmark`
+  // loads. `problems` are rows that would make the CLI refuse the benchmark.
+  function handleBenchmarkDataset(req, res) {
+    try {
+      const dir = requestBenchmarkDir(new URL(req.url, 'http://localhost'));
+      if (!dir) {
+        sendJson(res, 404, { error: 'Unknown benchmark' });
+        return;
+      }
+      if (req.method !== 'GET') {
+        sendJson(res, 405, { error: 'Method not allowed' });
+        return;
+      }
+      let raw;
+      try {
+        raw = readYamlFile(resolve(dir, BENCHMARK_FILE));
+      } catch (e) {
+        sendJson(res, 400, { error: `${BENCHMARK_FILE}: ${e.message}` });
+        return;
+      }
+      const { rows, problems } = readRows(dir);
+      sendJson(res, 200, { dir, raw, rows, problems });
+    } catch (e) {
+      sendJson(res, 500, { error: String(e?.message ?? e) });
+    }
+  }
+
   function listTests(benchmarkDir) {
     return readRows(benchmarkDir).rows.map((row) => ({
       file: rowFile(row),
@@ -452,42 +485,85 @@ export function viewerServer({
     }
   }
 
-  function walkJson(dir, prefix, onFile) {
-    let entries;
-    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
-    for (const entry of entries) {
-      if (entry.name.startsWith('.')) continue;
-      const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
-      if (entry.isDirectory()) {
-        walkJson(resolve(dir, entry.name), rel, onFile);
-      } else if (entry.isFile() && entry.name.endsWith('.json')) {
-        onFile(rel, resolve(dir, entry.name));
-      }
-    }
-  }
-
   // ---- Policy catalog (/api/policies): ONNX policies for benchmarking ----
   function listPolicies() {
     return discoverPolicies(policyLibraryDir, policyRootNames);
   }
 
-  // ---- Benchmark results (/api/results): saved results ----
+  // ---- Benchmark results (/api/results) ----
+  // Every <folder>/result.json under resultsDir: the CLI's out dirs and the
+  // viewer's own Runs alike. POST saves a Run's result as a new
+  // <timestamp>/result.json + report.html, with what the server knows added:
+  // provenance (viewer commit, runtime) and each policy's file hashes.
   function listResults() {
-    if (!existsSync(RESULTS_DIR)) return [];
+    let entries;
+    try { entries = readdirSync(RESULTS_DIR, { withFileTypes: true }); } catch { return []; }
     const out = [];
-    walkJson(RESULTS_DIR, '', (rel, full) => {
+    for (const entry of entries) {
+      const path = resolve(RESULTS_DIR, entry.name, RESULT_FILE);
+      if (!entry.isDirectory() || entry.name.startsWith('.') || !existsSync(path)) continue;
       let meta = {};
       try {
-        const p = JSON.parse(readFileSync(full, 'utf8'));
+        const result = JSON.parse(readFileSync(path, 'utf8'));
         meta = {
-          generatedAt: p.generatedAt ?? null,
-          policyCount: Array.isArray(p.policies) ? p.policies.length : null,
-          testCount: Array.isArray(p.tests) ? p.tests.length : null,
+          generatedAt: result.generatedAt ?? null,
+          benchmark: result.benchmark?.raw?.title ?? result.benchmark?.raw?.name ?? null,
+          policyCount: Array.isArray(result.policies) ? result.policies.length : null,
+          testCount: Array.isArray(result.tests) ? result.tests.length : null,
         };
-      } catch { /* ignore */ }
-      out.push({ file: rel, ...meta });
-    });
+      } catch { /* listed without its summary */ }
+      out.push({ file: `${entry.name}/${RESULT_FILE}`, ...meta });
+    }
     return out.sort((a, b) => b.file.localeCompare(a.file));
+  }
+
+  /** The policy file an app URL (/policy-library/... or a public/ path) names, or null. */
+  function policyFileOnDisk(onnxPath) {
+    if (typeof onnxPath !== 'string' || !onnxPath.startsWith('/')) return null;
+    const path = onnxPath.startsWith('/policy-library/')
+      ? policyLibraryDir && resolve(policyLibraryDir, onnxPath.slice('/policy-library/'.length))
+      : resolve(appDir, 'public', onnxPath.slice(1));
+    if (!path || !existsSync(path)) return null;
+    const real = realpathSync(path);
+    const allowed = onnxPath.startsWith('/policy-library/')
+      ? policyRoots.some((root) => isWithinDirectory(root.realDirectory, real))
+      : isWithinDirectory(resolve(appDir, 'public'), real);
+    return allowed && statSync(real).isFile() ? path : null;
+  }
+
+  /** A policy as `npm run benchmark` records a local one, from the app's { key, label, onnxPath }. */
+  function resultPolicy({ onnxPath, ...policy }) {
+    const path = policyFileOnDisk(onnxPath);
+    if (!path) return { ...policy, id: policy.id ?? `local:${onnxPath}`, source: 'local', sha: null, files: null };
+    const policyDir = dirname(path);
+    return { ...policy, id: `local:${policyDir}`, source: 'local', sha: null, primary: basename(path), files: policyFileHashes(policyDir, basename(path)) };
+  }
+
+  function newResultDir() {
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[-:]/g, '');
+    let name = stamp;
+    for (let n = 2; existsSync(resolve(RESULTS_DIR, name)); n++) name = `${stamp}_${n}`;
+    return name;
+  }
+
+  function saveResult(body) {
+    if (body?.schema !== RESULT_SCHEMA) throw new Error(`A result must be a ${RESULT_SCHEMA} object`);
+    for (const field of ['policies', 'tests', 'cells']) {
+      if (!Array.isArray(body[field])) throw new Error(`A result needs a "${field}" list`);
+    }
+    if (!body.benchmark?.raw || typeof body.benchmark.raw !== 'object') throw new Error('A result needs the benchmark.yaml it ran (benchmark.raw)');
+    const provenance = collectProvenance(appDir);
+    const browser = body.provenance?.runtime?.chromium;
+    provenance.runtime.chromium = typeof browser === 'string' ? browser : null;
+    const result = { ...body, provenance, policies: body.policies.map(resultPolicy) };
+    Object.assign(result, isComplete(result) ? summarize(result) : {});
+    const name = newResultDir();
+    const dir = resolve(RESULTS_DIR, name);
+    mkdirSync(dir, { recursive: true });
+    // Compact, as the CLI writes it: machine-written and machine-read.
+    writeFileSync(resolve(dir, RESULT_FILE), JSON.stringify(result));
+    writeFileSync(resolve(dir, 'report.html'), buildBenchmarkReportHtml(toReport(result)));
+    return `${name}/${RESULT_FILE}`;
   }
 
   async function handleResults(req, res) {
@@ -495,32 +571,30 @@ export function viewerServer({
     const file = url.searchParams.get('file');
     try {
       if (req.method === 'GET' && !file) { sendJson(res, 200, { files: listResults() }); return; }
-      if (file && !FILENAME_RE.test(file)) { sendJson(res, 400, { error: 'Invalid filename' }); return; }
-      const filePath = file ? resolve(RESULTS_DIR, file) : null;
-      if (filePath && !isWithinDirectory(RESULTS_DIR, filePath)) { sendJson(res, 400, { error: 'Invalid path' }); return; }
+      if (req.method === 'POST') {
+        let body;
+        try { body = await readRequestJson(req); } catch (e) { sendJson(res, 400, { error: `Invalid JSON: ${e.message}` }); return; }
+        let saved;
+        try { saved = saveResult(body); } catch (e) { sendJson(res, 400, { error: e.message }); return; }
+        sendJson(res, 201, { ok: true, file: saved });
+        return;
+      }
+      if (!file || !RESULT_FILE_RE.test(file)) { sendJson(res, 400, { error: 'A result is named <folder>/result.json' }); return; }
+      const filePath = resolve(RESULTS_DIR, file);
+      if (!isWithinDirectory(RESULTS_DIR, filePath)) { sendJson(res, 400, { error: 'Invalid path' }); return; }
+      if (!existsSync(filePath)) { sendJson(res, 404, { error: 'Not found' }); return; }
       if (req.method === 'GET') {
-        if (!existsSync(filePath)) { sendJson(res, 404, { error: 'Not found' }); return; }
         res.statusCode = 200;
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
         res.setHeader('Cache-Control', 'no-store');
         res.end(readFileSync(filePath, 'utf8'));
         return;
       }
-      if (req.method === 'PUT') {
-        let parsed;
-        try { parsed = await readRequestJson(req); } catch (e) { sendJson(res, 400, { error: `Invalid JSON: ${e.message}` }); return; }
-        mkdirSync(dirname(filePath), { recursive: true });
-        // Compact, not pretty-printed: a run is machine-written and machine-read,
-        // and the indentation alone tripled it (827KB -> 236KB for a 2x3 run),
-        // which the results page then had to fetch and parse on every open.
-        writeFileSync(filePath, JSON.stringify(parsed), 'utf8');
-        sendJson(res, 200, { ok: true, file });
-        return;
-      }
       if (req.method === 'DELETE') {
-        if (!file) { sendJson(res, 400, { error: 'Missing file' }); return; }
-        if (!existsSync(filePath)) { sendJson(res, 404, { error: 'Not found' }); return; }
+        // result.json and the report beside it; the folder only if that empties it.
         unlinkSync(filePath);
+        rmSync(resolve(dirname(filePath), 'report.html'), { force: true });
+        try { rmdirSync(dirname(filePath)); } catch { /* holds other files */ }
         sendJson(res, 200, { ok: true, file });
         return;
       }
@@ -561,6 +635,10 @@ export function viewerServer({
         }
         if (pathname === '/api/benchmark') {
           await handleBenchmarkFile(req, res);
+          return;
+        }
+        if (pathname === '/api/benchmark/dataset') {
+          handleBenchmarkDataset(req, res);
           return;
         }
         if (pathname === '/api/tests') {

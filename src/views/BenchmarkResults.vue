@@ -376,6 +376,7 @@
 
 <script>
 import { appState, closeResults, setBenchmarkResults } from '@/state/appState.js';
+import { RESULT_SCHEMA, toReport } from '@/benchmark/run.js';
 import { listResults, loadResult } from '@/state/resultStore.js';
 import { loadTest } from '@/state/testStore.js';
 import { resolveLimits } from '@/simulation/commandSequencer.js';
@@ -512,8 +513,10 @@ export default {
     hasResults() {
       return appState.benchmarkResults != null;
     },
+    /** The result on show in the report shape ({ policies, tests, results }) the views below read. */
     br() {
-      return appState.benchmarkResults;
+      const result = appState.benchmarkResults;
+      return result?.schema === RESULT_SCHEMA ? toReport(result) : result;
     },
     generatedAtLabel() {
       const g = this.br && this.br.generatedAt;
