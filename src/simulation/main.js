@@ -174,8 +174,8 @@ export class MuJoCoDemo {
    * Permanently stops the WebGL draw loop. render() only copies simulation
    * state into the Three.js scene graph and issues the draw call — nothing
    * a benchmark reads depends on it (metrics read this.simulation
-   * directly) — so headless CI runs (see
-   * runHeadlessBenchmark() in Demo.vue) can skip it entirely. Software-
+   * directly) — so headless runs (see
+   * runBenchmarkGroupOnPage() in Demo.vue) can skip it entirely. Software-
    * rendered WebGL (no GPU passthrough, e.g. most CI runners) makes this a
    * meaningful chunk of the per-frame cost, not just an idle canvas.
    */
