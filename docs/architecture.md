@@ -35,7 +35,7 @@ uploads.
 ```
 LOCAL
 npm run dev [<policy>...] [benchmark=<benchmark>] [port=<n>]   viewer on all interfaces, no browser opened
-npm run benchmark <policy>... [<benchmark>] [tests= repeats= jobs= robots= shard= out= watch dry-run force verbose]
+npm run benchmark <policy>... [<benchmark>] [tests= repeats= jobs= robots= shard= out= watch force verbose]
                                                  result -> benchmark_results/<timestamp>/; never uploads
 npm run benchmark init <dir>                     new benchmark, a copy of benchmarks/default
 npm run benchmark path-end <dir> [<test id>...]  where each test's path ends, for placing an end zone
@@ -94,7 +94,7 @@ npm run benchmark ┘    (setup.mjs first      │                              
 | Start-up | `scripts/startViewer.mjs` | `startViewer({policies, benchmark, policyLibrary, host, port, open, editable})`. It resolves the words (downloading Hub policies and benchmarks into the cache), starts Vite in-process with the server plugin, and returns `{server, url}`. `policyLibrary` (`{dir, roots}`) replaces the default library: `hf` passes its one policy, the runner a temporary folder of links. All three launchers call it. |
 | Server | `scripts/viewerServer.mjs` | The Vite plugin `viewerServer(options)`: the [routes](#server-routes). Its options are `{benchmarksDir, openBenchmark, resultsDir, policyLibraryDir, policyRoots, editable}`. `vite.config.mjs` fills them from `HPV_*` env vars for plain `npx vite`; the launchers pass them directly. |
 | Launchers | `scripts/dev.mjs`, `scripts/hf.mjs`, `scripts/run-benchmark.mjs` | Parse words with `scripts/cliArgs.mjs` `parseWords`, then call `startViewer`. `hf.mjs` dispatches on its first word. |
-| Hub | `scripts/hfPolicy.mjs`, `hfDataset.mjs`, `hfCommit.mjs`, `hfEvalResults.mjs`, `hfSubmit.mjs`, `hfPublish.mjs` | Download policies and benchmarks; build `eval.yaml` and `.eval_results`; commit, or open a pull request. |
+| Hub | `scripts/hfPolicy.mjs`, `hfDataset.mjs`, `hfCommit.mjs`, `hfEvalResults.mjs`, `hfSubmit.mjs`, `hfBenchmark.mjs` | Download policies and benchmarks; build `eval.yaml` and `.eval_results`; commit, or open a pull request. |
 | App | `src/views/Demo.vue`, `src/simulation/` | The scene, the policy loop, commands and pushes, the robots of a group, the panels. |
 | Benchmark logic | `src/benchmark/` | Pure code with no Node APIs, so the app and the CLI share it: `settings.js` (`parseBenchmark`, `selectTests`, `expandCells`), `rng.js` (`cellSeed`), `run.js` (`groupCells`, `buildJobs`, `mergeResults`, `RESULT_SCHEMA`), `summary.js` (`summarizeTests`, `computeTasks`), `resultView.js` (the tables both result views draw), `protocol.js`. |
 | Stores | `src/state/testStore.js`, `resultStore.js`, `policyStore.js` | The app's clients for the routes, or for `/static-data/*` in a static build. |

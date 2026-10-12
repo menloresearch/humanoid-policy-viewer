@@ -6,12 +6,13 @@ into the model repo's `.eval_results/` and appear on the model page and on the b
 ([Hugging Face eval results](https://huggingface.co/docs/hub/eval-results)).
 
 ```bash
-npm run benchmark menloresearch/asimov1-loco                         # Hub policy, default benchmark -> uploads
-npm run benchmark ./policies/model_Aug_18_1                          # local policy -> local results only
-npm run benchmark menloresearch/asimov1-loco ./benchmarks/default    # local benchmark -> local only
-npm run benchmark menloresearch/asimov1-loco datasets/<org>/<name>@v1 pr
+npm run benchmark menloresearch/asimov1-loco datasets/<org>/<name>@v1   # Hub policy, Hub benchmark
+npm run hf submit benchmark_results/<timestamp>                        # -> the policy's model repo
+npm run benchmark ./policies/model_Aug_18_1                            # local policy, ./benchmarks/default
 npm run benchmark menloresearch/asimov1-loco test/fixtures/smoke-benchmark jobs=1   # 20-second smoke run
 ```
+
+`npm run benchmark` never uploads anything; `npm run hf submit` does, as a separate step (see below).
 
 No `--` is needed: everything is a word. `npm run benchmark` alone prints the full usage.
 
@@ -25,12 +26,12 @@ No `--` is needed: everything is a word. `npm run benchmark` alone prints the fu
 | `tests=<id,id>`, `repeats=<n>` | run part of the benchmark (results stay local) |
 | `jobs=<n>` | browser pages in parallel (default: half the cores) |
 | `robots=<n>` | most repeats of one test a page runs at once, as robots in one scene (1-5, default 5); results do not depend on it |
-| `shard=<i>/<n>`, then `npm run benchmark merge <dirs...> [upload]` | split a run across machines |
+| `shard=<i>/<n>`, then `npm run benchmark merge <dirs...>` | split a run across machines (merging is local) |
 | `out=<dir>` | output folder (default `benchmark_results/<timestamp>/`) |
-| `dry-run`, `no-upload`, `pr`, `force`, `watch`, `verbose` | see the usage text |
+| `force`, `watch`, `verbose` | see the usage text |
 
-A bare `org/name` is always a policy; write `datasets/` for a benchmark. Without a benchmark,
-`src/benchmark/default-suite.json` names the released default.
+A bare `org/name` is always a policy; write `datasets/` for a benchmark. Without a benchmark, the run uses
+`./benchmarks/default`, a local folder, so its results can be looked at but not submitted.
 
 ## What a run produces
 
@@ -38,8 +39,8 @@ A bare `org/name` is always a policy; write `datasets/` for a benchmark. Without
 protocol, asimov-1 commit, mujoco-js / onnxruntime-web / Chromium versions), the benchmark.yaml and test rows that
 ran, the policy (Hub commit, sha256 of the ONNX and env.yaml), and for every **cell** (one test, one repeat) the
 seed, the action delay drawn, the commands actually sent if a policy's command range clamped them, and the full
-metrics. `<out>/report.html` is the readable report. `<out>/policies/<policy>/eval_results.yaml` previews what would
-be uploaded.
+metrics. `<out>/report.html` is the readable report. The run ends by printing the `npm run hf submit <out>` command,
+or why the result cannot be submitted.
 
 The results have three layers, and only the last is squashed into single numbers:
 
@@ -56,18 +57,25 @@ The report tells the two ways to fail a test apart: a run that fell shows "fell 
 never entered the test's end zone (`goal`) shows "missed end zone by D m". Both score 0 on `survival_rate`, but only
 the fall costs `survival_time`.
 
-## When results are uploaded
+## Submitting results
 
-Only when they can be reproduced: a Hub policy, a Hub benchmark (pinned to its commit), a viewer checkout with no
-uncommitted changes whose `BENCHMARK_PROTOCOL` matches the benchmark, the whole benchmark as specified (no `tests=`,
-`repeats=`, `force`, unmerged shard) and no failed cell. Otherwise the run is written locally and the reasons are
-printed.
+```bash
+npm run hf submit <out> dry-run   # the files, the target repo and commit, or why not
+npm run hf submit <out> [pr]
+```
 
-Uploading writes, in one commit, `.eval_results/<dataset>.yaml` (one entry per task; re-runs replace their own
-task ids and keep the rest) and `eval_logs/<dataset>/v<version>/{result.json,report.html}` (the source each entry
-links to). If you own the model repo's namespace (your user or one of your orgs) it is committed to `main`;
-otherwise, or with `pr`, or if a direct commit is refused, it is opened as a pull request, which the Hub shows
-as a community result until merged. It needs a token: `hf auth login` or `HF_TOKEN`.
+Only results that can be reproduced are submitted: a Hub policy pinned to its commit, a Hub benchmark pinned to its
+commit, a viewer checkout with no uncommitted changes whose `BENCHMARK_PROTOCOL` matches the benchmark, the whole
+benchmark as specified (no `tests=`, `repeats=`, `force`, unmerged shard) and no failed cell. `submit` decides from
+what `result.json` recorded when the run happened, so a result cannot be made submittable afterwards; it lists the
+reasons for each policy it refuses.
+
+For each policy, `submit` writes, in one commit to its model repo, `.eval_results/<dataset>.yaml` (one entry per
+task; re-runs replace their own task ids and keep the rest) and `eval_logs/<dataset>/v<version>/{result.json,report.html}`
+(that policy's part of the result, and the source each entry links to). If you own the model repo's namespace (your
+user or one of your orgs) it is committed to `main`; otherwise, or with `pr`, or if a direct commit is refused, it
+is opened as a pull request, which the Hub shows as a community result until merged. It needs a token:
+`hf auth login` or `HF_TOKEN`.
 
 Each entry's `notes` records `hpv@<commit> protocol=<n> benchmark=<name> v<version> asimov-1@<commit> policy@<commit>`.
 
@@ -108,8 +116,8 @@ The in-app **Tests & Benchmark** panel runs the same code, once per test, on the
 check some tests and press **Run Benchmark**. Its confirm dialog has **Watch at real-time speed**, the in-app `watch`.
 It plays each test once, one robot, with no seeds or randomisation: it ignores the benchmark's repeats, randomisation and
 test selection (the benchmark's ⚙ **Benchmark settings** edit those for `npm run benchmark`, see
-[Benchmark datasets](benchmark-datasets.md#editing-benchmarkyaml-in-the-viewer)). It keeps its results locally and never
-uploads.
+[Benchmark datasets](benchmark-datasets.md#editing-benchmarkyaml-in-the-viewer)). It keeps its results locally; they
+cannot be submitted.
 
 ## Saved results
 

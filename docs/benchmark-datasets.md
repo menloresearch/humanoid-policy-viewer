@@ -166,12 +166,18 @@ leaderboard yet; each can become a metric when it is trustworthy.
 ## Workflow
 
 ```bash
-npm run hf pull datasets/<org>/<name> ./bench   # working copy (+ .hpv-benchmark.json)
+npm run hf pull datasets/<org>/<name> ./bench   # working copy (+ .hpv-benchmark.json, which records the dataset)
 npm run dev benchmark=./bench                   # edit tests in the trajectory editor (or edit data/*/test.jsonl)
-npm run hf diff ./bench                         # what changed since the pulled revision, and whether scores can move
-npm run hf baseline ./bench                     # run reference policies on the old and new benchmark -> ./bench/baseline.md
-npm run hf publish ./bench pr                   # commit (owners) or pull request; description = diff + baseline
+npm run hf diff ./bench                         # what changed compared with the dataset's main, and whether scores can move
+npm run hf baseline ./bench                     # run reference policies on main and on the folder -> ./bench/baseline.md
+npm run hf publish ./bench dry-run              # the files, eval.yaml and the description, without writing
+npm run hf publish ./bench [pr]                 # commit + tag v<version> (owners) or pull request; description = diff + baseline
 ```
+
+`diff`, `baseline` and `publish` always compare with the dataset's current `main` on the Hub, not with the revision
+that was pulled, so a change someone published in the meantime is not hidden. `base=<rev>` compares with another
+revision instead; `publish` refuses a `base=` that is no longer `main` (it would publish on top of a stale
+revision). A folder that was not pulled names its dataset with `repo=<org>/<name>`.
 
 `npm run dev benchmark=datasets/<org>/<name>[@rev]` does the pull for you: the first time it pulls the dataset into
 `./benchmarks/<org>__<name>` (gitignored), an ordinary working copy like `./bench` above; later runs open
@@ -179,23 +185,25 @@ that copy as it is, edits included (delete the folder to pull afresh).
 
 There is no separate check step. `npm run benchmark` checks the tests before it starts a browser: every row loads
 in the command player, the benchmark's selection works, and it warns about tests no selector picks. `publish` runs
-the same checks plus "a change that can move a score needs a new `version`".
+the same checks plus "a change that can move a score needs a new `version`" (compared with `main`).
 
-Hub dataset pull requests have no CI, so the reviewer reproduces the checks:
-`npm run hf pull datasets/<id>@refs/pr/<n> ./review`, then `baseline`. After merging, a
-maintainer tags the release and points the viewer at it:
+When you own the dataset's namespace, `publish` commits to `main` and tags the commit `v<version>`; it does not tag
+when the version did not change (nothing that affects scores changed). Otherwise, or with `pr`, it opens a pull
+request and prints the release command. Hub dataset pull requests have no CI, so the reviewer reproduces the
+checks: `npm run hf pull datasets/<id>@refs/pr/<n> ./review`, then `baseline`. After merging, a maintainer tags
+the release:
 
 ```bash
 npm run hf release datasets/<org>/<name> rev=<merged commit>   # tags v<version>
-# then, in this repo: src/benchmark/default-suite.json -> "revision": "v<version>"
 ```
 
-and re-runs `npm run benchmark` for the reference policies so the new leaderboards are not empty.
+and re-runs `npm run benchmark <policy> datasets/<org>/<name>@v<version>` for the reference policies, then
+`npm run hf submit` for each result, so the new leaderboards are not empty.
 
 ### When the viewer changes
 
 A change that moves numbers bumps `BENCHMARK_PROTOCOL` (and `npm run benchmark:golden update`). Benchmarks validated
-with the old protocol are then refused for upload until they are re-validated: set `harness.protocol` and
+with the old protocol are then refused by `npm run hf submit` until they are re-validated: set `harness.protocol` and
 `tested_commit`, bump `version`, publish, release. Old results keep their old task ids.
 
 ### Creating a new benchmark
@@ -206,8 +214,8 @@ Everything happens locally until `publish`:
 npm run benchmark init ./new-bench                         # a copy of ./benchmarks/default: benchmark.yaml + three example tests
 npm run dev benchmark=./new-bench                          # add tests; type a new Category in the editor to start a category
 npm run benchmark <policy> ./new-bench                     # real runs, results stay local
-npm run hf publish ./new-bench repo=<org>/<name> dry-run   # what would be uploaded
-npm run hf publish ./new-bench repo=<org>/<name> create    # creates a PRIVATE dataset repo first
+npm run hf publish ./new-bench repo=<org>/<name> dry-run   # what would be uploaded (works before the repo exists)
+npm run hf publish ./new-bench repo=<org>/<name> create    # creates a PRIVATE dataset repo first, then commits and tags v1
 ```
 
 Plain `npm run dev` uses `./benchmarks/default`, the example benchmark kept in this repo for trying things out: a
