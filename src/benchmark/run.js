@@ -165,14 +165,3 @@ export function mergeResults(results) {
   return { ...merged, ...summarize(merged) };
 }
 
-/** A copy of the result with only one policy's cells and summaries, for that policy's repo. */
-export function resultForPolicy(result, policyKey) {
-  return {
-    ...result,
-    policies: result.policies.filter((policy) => policy.key === policyKey),
-    cells: result.cells.filter((cell) => cell.policyKey === policyKey),
-    expectedCells: result.expectedCells / result.policies.length,
-    perTest: result.perTest ? { [policyKey]: result.perTest[policyKey] } : undefined,
-    tasks: result.tasks ? { [policyKey]: result.tasks[policyKey] } : undefined,
-  };
-}

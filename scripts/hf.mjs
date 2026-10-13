@@ -52,7 +52,7 @@ Verbs, for a benchmark dataset on the Hub:
 
 For benchmark results:
   submit <result dir> [pr] [dry-run]       add the results of \`npm run benchmark\` to each policy's model
-                                           repo (.eval_results + eval_logs): a commit if you own it, else
+                                           repo (.eval_results only): a commit if you own it, else
                                            (or with pr) a pull request. Only reproducible results.
 
 Write options as key=value and flags as plain words, without "--".

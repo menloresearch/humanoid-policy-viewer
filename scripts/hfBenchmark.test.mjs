@@ -290,7 +290,7 @@ function writeResult(run) {
   return dir;
 }
 
-test('submit writes .eval_results and eval_logs to the policy repo', async () => {
+test('submit writes only .eval_results to the policy repo', async () => {
   const fake = fakeHub();
   const other = '- dataset: { id: other/bench, task_id: x_v1 }\n  value: 0.3\n';
   const sha = fake.seed('model', 'me/model', { 'policy.onnx': 'onnx', '.eval_results/me__bench.yaml': other.replace('other/bench', 'me/bench').replace('x_v1', 'old_v0') });
@@ -301,8 +301,8 @@ test('submit writes .eval_results and eval_logs to the policy repo', async () =>
   const files = fake.model('me/model').commits.get(result.commit);
   const entries = parseYaml(files['.eval_results/me__bench.yaml']);
   assert.deepEqual(entries.map((e) => e.dataset.task_id).sort(), ['old_v0', 'survival_rate_v1', 'survival_time_v1']);
-  assert.equal(JSON.parse(files['eval_logs/bench/v1/result.json']).schema, RESULT_SCHEMA);
-  assert.match(files['eval_logs/bench/v1/report.html'], /<html/i);
+  assert.ok(entries.every((e) => !('source' in e)));
+  assert.deepEqual(Object.keys(files).sort(), ['.eval_results/me__bench.yaml', 'policy.onnx']);
   assert.equal(files['policy.onnx'], 'onnx');
 });
 

@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadBenchmarkDir } from '../../scripts/benchmarkDir.mjs';
 import {
-  RESULT_SCHEMA, cellResult, groupCells, isComplete, mergeResults, planCells, resultForPolicy, sortCells, summarize,
+  RESULT_SCHEMA, cellResult, groupCells, isComplete, mergeResults, planCells, sortCells, summarize,
 } from './run.js';
 
 const smokeDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'test', 'fixtures', 'smoke-benchmark');
@@ -69,18 +69,6 @@ test('a complete result is summarised per policy; a shard or a short result is n
   const { perTest, tasks } = summarize(result);
   assert.deepEqual(Object.keys(perTest), ['m0']);
   assert.equal(tasks.m0[0].value, 1);
-});
-
-test('a result splits per policy, one repo each', () => {
-  const two = fakeResult({ expectedCells: 2 });
-  two.policies.push({ ...two.policies[0], key: 'm1', id: 'org/other', label: 'org/other' });
-  two.cells.push({ ...two.cells[0], policyKey: 'm1' });
-  Object.assign(two, summarize(two));
-  const one = resultForPolicy(two, 'm1');
-  assert.deepEqual(one.policies.map((p) => p.key), ['m1']);
-  assert.equal(one.expectedCells, 1);
-  assert.deepEqual(Object.keys(one.tasks), ['m1']);
-
 });
 
 test('merge needs every shard of the same run exactly once', () => {

@@ -157,7 +157,7 @@ flowchart LR
     subgraph results["Results"]
         direction TB
         result[result.json] --> submit[hf submit]
-        submit --> eval[".eval_results + eval_logs"]
+        submit --> eval[".eval_results"]
         result --> summary[summary.js]
         summary --> view[resultView.js]
         view --> views["in-app Results view, report.html"]
@@ -241,8 +241,8 @@ refuses unless the result has:
 - the whole benchmark, with no overrides and no unmerged shard;
 - no failed cell.
 
-For each policy it commits `.eval_results/<dataset>.yaml` (one entry per task) and
-`eval_logs/<dataset>/v<version>/{result.json,report.html}` to the model repo. Each entry's `notes` record
+For each policy it commits only `.eval_results/<dataset>.yaml` (one entry per task) to the model repo; the full
+run stays in the local result dir. Each entry's `notes` record
 `hpv@<commit> protocol=<n> benchmark=<name> v<version> asimov-1@<commit> policy@<commit>`. It commits
 directly in your own namespace; otherwise, or with `pr`, it opens a pull request, which the Hub shows as a
 community result.

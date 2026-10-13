@@ -1,12 +1,10 @@
-// Builds the files `npm run hf submit` adds to a model repo on the Hub:
+// Builds the file `npm run hf submit` adds to a model repo on the Hub:
 //
 //   .eval_results/<dataset org>__<dataset name>.yaml
 //       Hugging Face eval results (https://huggingface.co/docs/hub/eval-results):
 //       one entry per benchmark task. These feed the model page and the benchmark
-//       dataset's leaderboards.
-//   eval_logs/<dataset name>/v<benchmark version>/result.json + report.html
-//       the full run: every cell's metrics and the provenance; each entry's
-//       source.url points here.
+//       dataset's leaderboards. The full run (result.json, report.html) stays in
+//       the local result dir.
 //
 // Re-running replaces the entries for the same task ids and keeps the rest, so
 // results for earlier benchmark versions (other _v<n> task ids) stay listed.
@@ -15,10 +13,6 @@ import { Scalar, parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 
 export function evalResultsPath(datasetId) {
   return `.eval_results/${datasetId.replace('/', '__')}.yaml`;
-}
-
-export function evalLogsDir(datasetId, benchmarkVersion) {
-  return `eval_logs/${datasetId.split('/')[1]}/v${benchmarkVersion}`;
 }
 
 const short = (sha) => (sha ? sha.slice(0, 12) : 'unknown');
@@ -45,17 +39,14 @@ export function taskNotes(task) {
  * The .eval_results entries for one policy of a complete run. Tasks with nothing
  * to measure (value null) are left out.
  */
-export function buildEvalResultEntries(run, policyKey, { sourceUrl, user = null }) {
+export function buildEvalResultEntries(run, policyKey) {
   const policy = run.policies.find((p) => p.key === policyKey);
-  const source = { url: sourceUrl, name: 'humanoid-policy-viewer run log' };
-  if (user) source.user = user;
   return (run.tasks?.[policyKey] ?? [])
     .filter((task) => task.value !== null)
     .map((task) => ({
       dataset: { id: run.benchmark.id, task_id: task.taskId, revision: run.benchmark.sha },
       value: task.value,
       date: run.generatedAt,
-      source,
       notes: `${taskNotes(task)} ${runNotes(run, policy)}`,
     }));
 }

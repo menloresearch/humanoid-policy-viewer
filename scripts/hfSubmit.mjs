@@ -10,11 +10,10 @@
 
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { buildBenchmarkReportHtml } from '../src/simulation/benchmarkReport.js';
-import { RESULT_SCHEMA, resultForPolicy } from '../src/benchmark/run.js';
+import { RESULT_SCHEMA } from '../src/benchmark/run.js';
 import { formatOutcomes, formatTasks, uploadBlockers } from './benchmarkRun.mjs';
 import { commitFiles, readRepoText } from './hfCommit.mjs';
-import { buildEvalResultEntries, evalLogsDir, evalResultsPath, mergeEvalResults } from './hfEvalResults.mjs';
+import { buildEvalResultEntries, evalResultsPath, mergeEvalResults } from './hfEvalResults.mjs';
 
 /** The result.json of a result dir (or the file itself). */
 export function readResult(path) {
@@ -25,16 +24,14 @@ export function readResult(path) {
   return run;
 }
 
-/** The files submitted to one policy's repo; `existing` is its current .eval_results file, if any. */
+/**
+ * The files submitted to one policy's repo; `existing` is its current .eval_results file, if any.
+ * Only the leaderboard numbers go up; the full run stays in the local result dir.
+ */
 function policyFiles(run, policy, existing) {
-  const logsDir = evalLogsDir(run.benchmark.id, run.benchmark.raw.version);
-  const sourceUrl = `https://huggingface.co/${policy.repo}/blob/main/${logsDir}/report.html`;
-  const entries = buildEvalResultEntries(run, policy.key, { sourceUrl });
-  const policyResult = resultForPolicy(run, policy.key);
+  const entries = buildEvalResultEntries(run, policy.key);
   return [
     { path: evalResultsPath(run.benchmark.id), content: mergeEvalResults(existing, entries) },
-    { path: `${logsDir}/result.json`, content: JSON.stringify(policyResult) },
-    { path: `${logsDir}/report.html`, content: buildBenchmarkReportHtml(policyResult) },
   ];
 }
 

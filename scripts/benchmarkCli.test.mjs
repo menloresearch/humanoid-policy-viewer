@@ -182,7 +182,7 @@ test('eval results: entries per task, re-runs replace only their own tasks', () 
     { taskId: 'survival_rate_v1', metric: 'survival_rate@1', value: 0.5, ci95: [0.3, 0.7], tests: 4, cells: 20 },
     { taskId: 'nothing_v1', metric: 'survival_rate@1', value: null, ci95: null, tests: 0, cells: 0 },
   ] } });
-  const entries = buildEvalResultEntries(run, 'm0', { sourceUrl: 'https://example/report.html' });
+  const entries = buildEvalResultEntries(run, 'm0');
   assert.equal(entries.length, 1);
   assert.deepEqual(entries[0].dataset, { id: 'org/bench', task_id: 'survival_rate_v1', revision: 'd'.repeat(40) });
   assert.match(entries[0].notes, /^metric=survival_rate@1 95%CI=\[0\.3, 0\.7\] tests=4 runs=20 hpv@cccccccccccc protocol=1 benchmark=smoke v1/);
