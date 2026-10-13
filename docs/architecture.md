@@ -80,6 +80,10 @@ comes first. A swallowed flag is reported with the words form to use instead.
 ## The pieces
 
 ```mermaid
+---
+config:
+  htmlLabels: false
+---
 flowchart LR
     dev["npm run dev"] --> start
     hf["npm run hf"] --> start
@@ -134,19 +138,31 @@ The static build serves the same data as files: `/static-data/policies.json`, `/
 ## From benchmark to leaderboard
 
 ```mermaid
-flowchart TD
-    folder["benchmark folder<br/>benchmark.yaml, data/*/test.jsonl"] --> parse["parseBenchmark + test rows<br/>settings.js"]
-    parse --> select[selectTests]
-    select --> expand["expandCells<br/>test × repeat, seed = cellSeed"]
-    expand --> group["groupCells<br/>≤ robots= per group"]
-    group --> run["a page runs each group<br/>runBenchmarkGroup"]
-    run --> cells[cell metrics]
-    cells --> result[result.json]
-    result --> submit[hf submit]
-    submit --> eval[".eval_results + eval_logs"]
-    result --> summary[summary.js]
-    summary --> view[resultView.js]
-    view --> views["in-app Results view, report.html"]
+---
+config:
+  htmlLabels: false
+---
+flowchart LR
+    subgraph planning["Planning"]
+        direction TB
+        folder["benchmark folder<br/>benchmark.yaml, data/*/test.jsonl"] --> parse["parseBenchmark + test rows<br/>settings.js"]
+        parse --> select[selectTests]
+        select --> expand["expandCells<br/>test × repeat, seed = cellSeed"]
+        expand --> group["groupCells<br/>≤ robots= per group"]
+    end
+    subgraph running["Running"]
+        direction TB
+        run["a page runs each group<br/>runBenchmarkGroup"] --> cells[cell metrics]
+    end
+    subgraph results["Results"]
+        direction TB
+        result[result.json] --> submit[hf submit]
+        submit --> eval[".eval_results + eval_logs"]
+        result --> summary[summary.js]
+        summary --> view[resultView.js]
+        view --> views["in-app Results view, report.html"]
+    end
+    planning --> running --> results
 ```
 
 - **Planning** is the same everywhere. The settings choose the tests and how many repeats each gets. A cell's seed
