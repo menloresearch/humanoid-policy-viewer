@@ -53,7 +53,9 @@ export async function submit(dir, { pr = false, dryRun = false } = {}, io = {}) 
       continue;
     }
     const repo = { type: 'model', name: policy.repo };
-    const existing = await readRepoText({ repo, path: evalResultsPath(run.benchmark.id), revision: policy.sha, env, hub }).catch(() => null);
+    // null only when the file does not exist; any other read error stops here, before a
+    // merge with nothing would drop the entries already there.
+    const existing = await readRepoText({ repo, path: evalResultsPath(run.benchmark.id), revision: policy.sha, env, hub });
     const files = policyFiles(run, policy, existing);
     if (dryRun) {
       log(`  dry-run: would write to ${policy.repo} on top of ${policy.sha.slice(0, 7)}${pr ? ' as a pull request' : ' (direct commit if you own it, else a pull request)'}:`);
