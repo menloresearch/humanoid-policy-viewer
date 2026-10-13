@@ -20,6 +20,12 @@ const scratch = mkdtempSync(join(tmpdir(), 'hpv-fake-hub-'));
 after(() => rmSync(scratch, { recursive: true, force: true }));
 let dirs = 0;
 
+// benchmarks/default ships with no `license:` key, so publish asks about it. Most tests are about something
+// else and publish from this copy, which has one.
+const LICENSED = join(scratch, 'licensed-default');
+cpSync(DEFAULT, LICENSED, { recursive: true });
+writeFileSync(join(LICENSED, 'benchmark.yaml'), readFileSync(join(LICENSED, 'benchmark.yaml'), 'utf8').replace(/^(version: .*)$/m, '$1\nlicense: bsd-3-clause'));
+
 function readTree(dir) {
   const files = {};
   (function walk(sub) {
@@ -35,7 +41,7 @@ function readTree(dir) {
 /** A copy of benchmarks/default to edit, with no pull record. */
 function workingCopy(edit = (files) => files) {
   const dir = join(scratch, `work-${dirs++}`);
-  cpSync(DEFAULT, dir, { recursive: true });
+  cpSync(LICENSED, dir, { recursive: true });
   const files = edit(readTree(dir));
   for (const [path, content] of Object.entries(files)) writeFileSync(join(dir, path), content);
   return dir;
@@ -132,7 +138,7 @@ function fakeHub() {
 
 test('publish without a pull record compares with the Hub main given repo=', async () => {
   const fake = fakeHub();
-  const main = fake.seed('dataset', 'me/bench', readTree(DEFAULT));
+  const main = fake.seed('dataset', 'me/bench', readTree(LICENSED));
   const result = await publish(workingCopy(), { repo: 'me/bench' }, fake.io);
   assert.match(fake.output(), new RegExp(`Changes since datasets/me/bench@main \\(${main.slice(0, 7)}\\)`));
   assert.match(fake.output(), /Nothing that affects scores changed/);
@@ -145,14 +151,14 @@ test('publish without a pull record compares with the Hub main given repo=', asy
 
 test('a change that can move a score needs a version bump', async () => {
   const fake = fakeHub();
-  const main = fake.seed('dataset', 'me/bench', readTree(DEFAULT));
+  const main = fake.seed('dataset', 'me/bench', readTree(LICENSED));
   await assert.rejects(() => publish(workingCopy(lengthenFirstTest), { repo: 'me/bench' }, fake.io), /bump benchmark\.yaml version to 2/);
   assert.equal(fake.dataset('me/bench').main, main);
 });
 
 test('a direct commit is tagged v<version>', async () => {
   const fake = fakeHub();
-  fake.seed('dataset', 'me/bench', readTree(DEFAULT));
+  fake.seed('dataset', 'me/bench', readTree(LICENSED));
   const result = await publish(workingCopy((files) => bumpVersion(lengthenFirstTest(files))), { repo: 'me/bench' }, fake.io);
   assert.equal(result.mode, 'direct');
   assert.deepEqual(fake.dataset('me/bench').tags, { v2: result.commit });
@@ -161,7 +167,7 @@ test('a direct commit is tagged v<version>', async () => {
 
 test('a pull request is not tagged and says how to release it', async () => {
   const fake = fakeHub();
-  const main = fake.seed('dataset', 'me/bench', readTree(DEFAULT));
+  const main = fake.seed('dataset', 'me/bench', readTree(LICENSED));
   const result = await publish(workingCopy((files) => bumpVersion(lengthenFirstTest(files))), { repo: 'me/bench', pr: true }, fake.io);
   assert.equal(result.mode, 'pr');
   assert.equal(fake.dataset('me/bench').main, main);
@@ -171,8 +177,8 @@ test('a pull request is not tagged and says how to release it', async () => {
 
 test('publish refuses a base= that is no longer main', async () => {
   const fake = fakeHub();
-  const old = fake.seed('dataset', 'me/bench', readTree(DEFAULT));
-  const main = fake.seed('dataset', 'me/bench', bumpVersion(lengthenFirstTest(readTree(DEFAULT))));
+  const old = fake.seed('dataset', 'me/bench', readTree(LICENSED));
+  const main = fake.seed('dataset', 'me/bench', bumpVersion(lengthenFirstTest(readTree(LICENSED))));
   await assert.rejects(() => publish(workingCopy(), { repo: 'me/bench', base: old }, fake.io), /stale/);
   assert.equal(fake.dataset('me/bench').main, main);
   assert.equal(fake.dataset('me/bench').commits.size, 2);
@@ -180,7 +186,7 @@ test('publish refuses a base= that is no longer main', async () => {
 
 test('dry-run publish of a new dataset lists the files and eval.yaml and writes nothing', async () => {
   const fake = fakeHub();
-  assert.equal(await publish(DEFAULT, { repo: 'me/new', dryRun: true }, fake.io), null);
+  assert.equal(await publish(LICENSED, { repo: 'me/new', dryRun: true }, fake.io), null);
   const out = fake.output();
   assert.match(out, /would write \d+ files to datasets\/me\/new as a new dataset \(not found on the Hub; add "create"/);
   for (const path of ['benchmark.yaml', 'data/locomotion/test.jsonl', 'data/push_standing/test.jsonl', 'eval.yaml', 'README.md']) assert.match(out, new RegExp(`^  ${path}$`, 'm'));
@@ -188,7 +194,7 @@ test('dry-run publish of a new dataset lists the files and eval.yaml and writes 
   assert.equal(fake.repos.size, 0);
 
   // create makes the repo, the first publish lands on it and is tagged.
-  const result = await publish(DEFAULT, { repo: 'me/new', create: true }, fake.io);
+  const result = await publish(LICENSED, { repo: 'me/new', create: true }, fake.io);
   assert.deepEqual(fake.dataset('me/new').tags, { v1: result.commit });
 });
 
@@ -196,11 +202,11 @@ test('publish says how to log in before touching the Hub when there is no token'
   const fake = fakeHub();
   const touched = [];
   const io = { ...fake.io, env: { HF_ENDPOINT: 'https://fake.hub' }, fetchImpl: async (url) => { touched.push(url); throw new Error('no Hub call expected'); } };
-  await assert.rejects(publish(DEFAULT, { repo: 'me/new', create: true }, io), /Publishing datasets\/me\/new needs a Hugging Face token, and you are not logged in[^]*export HF_TOKEN=hf_[^]*hf auth login/);
+  await assert.rejects(publish(LICENSED, { repo: 'me/new', create: true }, io), /Publishing datasets\/me\/new needs a Hugging Face token, and you are not logged in[^]*export HF_TOKEN=hf_[^]*hf auth login/);
   assert.deepEqual(touched, []);
   assert.equal(fake.repos.size, 0);
   // dry-run still works without a token.
-  await publish(DEFAULT, { repo: 'me/new', dryRun: true }, { ...fake.io, env: { HF_ENDPOINT: 'https://fake.hub' } });
+  await publish(LICENSED, { repo: 'me/new', dryRun: true }, { ...fake.io, env: { HF_ENDPOINT: 'https://fake.hub' } });
   assert.match(fake.output(), /dry-run: would write/);
 });
 
@@ -208,7 +214,7 @@ test('a token the Hub rejects while creating a dataset is explained', async () =
   const fake = fakeHub();
   const rejecting = async () => { throw Object.assign(new Error('Invalid username or password.'), { statusCode: 401 }); };
   const io = { ...fake.io, hub: { ...fake.io.hub, repoExists: rejecting } };
-  await assert.rejects(publish(DEFAULT, { repo: 'me/new', create: true }, io), /Creating datasets\/me\/new failed: Hugging Face rejected your token \(from HF_TOKEN\)[^]*settings\/tokens/);
+  await assert.rejects(publish(LICENSED, { repo: 'me/new', create: true }, io), /Creating datasets\/me\/new failed: Hugging Face rejected your token \(from HF_TOKEN\)[^]*settings\/tokens/);
 });
 
 const uploadedYaml = (fake, repo) => fake.dataset(repo).commits.get(fake.dataset(repo).main)['benchmark.yaml'];
@@ -224,14 +230,14 @@ test('publish puts this viewer commit in the uploaded benchmark.yaml, its layout
 
 test('a republish of the same version records this viewer commit, not the one before', async () => {
   const fake = fakeHub();
-  fake.seed('dataset', 'me/bench', readTree(DEFAULT));
+  fake.seed('dataset', 'me/bench', readTree(LICENSED));
   await publish(workingCopy(), { repo: 'me/bench' }, fake.io);
   assert.equal(parseYaml(uploadedYaml(fake, 'me/bench')).harness.tested_commit, VIEWER.commit);
 });
 
 test('publish refuses a viewer checkout others cannot reproduce, even in dry-run, and writes nothing', async () => {
   const fake = fakeHub();
-  const main = fake.seed('dataset', 'me/bench', readTree(DEFAULT));
+  const main = fake.seed('dataset', 'me/bench', readTree(LICENSED));
   const cases = [
     [{ ...VIEWER, dirty: true }, /this viewer checkout has uncommitted changes, so commit eeeeeee is not the code that checked the benchmark/],
     [{ ...VIEWER, public: false }, /viewer commit eeeeeee is not on a branch of https:\/\/github\.com\/menloresearch\/humanoid-policy-viewer[^]*push it first/],
@@ -323,7 +329,7 @@ const withYaml = (edit) => workingCopy((files) => ({ ...files, 'benchmark.yaml':
 
 test('the card is tagged humanoid-policy-viewer plus the tags in benchmark.yaml, and has the license id given there', async () => {
   const fake = fakeHub();
-  const plain = await publishedCard(fake, DEFAULT, 'me/plain');
+  const plain = await publishedCard(fake, LICENSED, 'me/plain');
   assert.deepEqual(plain.card.tags, ['humanoid-policy-viewer']);
   assert.equal(plain.card.license, 'bsd-3-clause');
   assert.equal(plain.card.license_link, undefined);
@@ -404,9 +410,16 @@ test('a blank license: is on purpose: publish warns and asks; no (or no terminal
   assert.equal(yes.card.license, 'bsd-3-clause');
 });
 
+test('benchmarks/default has no license: key, so a benchmark made from it is asked about at its first publish', async () => {
+  assert.doesNotMatch(readFileSync(join(DEFAULT, 'benchmark.yaml'), 'utf8'), /^license:/m);
+  const asked = await publishAsking(fakeHub(), DEFAULT, 'me/fresh', false);
+  assert.match(asked.result.message, /Not published: no license chosen, nothing was uploaded/);
+  assert.match(asked.questions[0], /Use bsd-3-clause instead\? \[y\/N\]/);
+});
+
 test('a license in benchmark.yaml is never asked about, and dry-run never asks', async () => {
   const fake = fakeHub();
-  const set = await publishAsking(fake, DEFAULT, 'me/set', false);
+  const set = await publishAsking(fake, LICENSED, 'me/set', false);
   assert.equal(set.result, 'published');
   assert.deepEqual(set.questions, []);
 

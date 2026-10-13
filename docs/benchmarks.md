@@ -124,7 +124,8 @@ reference_policies: [menloresearch/asimov1-loco]   # used by `npm run hf baselin
 and the card says `license: other`, linking to it. `license` and `tags` only change the card, so they never need a
 version bump.
 
-If `license:` is missing, `hf publish` warns and asks `Use bsd-3-clause instead? [y/N]`: yes publishes with
+A new benchmark (`npm run benchmark init`, **New benchmark**) starts with no `license:` line, so that its first
+`hf publish` asks. If `license:` is missing, `hf publish` warns and asks `Use bsd-3-clause instead? [y/N]`: yes publishes with
 `bsd-3-clause`, no cancels before anything is uploaded (with no terminal to ask on, it cancels too). A blank
 `license:` means no license on purpose: it warns and asks the same question, but no (or no terminal) publishes without
 one. `dry-run` never asks.
