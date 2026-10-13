@@ -382,7 +382,7 @@ test('with no license: key, publish warns and asks; yes uses bsd-3-clause, no ca
   assert.equal(yes.result, 'published');
   assert.equal(yes.card.license, 'bsd-3-clause');
   assert.ok(yes.warnings.some((line) => /has no license/.test(line)));
-  assert.match(yes.questions[0], /Use bsd-3-clause instead\? \[y\/N\]/);
+  assert.match(yes.questions[0], /Use bsd-3-clause instead\? \(N to cancel this workflow to specify your own\)/);
 
   const no = await publishAsking(fake, unset(), 'me/no', false);
   assert.match(no.result.message, /Not published: no license chosen, nothing was uploaded/);
@@ -401,6 +401,7 @@ test('a blank license: is on purpose: publish warns and asks; no (or no terminal
   assert.equal(no.result, 'published');
   assert.equal(no.card.license, undefined);
   assert.ok(no.warnings.some((line) => /blank license/.test(line)));
+  assert.match(no.questions[0], /Use bsd-3-clause instead\? \[y\/N\]/); // "no" does not cancel here
 
   const noTerminal = await publishAsking(fake, blank(), 'me/blank-pipe', null);
   assert.equal(noTerminal.result, 'published');
@@ -414,7 +415,7 @@ test('benchmarks/default has no license: key, so a benchmark made from it is ask
   assert.doesNotMatch(readFileSync(join(DEFAULT, 'benchmark.yaml'), 'utf8'), /^license:/m);
   const asked = await publishAsking(fakeHub(), DEFAULT, 'me/fresh', false);
   assert.match(asked.result.message, /Not published: no license chosen, nothing was uploaded/);
-  assert.match(asked.questions[0], /Use bsd-3-clause instead\? \[y\/N\]/);
+  assert.match(asked.questions[0], /Use bsd-3-clause instead\? \(N to cancel this workflow to specify your own\)/);
 });
 
 test('a license in benchmark.yaml is never asked about, and dry-run never asks', async () => {

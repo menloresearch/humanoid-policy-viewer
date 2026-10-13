@@ -76,7 +76,10 @@ async function chooseLicense(raw, { confirm, log }, dryRun) {
     if (!blank) log(`dry-run: a real publish asks whether to use ${DEFAULT_LICENSE}; the card is shown with it.`);
     return blank ? null : DEFAULT_LICENSE;
   }
-  const answer = await confirm(`Use ${DEFAULT_LICENSE} instead? [y/N] `);
+  // With no key, "no" cancels, so the prompt says how to choose another license; a blank key publishes without one.
+  const answer = await confirm(blank
+    ? `Use ${DEFAULT_LICENSE} instead? [y/N] `
+    : `Use ${DEFAULT_LICENSE} instead? (N to cancel this workflow to specify your own) `);
   if (answer) return DEFAULT_LICENSE;
   if (blank) return null;
   throw new Error(answer === null

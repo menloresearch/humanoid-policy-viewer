@@ -125,7 +125,7 @@ and the card says `license: other`, linking to it. `license` and `tags` only cha
 version bump.
 
 A new benchmark (`npm run benchmark init`, **New benchmark**) starts with no `license:` line, so that its first
-`hf publish` asks. If `license:` is missing, `hf publish` warns and asks `Use bsd-3-clause instead? [y/N]`: yes publishes with
+`hf publish` asks. If `license:` is missing, `hf publish` warns and asks `Use bsd-3-clause instead? (N to cancel this workflow to specify your own)`: yes publishes with
 `bsd-3-clause`, no cancels before anything is uploaded (with no terminal to ask on, it cancels too). A blank
 `license:` means no license on purpose: it warns and asks the same question, but no (or no terminal) publishes without
 one. `dry-run` never asks.
