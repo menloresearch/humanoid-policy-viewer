@@ -79,13 +79,15 @@ comes first. A swallowed flag is reported with the words form to use instead.
 
 ## The pieces
 
-```
-npm run dev ──────┐
-npm run hf ───────┼──► startViewer() ──► Vite + viewerServer ◄── /api/*, /policy-library/* ──► browser page
-npm run benchmark ┘    (setup.mjs first,     │                                                 Demo.vue
-  (drives pages with    for dev and hf)      │ reads and writes                                simulation/
-   Playwright,                               ▼                                                 src/benchmark/
-   editable: false)    benchmarks/   benchmark_results/   policies/ + Hub cache
+```mermaid
+flowchart LR
+    dev["npm run dev"] --> start
+    hf["npm run hf"] --> start
+    bench["npm run benchmark<br/>(editable: false)"] --> start
+    start["startViewer()<br/>setup.mjs runs first for dev and hf"] --> server["Vite + viewerServer"]
+    server <-->|"/api/*, /policy-library/*"| page["Browser page<br/>Demo.vue, simulation/, src/benchmark/"]
+    server <-->|reads and writes| disk[("benchmarks/<br/>benchmark_results/<br/>policies/ + Hub cache")]
+    bench -.->|"drives pages with Playwright"| page
 ```
 
 | Piece | File | Job |
@@ -131,14 +133,20 @@ The static build serves the same data as files: `/static-data/policies.json`, `/
 
 ## From benchmark to leaderboard
 
-```
-benchmark folder ─► parseBenchmark + test rows ─► selectTests ─► expandCells ─► groupCells ─► a page runs each group
-   (benchmark.yaml,     (settings.js)                (test × repeat;     (≤ robots= per group)    (runBenchmarkGroup)
-    data/*/test.jsonl)                                seed = cellSeed)                                   │
-                                                                                                         ▼
-.eval_results + eval_logs ◄── hf submit ◄── result.json ◄──────────────────────────────────────── cell metrics
-                                               │
-                                               └─► summary.js ─► resultView.js ─► in-app Results view, report.html
+```mermaid
+flowchart TD
+    folder["benchmark folder<br/>benchmark.yaml, data/*/test.jsonl"] --> parse["parseBenchmark + test rows<br/>settings.js"]
+    parse --> select[selectTests]
+    select --> expand["expandCells<br/>test × repeat, seed = cellSeed"]
+    expand --> group["groupCells<br/>≤ robots= per group"]
+    group --> run["a page runs each group<br/>runBenchmarkGroup"]
+    run --> cells[cell metrics]
+    cells --> result[result.json]
+    result --> submit[hf submit]
+    submit --> eval[".eval_results + eval_logs"]
+    result --> summary[summary.js]
+    summary --> view[resultView.js]
+    view --> views["in-app Results view, report.html"]
 ```
 
 - **Planning** is the same everywhere. The settings choose the tests and how many repeats each gets. A cell's seed
