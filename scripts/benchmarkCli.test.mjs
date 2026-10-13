@@ -7,7 +7,7 @@ import { parse as parseYaml } from 'yaml';
 import { parsePort, parseWords, rejectSwallowedNpmFlags, swallowedNpmFlags } from './cliArgs.mjs';
 import { classifyTarget } from './benchmarkTargets.mjs';
 import { MAX_ROBOTS, buildJobs, groupCells, takeNextJob, RESULT_SCHEMA } from '../src/benchmark/run.js';
-import { parseShard, resultTarget, shardJobs, submitHint, uploadBlockers, viewHint } from './benchmarkRun.mjs';
+import { parseShard, parseTests, resultTarget, shardJobs, submitHint, uploadBlockers, viewHint } from './benchmarkRun.mjs';
 import { buildEvalResultEntries, evalResultsPath, mergeEvalResults } from './hfEvalResults.mjs';
 import { commitFiles, decideCommitMode } from './hfCommit.mjs';
 import { datasetFilesToFetch } from './hfDataset.mjs';
@@ -25,7 +25,10 @@ test('words, key=value options and flags', () => {
   assert.throws(() => parseWords(['jobs=1', 'jobs=2'], { keys: ['jobs'] }), /twice/);
   // A path containing "=" is a positional, not an option.
   assert.deepEqual(parseWords(['./a=b/model'], { keys: [] }).positionals, ['./a=b/model']);
-  assert.deepEqual(swallowedNpmFlags({ npm_config_pr: 'true', npm_config_no_upload: '' }, ['pr', 'no-upload', 'watch']), ['pr', 'no-upload']);
+  assert.deepEqual(swallowedNpmFlags({ npm_config_pr: 'true' }, ['pr', 'watch']), ['pr']);
+  // What npm really sets: `--no-open` -> npm_config_open='', `--verbose` -> npm_config_loglevel=verbose (the default is notice).
+  assert.deepEqual(swallowedNpmFlags({ npm_config_open: '', npm_config_loglevel: 'verbose' }, ['no-open', 'verbose', 'watch']), ['no-open', 'verbose']);
+  assert.deepEqual(swallowedNpmFlags({ npm_config_loglevel: 'notice' }, ['no-open', 'verbose']), []);
 });
 
 test('a "--" word is refused with the words form to write instead', () => {
@@ -69,6 +72,10 @@ test('jobs run the most work first, shards partition them, pages keep their poli
   assert.equal(new Set(shards.flat()).size, jobs.length);
   assert.deepEqual(parseShard('2/3'), { index: 2, count: 3 });
   assert.throws(() => parseShard('4/3'), /shard=/);
+  assert.equal(parseTests(undefined), null);
+  assert.deepEqual(parseTests(' a/x, a/y ,'), ['a/x', 'a/y']);
+  // Commas alone name no tests; that is a mistake, not "run nothing".
+  assert.throws(() => parseTests(','), /tests= names no test ids/);
 
   const queue = jobs.slice();
   assert.equal(takeNextJob(queue, null).policyKey, 'm0');
@@ -241,7 +248,14 @@ test('a refused direct commit is retried as a pull request', async () => {
   assert.deepEqual(calls, [false, true]);
   assert.equal(result.mode, 'pr');
   assert.equal(result.url, 'https://hf/pr/1');
-  assert.match(result.fellBack, /403/);
+  assert.match(result.fellBack, /403: forbidden/);
+
+  // When the pull request is refused too, the error says what to do about the token, not just "forbidden".
+  const refusing = { ...hub, commit: async () => { throw Object.assign(new Error('forbidden'), { statusCode: 403 }); } };
+  await assert.rejects(
+    () => commitFiles({ repo: { type: 'model', name: 'jiaqi/model' }, files: [], title: 't', env: { HF_TOKEN: 'hf_x' }, hub: refusing }),
+    /Uploading to jiaqi\/model failed: your Hugging Face token \(from HF_TOKEN\) is not allowed to do this \(forbidden\)[^]*settings\/tokens/,
+  );
 
   const failing = { ...hub, commit: async () => { throw Object.assign(new Error('server down'), { statusCode: 500 }); } };
   await assert.rejects(() => commitFiles({ repo: { type: 'model', name: 'jiaqi/model' }, files: [], title: 't', env: { HF_TOKEN: 'x' }, hub: failing }), /server down/);

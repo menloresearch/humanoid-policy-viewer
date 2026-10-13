@@ -46,6 +46,8 @@ test('old --flags fail with the words form to write instead', () => {
 test('verbs check their own words', () => {
   assert.match(hf('submit').stderr, /submit needs <dir>/);
   assert.match(hf('submit', 'x', 'base=main').stderr, /Unknown option "base="/);
+  assert.match(hf('submit', 'out/a', 'out/b').stderr, /submit takes one argument, not out\/a out\/b; submit one result dir at a time/);
+  assert.match(hf('pull', 'datasets/a/b', 'dir', 'extra').stderr, /pull takes 2 arguments/);
   assert.match(hf('diff', 'port=3').stderr, /Unknown option "port="/);
   assert.match(hf('release', '--rev=abc').stderr, /write rev=abc/);
   const usage = hf();

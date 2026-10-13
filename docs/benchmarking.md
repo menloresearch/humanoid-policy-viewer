@@ -82,7 +82,7 @@ benchmark as specified (no `tests=`, `repeats=`, `force`, unmerged shard) and no
 what `result.json` recorded when the run happened, so a result cannot be made submittable afterwards; it lists the
 reasons for each policy it refuses.
 
-For each policy, `submit` writes, in one commit to its model repo, `.eval_results/<dataset>.yaml` (one entry per
+For each policy, `submit` writes, in one commit to its model repo, `.eval_results/<org>__<name>.yaml` (one entry per
 task; re-runs replace their own task ids and keep the rest). Only these leaderboard numbers are uploaded; the full
 run (`result.json`, `report.html`) stays in the local result dir. If you own the model repo's namespace (your
 user or one of your orgs) it is committed to `main`; otherwise, or with `pr`, or if a direct commit is refused, it

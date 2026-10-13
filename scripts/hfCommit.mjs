@@ -72,6 +72,7 @@ export async function commitFiles({
     path,
     content: typeof content === 'string' ? new Blob([content]) : content,
   }));
+  // A refused token (401) or action (403) is explained the way the whoAmI check above is.
   const attempt = (isPullRequest) => lib.commit({
     repo,
     accessToken,
@@ -81,6 +82,8 @@ export async function commitFiles({
     operations,
     isPullRequest,
     ...(parentCommit ? { parentCommit } : {}),
+  }).catch((error) => {
+    throw explainAuthError(error, env, `Uploading to ${repo.name}`);
   });
 
   if (decision.mode === 'direct') {
@@ -89,7 +92,7 @@ export async function commitFiles({
       return { ...decision, url: output.commit.url, commit: output.commit.oid, fellBack: null };
     } catch (error) {
       if (!RETRY_AS_PR_STATUS.includes(error?.statusCode)) throw error;
-      const why = `a direct commit was refused (${error.statusCode}: ${error.message})`;
+      const why = `a direct commit was refused (${error.statusCode}: ${(error.cause ?? error).message})`;
       log(`${why}; opening a pull request instead`);
       const output = await attempt(true);
       return { mode: 'pr', reason: why, url: output.pullRequestUrl ?? output.commit.url, commit: output.commit.oid, fellBack: why };

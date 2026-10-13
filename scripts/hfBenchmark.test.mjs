@@ -306,6 +306,16 @@ test('submit writes only .eval_results to the policy repo', async () => {
   assert.equal(files['policy.onnx'], 'onnx');
 });
 
+test('submit stops on a failed read of the existing .eval_results instead of overwriting it', async () => {
+  const fake = fakeHub();
+  const sha = fake.seed('model', 'me/model', { 'policy.onnx': 'onnx', '.eval_results/me__bench.yaml': '- dataset: { id: me/bench, task_id: old_v0 }\n  value: 0.3\n' });
+  const run = resultRun();
+  run.policies[0].sha = sha;
+  const io = { ...fake.io, hub: { ...fake.io.hub, downloadFile: async () => { throw Object.assign(new Error('Service Unavailable'), { statusCode: 503 }); } } };
+  await assert.rejects(() => submit(writeResult(run), {}, io), /Service Unavailable/);
+  assert.equal(fake.model('me/model').commits.size, 1);
+});
+
 test('submit refuses a result on a local benchmark and says why', async () => {
   const fake = fakeHub();
   const sha = fake.seed('model', 'me/model', { 'policy.onnx': 'onnx' });
@@ -315,6 +325,8 @@ test('submit refuses a result on a local benchmark and says why', async () => {
   run.provenance.hpv.dirty = true;
   await assert.rejects(() => submit(writeResult(run), { dryRun: true }, fake.io), /Not submitted: me\/model/);
   assert.match(fake.output(), /Not submitted:\n {4}- the benchmark is a local folder[^]*uncommitted changes/);
+  // A real submit is refused the same way, before anything reaches the repo (only the seed commit).
+  await assert.rejects(() => submit(writeResult(run), {}, fake.io), /Not submitted: me\/model/);
   assert.equal(fake.model('me/model').commits.size, 1);
 });
 

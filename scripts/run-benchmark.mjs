@@ -21,7 +21,7 @@ import { rowToSequence } from '../src/benchmark/testRow.js';
 import { buildBenchmarkReportHtml } from '../src/simulation/benchmarkReport.js';
 import { runJobs } from './benchmarkBrowser.mjs';
 import { collectProvenance, policyFileHashes } from './benchmarkProvenance.mjs';
-import { formatOutcomes, formatTasks, parseShard, resultTarget, shardJobs, submitHint, viewHint } from './benchmarkRun.mjs';
+import { formatOutcomes, formatTasks, parseShard, parseTests, resultTarget, shardJobs, submitHint, viewHint } from './benchmarkRun.mjs';
 import { classifyTarget, describeTarget } from './benchmarkTargets.mjs';
 import { checkPolicyDir, readReferenceJointNames } from './policyChecks.mjs';
 import { parsePort, parseWords, rejectSwallowedNpmFlags } from './cliArgs.mjs';
@@ -190,7 +190,7 @@ async function runBenchmarkCommand(args) {
   const robots = parseCount(options.robots, 'robots') ?? MAX_ROBOTS;
   if (robots > MAX_ROBOTS) throw new Error(`robots= must be at most ${MAX_ROBOTS}`);
   const shard = options.shard ? parseShard(options.shard) : null;
-  const only = options.tests ? options.tests.split(',').map((s) => s.trim()).filter(Boolean) : null;
+  const only = parseTests(options.tests);
   const outDir = resolve(options.out ?? join(appDir, 'benchmark_results', timestamp()));
   const log = (line) => console.log(line);
 

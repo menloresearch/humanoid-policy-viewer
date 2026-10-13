@@ -57,9 +57,16 @@ function dashedWordError(word, { keys, flags, hints }) {
  * npm turns an unknown `--name` given to `npm run` into the environment
  * variable npm_config_name and does not pass it on. Report any that look like
  * ours, so `npm run benchmark x --pr` fails instead of silently not opening a PR.
+ * Two spellings are not npm_config_<name>: `--no-x` is npm_config_x (empty), and the
+ * log levels `--verbose` / `--silent` are npm_config_loglevel.
  */
+const LOGLEVEL_FLAGS = { verbose: 'verbose', silent: 'silent' };
+
 export function swallowedNpmFlags(env, names) {
-  return names.filter((name) => env[`npm_config_${name.replace(/-/g, '_')}`] !== undefined);
+  const set = (name) => env[`npm_config_${name.replace(/-/g, '_')}`] !== undefined;
+  return names.filter((name) => set(name)
+    || (name.startsWith('no-') && set(name.slice(3)))
+    || (name in LOGLEVEL_FLAGS && env.npm_config_loglevel === LOGLEVEL_FLAGS[name]));
 }
 
 /** Throws, naming the words form, if npm swallowed any of these keys, flags or hinted names. */

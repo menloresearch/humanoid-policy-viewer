@@ -43,9 +43,10 @@ Verbs, for a benchmark dataset on the Hub:
                                            writes <dir>/baseline.md
   publish <dir> [repo=<org/name>] [base=<rev>] [pr] [create] [dry-run]
                                            check against main (or base=, which must still be main), build
-                                           eval.yaml + the dataset card, then commit and tag v<version>
-                                           (owner) or open a pull request; "create" makes a new PRIVATE
-                                           dataset repo
+                                           eval.yaml + the dataset card, then commit (owner), tagged
+                                           v<version> when that version is new, or open a pull request
+                                           (tag it with release after merging); "create" makes a new
+                                           PRIVATE dataset repo
   release <dataset> rev=<commit>           tag a revision v<version> (a merged pull request)
 
   repo= is the dataset (org/name); it can be left out for a folder made by pull.
@@ -64,8 +65,9 @@ Environment:
   HF_ENDPOINT          alternative Hub endpoint (default: https://huggingface.co)
   HPV_CACHE_DIR        where downloads are kept (default: ~/.cache/humanoid-policy-viewer)`;
 
+// args: how many plain words a verb takes (default 1); more is an error, not ignored.
 const VERBS = {
-  pull: {},
+  pull: { args: 2 },
   diff: { keys: ['repo', 'base'] },
   baseline: { keys: ['policy', 'repo', 'base'], repeatable: ['policy'] },
   publish: { keys: ['repo', 'base'], flags: ['pr', 'create', 'dry-run'] },
@@ -91,6 +93,10 @@ function needDir(verb, dir) {
 async function runVerb(verb, argv) {
   const { positionals, options, flags } = words(argv, VERBS[verb]);
   if (flags.has('help')) return console.log(USAGE);
+  const max = VERBS[verb].args ?? 1;
+  if (positionals.length > max) {
+    throw new Error(`${verb} takes ${max === 1 ? 'one argument' : `${max} arguments`}, not ${positionals.join(' ')}${verb === 'submit' ? '; submit one result dir at a time' : ''}`);
+  }
   const [a, b] = positionals;
   const { repo, base } = options;
   setup();

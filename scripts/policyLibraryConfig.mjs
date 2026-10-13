@@ -17,9 +17,29 @@ import { fileURLToPath } from 'node:url';
 const APP_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const DEFAULT_POLICY_ROOT = 'policies';
 
+// The variables were renamed with the policy/benchmark vocabulary; the old names keep working, with a warning.
+const LEGACY_NAMES = {
+  HPV_POLICY_LIBRARY_DIR: 'HPV_MODEL_LIBRARY_DIR',
+  HPV_POLICY_ROOTS: 'HPV_MODEL_ROOTS',
+  HPV_BENCHMARK_RESULTS_DIR: 'HPV_BENCHMARK_RUNS_DIR',
+};
+const warned = new Set();
+
+/** env[name], else its pre-rename value (warning once per name); undefined when neither is set. */
+export function readEnv(env, name, warn = console.warn) {
+  if (env[name] !== undefined) return env[name];
+  const legacy = LEGACY_NAMES[name];
+  if (env[legacy] === undefined) return undefined;
+  if (!warned.has(legacy)) {
+    warned.add(legacy);
+    warn(`Warning: ${legacy} is now ${name}; the old name still works for now.`);
+  }
+  return env[legacy];
+}
+
 export function getPolicyLibrary(env = process.env) {
-  const baseDir = resolve(env.HPV_POLICY_LIBRARY_DIR || APP_DIR);
-  const roots = (env.HPV_POLICY_ROOTS ?? DEFAULT_POLICY_ROOT)
+  const baseDir = resolve(readEnv(env, 'HPV_POLICY_LIBRARY_DIR') || APP_DIR);
+  const roots = (readEnv(env, 'HPV_POLICY_ROOTS') ?? DEFAULT_POLICY_ROOT)
     .split(',')
     .map((name) => name.trim())
     .filter(Boolean);
@@ -27,7 +47,6 @@ export function getPolicyLibrary(env = process.env) {
 }
 
 export function getBenchmarkResultsDir(appDir, env = process.env) {
-  return env.HPV_BENCHMARK_RESULTS_DIR
-    ? resolve(env.HPV_BENCHMARK_RESULTS_DIR)
-    : resolve(appDir, 'benchmark_results');
+  const dir = readEnv(env, 'HPV_BENCHMARK_RESULTS_DIR');
+  return dir ? resolve(dir) : resolve(appDir, 'benchmark_results');
 }

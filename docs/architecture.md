@@ -44,7 +44,7 @@ npm run benchmark:golden [update]                check a smoke run against test/
 
 HUGGING FACE
 npm run hf <policy> [benchmark=] [port=] [no-open]   first-run setup, then the viewer on localhost with <policy> open
-npm run hf submit <result dir> [pr] [dry-run]        upload a result to each policy's model repo
+npm run hf submit <result dir> [pr] [dry-run]        upload a result's .eval_results to each policy's model repo
 npm run hf pull datasets/org/name[@rev] <dir>        working copy of a benchmark on the Hub
 npm run hf diff <dir> [repo=] [base=<rev>]           what changed compared with the Hub
 npm run hf baseline <dir> [repo=] [base=<rev>] [policy=...]   reference policies on <dir> and on the base
@@ -74,7 +74,8 @@ comes first. A swallowed flag is reported with the words form to use instead.
 | a folder with a `benchmark.yaml` | a local benchmark |
 | a first word with no `/` that names a verb | that verb |
 
-`policy=` and `benchmark=` say the same thing as options (`policy=` may repeat). Without a benchmark word,
+`npm run benchmark` also takes `policy=` (repeatable) and `benchmark=` as options; `dev` and `hf` take only
+`benchmark=`. Without a benchmark word,
 `npm run benchmark` and `npm run dev` use `benchmarks/default`.
 
 ## The pieces
@@ -88,7 +89,7 @@ flowchart LR
     dev["npm run dev"] --> start
     hf["npm run hf"] --> start
     bench["npm run benchmark<br/>(editable: false)"] --> start
-    start["startViewer()<br/>setup.mjs runs first for dev and hf"] --> server["Vite + viewerServer"]
+    start["startViewer()<br/>setup.mjs runs first (dev, hf, benchmark)"] --> server["Vite + viewerServer"]
     server <-->|"/api/*, /policy-library/*"| page["Browser page<br/>Demo.vue, simulation/, src/benchmark/"]
     server <-->|reads and writes| disk[("benchmarks/<br/>benchmark_results/<br/>policies/ + Hub cache")]
     bench -.->|"drives pages with Playwright"| page
@@ -97,7 +98,7 @@ flowchart LR
 | Piece | File | Job |
 |---|---|---|
 | First-run setup | `scripts/setup.mjs` | Fetches the `asimov-1` robot (`init-asimov-1.sh`), and runs `npm ci` if `node_modules` is missing. It has no dependencies, so it runs before anything is installed. `dev` and `hf` call it from their own script; `npm run benchmark` goes through `scripts/benchmark.mjs`, which calls it and then imports `run-benchmark.mjs`. It skips the robot for `merge`, `init` and `path-end`, and for a run it also installs Chromium (`setupBrowser`, after the dependencies) when Playwright has none. |
-| Start-up | `scripts/startViewer.mjs` | `startViewer({policies, benchmark, policyLibrary, host, port, open, editable})`. It resolves the words (downloading Hub policies and benchmarks into the cache), starts Vite in-process with the server plugin, and returns `{server, url}`. `policyLibrary` (`{dir, roots}`) replaces the default library: `hf` passes its one policy, the runner a temporary folder of links. All three launchers call it. |
+| Start-up | `scripts/startViewer.mjs` | `startViewer({policies, benchmark, policyLibrary, resultsDir, host, port, open, editable, logLevel})`. It resolves the words (downloading Hub policies and benchmarks into the cache), starts Vite in-process with the server plugin, and returns `{server, url}`. `policyLibrary` (`{dir, roots}`) replaces the default library: `hf` passes its one policy, the runner a temporary folder of links. Every launcher calls it (`dev`, `hf <policy>`, a benchmark run and `benchmark view`). |
 | Server | `scripts/viewerServer.mjs` | The Vite plugin `viewerServer(options)`: the [routes](#server-routes). Its options are `{benchmarksDir, openBenchmark, resultsDir, policyLibraryDir, policyRoots, editable}`. `vite.config.mjs` fills them from `HPV_*` env vars for plain `npx vite`; the launchers pass them directly. |
 | Launchers | `scripts/dev.mjs`, `scripts/hf.mjs`, `scripts/run-benchmark.mjs` | Parse words with `scripts/cliArgs.mjs` `parseWords`, then call `startViewer`. `hf.mjs` dispatches on its first word. |
 | Hub | `scripts/hfPolicy.mjs`, `hfDataset.mjs`, `hfCommit.mjs`, `hfEvalResults.mjs`, `hfSubmit.mjs`, `hfBenchmark.mjs` | Download policies and benchmarks; build `eval.yaml` and `.eval_results`; commit, or open a pull request. |
@@ -120,7 +121,8 @@ marked ✎ exist only when `editable` is on.
 
 | Route | Methods | Does |
 |---|---|---|
-| `/api/benchmarks` | GET, POST ✎ | Lists the open benchmark and every folder in `benchmarks/`. POST creates `benchmarks/<name>/` as a copy of `benchmarks/default`. |
+| `/api/benchmarks` | GET, POST ✎ | Lists the open benchmark and every folder in `benchmarks/`. POST creates `benchmarks/<name>/` from the starter `benchmark.yaml` and README, with no tests. |
+| `/api/benchmark/dataset?benchmark=` | GET | `benchmark.yaml` parsed, with every test row: what the in-app Run plans its cells from. |
 | `/api/benchmark?benchmark=` | GET, PUT ✎ | The `benchmark.yaml` text and its form fields (the ⚙ Benchmark settings dialog). PUT refuses an edit that `npm run benchmark` would reject, or one based on a stale copy. |
 | `/api/tests?benchmark=[&file=<config>/<name>.json]` | GET, PUT ✎, DELETE ✎ | Lists the tests, or reads, writes or deletes one row of `data/<config>/test.jsonl`. |
 | `/api/policies` | GET | The policies in the policy library: local folders and downloaded Hub policies. |
@@ -212,7 +214,8 @@ the ones made with **New benchmark**.
 
 **Leaderboards** are built by the Hub, not by this repo. It collects every model repo's `.eval_results` entries
 that name a task in the dataset's `eval.yaml`. A dataset shows leaderboards only once its `evaluation_framework`
-(`humanoid-policy-viewer`) is in Hugging Face's list and the dataset is allow-listed; see
+(`humanoid-policy-viewer`) is in Hugging Face's list (or the field is omitted; an unknown value makes the Hub reject
+`eval.yaml`) and the dataset is allow-listed; see
 [Hugging Face eval results](https://huggingface.co/docs/hub/eval-results).
 
 ## Results and submitting
@@ -228,7 +231,7 @@ benchmark_results/<timestamp>/
   Chromium versions;
 - `benchmark`: where it came from (Hub id and commit, or a path), the settings file, `raw` settings and the test
   rows;
-- `policies[]`: for each, `policyKey`, the Hub id and commit, and the sha256 of the `.onnx` and `env.yaml`;
+- `policies[]`: for each, its `key` (which `cells[].policyKey` refers to), the Hub id and commit, and the sha256 of the `.onnx` and `env.yaml`;
 - `cells[]`: seed, action delay drawn, commands actually sent, and every metric;
 - `perTest` and `tasks`;
 - `overrides` (`tests=`, `repeats=`) and `shard`.
@@ -241,7 +244,7 @@ refuses unless the result has:
 - the whole benchmark, with no overrides and no unmerged shard;
 - no failed cell.
 
-For each policy it commits only `.eval_results/<dataset>.yaml` (one entry per task) to the model repo; the full
+For each policy it commits only `.eval_results/<org>__<name>.yaml` (one entry per task) to the model repo; the full
 run stays in the local result dir. Each entry's `notes` record
 `hpv@<commit> protocol=<n> benchmark=<name> v<version> asimov-1@<commit> policy@<commit>`. It commits
 directly in your own namespace; otherwise, or with `pr`, it opens a pull request, which the Hub shows as a
@@ -255,7 +258,7 @@ community result.
 | `benchmarks/*` | no | Your benchmarks and pulled copies. |
 | `benchmark_results/` | no | Results, one folder each. |
 | `policies/` | no (except `README.md`) | Local policies, one folder each. |
-| `~/.cache/humanoid-policy-viewer/hf/` | — | Downloaded Hub policies and benchmarks. |
+| `~/.cache/humanoid-policy-viewer/hf/`, `hf-datasets/` | — | Downloaded Hub policies, and Hub benchmarks. |
 | `public/policy-library/`, `public/static-data/` | no | Written by an embedding site's static build. |
 | `test/fixtures/smoke-benchmark/` | yes | A tiny benchmark for tests and the golden check. |
 
@@ -269,7 +272,8 @@ community result.
 
 ## Migration from the old names
 
-There are no aliases: an old name stops working when it is renamed.
+There are no aliases, except for the three environment variables below: an old name stops working when it is
+renamed.
 
 | Old | New |
 |---|---|
@@ -300,8 +304,8 @@ There are no aliases: an old name stops working when it is renamed.
 | `docs/benchmark-datasets.md`, `docs/model-library.md` | `docs/benchmarks.md`, `docs/policy-library.md` |
 | **Environment** | |
 | `HPV_SUITE_DIR` (the benchmark open at start-up) | gone; `benchmark=` on `dev` / `hf` |
-| `HPV_BENCHMARK_RUNS_DIR` | `HPV_BENCHMARK_RESULTS_DIR` |
-| `HPV_MODEL_LIBRARY_DIR`, `HPV_MODEL_ROOTS` | `HPV_POLICY_LIBRARY_DIR`, `HPV_POLICY_ROOTS` |
+| `HPV_BENCHMARK_RUNS_DIR` | `HPV_BENCHMARK_RESULTS_DIR` (the old name still works, with a warning) |
+| `HPV_MODEL_LIBRARY_DIR`, `HPV_MODEL_ROOTS` | `HPV_POLICY_LIBRARY_DIR`, `HPV_POLICY_ROOTS` (the old names still work, with a warning) |
 | **Routes and URLs** | |
 | `/api/suites`, `/api/suite`, `?suite=` | `/api/benchmarks`, `/api/benchmark`, `?benchmark=` |
 | `/api/sequences` (listing field `folder`) | `/api/tests` (field `config`) |
@@ -314,7 +318,7 @@ There are no aliases: an old name stops working when it is renamed.
 | **Result fields** | |
 | `schema: hpv-benchmark-run/1` | `schema: hpv-benchmark-result/1` |
 | `suite: {…, suiteFile, raw}` | `benchmark: {…, raw}` |
-| `models[]`, `modelKey` | `policies[]`, `policyKey` |
+| `models[]`, `modelKey` | `policies[]` (`key`), `cells[].policyKey` |
 | `.eval_results` notes `suite=<name> v<n> … model@<sha>` | `benchmark=<name> v<n> … policy@<sha>` |
 
 Unchanged on purpose:
