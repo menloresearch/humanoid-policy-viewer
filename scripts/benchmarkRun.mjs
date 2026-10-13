@@ -16,6 +16,14 @@ export function parseShard(text) {
   return { index, count };
 }
 
+/** tests=<id,id> as a list of ids, or null when not given; a list with no ids is an error. */
+export function parseTests(text) {
+  if (text === undefined) return null;
+  const ids = text.split(',').map((s) => s.trim()).filter(Boolean);
+  if (!ids.length) throw new Error(`tests= names no test ids (got "${text}")`);
+  return ids;
+}
+
 /** A deterministic, work-balanced slice of the jobs: every count-th one (whole groups, so every cell once). */
 export function shardJobs(jobs, shard) {
   if (!shard) return jobs;
