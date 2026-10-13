@@ -1,8 +1,8 @@
-// Headless multi-policy benchmark runner.
-//
-// Loads each policy in turn, plays a set of command-sequence tests against it,
-// captures a per-frame sample stream (ported from public/sim-metrics.js's
-// captureFrame) and folds each stream into computeMetrics(). Pure JS, no DOM.
+// Benchmark runner: plays one command-sequence test against the loaded policy
+// as a group of robots, captures each robot's per-frame sample stream (ported
+// from public/sim-metrics.js's captureFrame) and folds it into computeMetrics().
+// Which cells run, and the result.json they make, is src/benchmark/run.js.
+// Pure JS, no DOM.
 
 import { computeMetrics, TILT_FALL_RAD, HEIGHT_FALL_M } from './metrics.js';
 import { commandSequencer } from './commandSequencer.js';
@@ -182,36 +182,31 @@ export async function waitForPolicyReady(demo, deadlineMs = 10000) {
 
 /**
  * Most robots one page runs at once: the repeats of a test beyond this are run
- * in further groups (see scripts/benchmarkRun.mjs).
+ * in further groups (groupCells in src/benchmark/run.js).
  */
 export const MAX_ROBOTS = 5;
 
 /**
- * Plays one test against the policy that is already loaded and returns its
- * metrics. The runner owns the clock: it stops the real-time loop and calls
+ * Plays one test against the policy that is already loaded, as several robots
+ * at once, one per entry of `randomizations` (at most MAX_ROBOTS), and returns
+ * one result per entry, in order, each exactly what that robot would have
+ * scored alone. The robots share the scene, the command clock and the push
+ * schedule but nothing that steers one robot's run (see
+ * MuJoCoDemo.addExtraRobots); robot 0 is the demo's own. A group of one is the
+ * plain single-robot run. `npm run benchmark` and the viewer's Run both run
+ * every cell through here (Demo.vue's runBenchmarkGroupOnPage).
+ *
+ * The runner owns the clock: it stops the real-time loop and calls
  * demo.stepPolicyTick() exactly round(duration / dt) times, so the result is
  * the same however fast or loaded the machine is, and however many pages run
  * in parallel. The caller restarts the real-time loop afterwards if it wants it.
  *
- * `randomization` is null (fixed behaviour: midpoint action delay, no noise)
- * or `{ seed, randomize: { action_delay, initial_joint_noise_rad } }` from the
- * suite; the same seed always gives the same run.
+ * Each entry of `randomizations` is null (fixed behaviour: midpoint action
+ * delay, no noise) or `{ seed, randomize: { action_delay, initial_joint_noise_rad } }`
+ * from the benchmark; the same seed always gives the same run.
  * `realtime` paces ticks to wall-clock time, for watching a run.
- * `timeoutMs` is a wall-clock budget; a cell over it stops early with an error.
- */
-export async function runBenchmarkCell({ randomization = null, ...options }) {
-  const [result] = await runBenchmarkGroup({ ...options, randomizations: [randomization] });
-  return result;
-}
-
-/**
- * Plays one test as several robots at once, one per entry of `randomizations`
- * (at most MAX_ROBOTS; each entry as runBenchmarkCell's `randomization`), and
- * returns one result per entry, in order, each exactly what runBenchmarkCell
- * would have returned for it alone. The robots share the scene, the command
- * clock and the push schedule but nothing that steers one robot's run (see
- * MuJoCoDemo.addExtraRobots); robot 0 is the demo's own. A group of one is
- * the plain single-robot run. `timeoutMs` is the budget of the whole group.
+ * `timeoutMs` is a wall-clock budget for the whole group; a group over it stops
+ * early with an error.
  */
 export async function runBenchmarkGroup({
   demo,
@@ -339,112 +334,4 @@ export async function runBenchmarkGroup({
     for (const robot of robots) demo.setBenchmarkRandomization(null, robot);
     demo.removeExtraRobots?.();
   }
-}
-
-// Every test against every policy, one cell at a time. `realtime` plays each
-// test at wall-clock speed so the run can be watched in the viewer.
-export async function runBenchmark({ demo, component, policies, tests, onProgress, realtime = false }) {
-  const policyList = Array.isArray(policies) ? policies : [];
-  const testList = Array.isArray(tests) ? tests : [];
-  const results = [];
-
-  const total = policyList.length * testList.length;
-  let done = 0;
-
-  try {
-    for (let policyIndex = 0; policyIndex < policyList.length; policyIndex++) {
-      const policy = policyList[policyIndex];
-
-      // A checkpoint whose observation layout doesn't match the base config
-      // fails here; record it and keep sweeping the remaining policies.
-      try {
-        await demo.stopMainLoop();
-        await demo.reloadPolicy(policy.configPath, { onnxPath: policy.onnxPath });
-        const ready = await waitForPolicyReady(demo, 10000);
-        if (!ready) throw new Error('policy did not become ready within 10s');
-      } catch (error) {
-        const message = error?.message || String(error);
-        for (const test of testList) {
-          results.push({
-            policyId: policy.id,
-            testFile: test.file,
-            error: `Could not load policy: ${message}`,
-            metrics: null,
-          });
-          done += 1;
-          onProgress?.({
-            policyIndex,
-            testIndex: testList.indexOf(test),
-            done,
-            total,
-            label: policy.label + ' — load failed',
-          });
-        }
-        continue;
-      }
-
-      for (let testIndex = 0; testIndex < testList.length; testIndex++) {
-        const test = testList[testIndex];
-        // A misconfigured test (unresolvable target body, no matching foot
-        // geoms, etc.) throws loudly from setFootFriction/getBodyMass instead
-        // of silently corrupting the result — caught here so one bad test
-        // fails just that row of the report rather than the whole sweep.
-        try {
-          const cell = await runBenchmarkCell({ demo, component, sequence: test.sequence, realtime });
-          results.push({
-            policyId: policy.id,
-            testFile: test.file,
-            frames: cell.frames,
-            expectedFrames: cell.expectedFrames,
-            warning: cell.warning,
-            ...(cell.error ? { error: cell.error } : {}),
-            clampedCommands: cell.clampedCommands,
-            metrics: cell.metrics,
-          });
-        } catch (error) {
-          results.push({
-            policyId: policy.id,
-            testFile: test.file,
-            error: error?.message || String(error),
-            metrics: null,
-          });
-        }
-
-        done += 1;
-        onProgress?.({
-          policyIndex,
-          testIndex,
-          done,
-          total,
-          label: policy.label + ' / ' + test.name,
-        });
-      }
-    }
-  } finally {
-    // Back to the live, real-time view.
-    if (demo) {
-      demo.alive = true;
-      demo.main_loop();
-    }
-  }
-
-  // The run carries its own inputs — the policy identities and the full command
-  // sequence of every test — so a saved run (and the HTML report built from it)
-  // is readable without the repo it came from.
-  return {
-    generatedAt: new Date().toISOString(),
-    policies: policyList.map((p) => ({
-      id: p.id,
-      label: p.label,
-      configPath: p.configPath,
-      onnxPath: p.onnxPath ?? null,
-    })),
-    tests: testList.map((t) => ({
-      file: t.file,
-      name: t.name,
-      duration: t.sequence?.duration || 0,
-      sequence: t.sequence ?? null,
-    })),
-    results,
-  };
 }

@@ -20,7 +20,7 @@ function writeFile(mujoco, path, data) {
   mujoco.FS.writeFile('/working/' + path, data);
 }
 
-// Mirrors downloadExampleScenesFolder(), reading from disk instead of fetch().
+// Mirrors stageSceneFolder(mujoco, SCENE), reading from disk instead of fetch().
 async function stageAsimov() {
   const mujoco = await loadMujoco();
   mujoco.FS.mkdir('/working');

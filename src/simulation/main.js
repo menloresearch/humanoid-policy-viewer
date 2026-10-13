@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { DragStateManager } from './utils/DragStateManager.js';
-import { createSimulationWrapper, downloadExampleScenesFolder, getPosition, getQuaternion, toMujocoPos, reloadScene, reloadPolicy } from './mujocoUtils.js';
+import { createSimulationWrapper, getPosition, getQuaternion, toMujocoPos, reloadScene, reloadPolicy } from './mujocoUtils.js';
 import { commandSequencer } from './commandSequencer.js';
 import { asimovCommandState } from './observationHelpers.js';
 import { IdealPathTracker, yawFromQuat } from './idealPath.js';
@@ -164,7 +164,9 @@ export class MuJoCoDemo {
     this.showIdealMarker = true;
     this._buildIdealMarker();
 
-    this.renderer.setAnimationLoop(this.render.bind(this));
+    // A headless benchmark page (benchmarkBrowser.mjs) sets __hpvNoDraw before the app loads: drawing
+    // with software WebGL while the scene and policy load made that take ~45 s instead of ~10 s.
+    if (!globalThis.__hpvNoDraw) this.renderer.setAnimationLoop(this.render.bind(this));
 
     this.reloadScene = reloadScene.bind(this);
     this.reloadPolicy = reloadPolicy.bind(this);
@@ -174,8 +176,8 @@ export class MuJoCoDemo {
    * Permanently stops the WebGL draw loop. render() only copies simulation
    * state into the Three.js scene graph and issues the draw call — nothing
    * a benchmark reads depends on it (metrics read this.simulation
-   * directly) — so headless CI runs (see
-   * runHeadlessBenchmark() in Demo.vue) can skip it entirely. Software-
+   * directly) — so headless runs (see
+   * runBenchmarkGroupOnPage() in Demo.vue) can skip it entirely. Software-
    * rendered WebGL (no GPU passthrough, e.g. most CI runners) makes this a
    * meaningful chunk of the per-frame cost, not just an idle canvas.
    */
@@ -217,8 +219,7 @@ export class MuJoCoDemo {
 
   async init() {
     this.defaultScenePath = defaultScene;
-    await downloadExampleScenesFolder(this.mujoco);
-    await this.reloadScene(defaultScene);
+    await this.reloadScene(defaultScene); // stages the scene's folder first (stageSceneFolder)
     commandSequencer.bindSim(this);
     this.updateFollowBodyId();
     await this.reloadPolicy(defaultPolicy);

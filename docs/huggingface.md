@@ -1,13 +1,13 @@
 # Run a policy from Hugging Face
 
 ```bash
-npm run hf <model>
+npm run hf <policy>
 
 # example
 npm run hf Menlo/asimov1-locomotion-0818
 ```
 
-`<model>` is the Hugging Face repo id (`org/name`) or its URL, for example
+`<policy>` is the Hugging Face repo id (`org/name`) or its URL, for example
 `https://huggingface.co/Menlo/asimov1-locomotion-0818`. Capitalisation does not
 matter.
 
@@ -17,21 +17,29 @@ needs `git` and `bash` for the latter). Then it downloads the repo's `.onnx`,
 `env.yaml` and `agent.yaml`, [checks them](#checks), starts the dev server and
 opens the viewer with that policy selected.
 
-Options go after a `--`, because npm keeps any flag written before it for
-itself: `npm run hf Menlo/asimov1-locomotion-0818 -- --no-open`.
+Options are plain words, with no `--`:
+`npm run hf Menlo/asimov1-locomotion-0818@main port=4000 no-open`.
 
 | Option / variable | Meaning |
 |---|---|
-| `--revision <ref>` | Branch, tag or commit of a Hub repo (default `main`) |
-| `--port <n>` | Dev server port (default 3000, or the next free one) |
-| `--no-open` | Do not open a browser window; open the printed link instead, which selects the policy (the bare server URL runs the bundled example) |
-| `HF_TOKEN` | Access token, for private repos |
+| `<policy>@<ref>` | Branch, tag or commit of a Hub repo (default `main`) |
+| `benchmark=<dir \| datasets/org/name[@rev]>` | The benchmark the viewer opens (default `./benchmarks/default`) |
+| `port=<n>` | Dev server port (default 3000, or the next free one) |
+| `no-open` | Do not open a browser window; open the printed link instead, which selects the policy (the bare server URL runs the bundled example) |
+| `HF_TOKEN` | Access token, for private repos and for writing (make one at https://huggingface.co/settings/tokens). Without it, the token `hf auth login` saved is used (`HF_TOKEN_PATH`, else `$HF_HOME/token`, else `~/.cache/huggingface/token`) |
 | `HF_ENDPOINT` | Alternative Hub endpoint (default `https://huggingface.co`) |
 | `HPV_CACHE_DIR` | Download cache (default `~/.cache/humanoid-policy-viewer`) |
 
+`npm run hf` is the command for everything that talks to the Hub. Besides
+viewing a policy, its verbs work on benchmark datasets (`pull`, `diff`,
+`baseline`, `publish`, `release`; see [Benchmarks](benchmarks.md#workflow)) and
+submit benchmark results to a policy's model repo (`submit`; see
+[Benchmarking](benchmarking.md#submitting-results)). It is the only command
+that uploads. `npm run hf` alone prints the usage.
+
 ## Run a policy from a folder
 
-`<model>` can also be a folder or an `.onnx` file on disk, for example a policy
+`<policy>` can also be a folder or an `.onnx` file on disk, for example a policy
 exported by a training repo before (or instead of) uploading it:
 
 ```bash
@@ -39,8 +47,8 @@ npm run hf ./my-policy
 npm run hf ./my-policy/policy.onnx
 ```
 
-Nothing is downloaded or copied: the folder is linked into a temporary model
-library and served under `/model-library/<folder name>/`, so re-exporting into
+Nothing is downloaded or copied: the folder is linked into a temporary policy
+library and served under `/policy-library/<folder name>/`, so re-exporting into
 it and reloading the page picks up the new files. The link is removed when the
 server stops. The folder needs the same files as a Hub repo (below) and gets the
 same [checks](#checks), except the model card one. A folder must hold
@@ -155,7 +163,7 @@ After downloading, the script checks the repo before running it:
 
 Warnings are printed and the viewer still starts. An error exits with status 1
 before the dev server starts; the download stays cached. When everything passes
-it prints `Checked env.yaml and agent.yaml: OK`. A checkpoint's own
+it prints `Checked env.yaml and agent.yaml: OK`. A policy's own
 `tracking_policy.json` is not consulted: the joint list always comes from
 `reference_policy_config.json`.
 
@@ -188,12 +196,12 @@ offline, the cached copy is used. Delete the folder to clear it.
 
 ## How it works
 
-`npm run hf` (`scripts/run-hf-model.mjs`, download logic in `scripts/hfModel.mjs`,
-local folders in `scripts/localModel.mjs`, checks in `scripts/checkpointChecks.mjs`)
+`npm run hf <policy>` (`scripts/hf.mjs`, download logic in `scripts/hfPolicy.mjs`,
+local folders in `scripts/localPolicy.mjs`, checks in `scripts/policyChecks.mjs`)
 treats the cache as a
-[model library](model-library.md), so the download is served under
-`/model-library/hf/<org>__<name>/` and listed in the policy dropdown like any
-other checkpoint. It then opens the page with a
-`?policy=ckpt:hf/<org>__<name>/policy.onnx` query parameter, which
+[policy library](policy-library.md), so the download is served under
+`/policy-library/hf/<org>__<name>/` and listed in the policy dropdown like any
+other policy. It then opens the page with a
+`?policy=lib:hf/<org>__<name>/policy.onnx` query parameter, which
 `selectPolicyFromUrl` in `src/views/Demo.vue` uses to select that entry once the
 catalog has loaded. The parameter only resolves on a server started this way.

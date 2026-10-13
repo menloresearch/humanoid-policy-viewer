@@ -1,7 +1,7 @@
 // One benchmark test = one row of a Hugging Face benchmark dataset
 // (data/<config>/test.jsonl). A row describes the scenario only: what is
 // commanded, what pushes happen and on what floor and terrain. How often it runs, how its
-// repeats are randomised and how it is scored belong to the suite (suite.js).
+// repeats are randomised and how it is scored belong to the benchmark settings (settings.js).
 //
 // Row fields (every row carries every key, so the dataset has one schema):
 //   id              "<config>/<name>", stable; results refer to tests by it

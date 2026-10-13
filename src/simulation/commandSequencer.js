@@ -14,22 +14,26 @@ export const MAX_ABS_LIMIT = 20;
 
 let activeCommandLimits = null;
 
-// Set by mujocoUtils.js reloadPolicy() when the current checkpoint's env.yaml
+// Set by mujocoUtils.js reloadPolicy() when the current policy's env.yaml
 // declares its own trained command range (commands.twist.ranges) — overrides
-// COMMAND_LIMITS for that checkpoint's resolveLimits() fallback, rather than
-// clamping every checkpoint against whichever one checkpoint COMMAND_LIMITS
+// COMMAND_LIMITS for that policy's resolveLimits() fallback, rather than
+// clamping every policy against whichever one policy COMMAND_LIMITS
 // was last hand-tuned for. Pass null to fall back to COMMAND_LIMITS (a
-// checkpoint whose env.yaml doesn't declare a command range, or no checkpoint
+// policy whose env.yaml doesn't declare a command range, or no policy
 // loaded yet).
 export function setActiveCommandLimits(limits) {
   activeCommandLimits = limits && typeof limits === 'object' ? limits : null;
 }
 
+export function getActiveCommandLimits() {
+  return activeCommandLimits;
+}
+
 // Resolve per-sequence command limits. A sequence may carry its own
 // `limits: { vx:[min,max], vy:[...], wz:[...] }`, which always wins. Falling
-// back to the currently active checkpoint's trained command range only makes
+// back to the currently active policy's trained command range only makes
 // sense while actually playing/recording a sequence against that live
-// checkpoint (the default, useActive: true) — a report/comparison view isn't
+// policy (the default, useActive: true) — a report/comparison view isn't
 // tied to whatever happens to be loaded live in the 3D viewer at the moment
 // someone's looking at it, so it should pass useActive: false to fall back to
 // the fixed COMMAND_LIMITS instead (see BenchmarkResults.vue).

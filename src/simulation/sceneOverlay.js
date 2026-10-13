@@ -2,7 +2,7 @@
 // them in Python), but the viewer drives joints through actuators. A scene with
 // none gets one torque motor per `class="motor"` joint spliced in just before
 // compile, so the canonical XML is never edited. The motors start unclamped:
-// torque limits come from the loaded checkpoint's training config
+// torque limits come from the loaded policy's training config
 // (applyTorqueLimits), not from the robot model, whose limits are hardware
 // maxima that usually differ from what the policy was trained with.
 
@@ -41,7 +41,7 @@ export function withActuatorOverlay(mujoco, filename) {
  * Sets each policy actuator's torque cap (N*m) from `limits` (aligned with
  * ctrlAdr). A null `limits` removes the cap: the viewer only clamps when
  * ctrlrange has min < max, so 0/0 means unlimited. Always called on policy
- * load so one checkpoint's limits never leak into the next.
+ * load so one policy's limits never leak into the next.
  */
 export function applyTorqueLimits(model, ctrlAdr, limits) {
   ctrlAdr.forEach((actuator, i) => {

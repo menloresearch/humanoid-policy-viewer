@@ -1,17 +1,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { cellSeed, mulberry32 } from './rng.js';
 import { ROW_FEATURES, rowToSequence, sequenceToRow, validateTestRow } from './testRow.js';
-import { buildEvalYaml, compatibilityProblems, expandCells, parseSuite, selectTests } from './suite.js';
+import { buildEvalYaml, compatibilityProblems, expandCells, parseBenchmark, selectTests } from './settings.js';
 import { computeTasks, summarizeTests } from './summary.js';
 import { BENCHMARK_PROTOCOL } from './protocol.js';
-import { isPushCategory } from '../simulation/benchmarkReport.js';
 import { goalOutcome } from '../simulation/metrics.js';
 
-const FIXTURE = new URL('../../test/fixtures/smoke-suite/', import.meta.url).pathname;
+const FIXTURE = new URL('../../test/fixtures/smoke-benchmark/', import.meta.url).pathname;
 
 function row(id, extra = {}) {
   const [config] = id.split('/');
@@ -26,16 +25,16 @@ const push = (t, force) => ({
   t, type: 'push', dir: [1, 0], force, duration: 0.15, targetBody: null, torqueAxis: null, torqueMag: null, label: null,
 });
 
-function suite(extra = {}) {
-  return parseSuite({
-    suite: 's', version: 2, harness: { protocol: BENCHMARK_PROTOCOL }, requires: { robot: { name: 'asimov-1' } },
+function benchmark(extra = {}) {
+  return parseBenchmark({
+    name: 's', version: 2, harness: { protocol: BENCHMARK_PROTOCOL }, requires: { robot: { name: 'asimov-1' } },
     tests: [{ config: 'loco' }, { config: 'push' }],
     tasks: [{ id: 'survival_rate', metric: 'survival_rate@1' }],
     ...extra,
   });
 }
 
-test('seeds depend only on suite seed, test id and repeat', () => {
+test('seeds depend only on benchmark seed, test id and repeat', () => {
   assert.equal(cellSeed(0, 'a/b', 1), cellSeed(0, 'a/b', 1));
   assert.notEqual(cellSeed(0, 'a/b', 1), cellSeed(0, 'a/b', 2));
   assert.notEqual(cellSeed(0, 'a/b', 1), cellSeed(1, 'a/b', 1));
@@ -47,7 +46,7 @@ test('seeds depend only on suite seed, test id and repeat', () => {
 });
 
 test('a row survives the editor round trip (row -> sequence -> row)', async () => {
-  const { readRows } = await import('../../scripts/suiteDir.mjs');
+  const { readRows } = await import('../../scripts/benchmarkDir.mjs');
   const { rows } = readRows(FIXTURE);
   assert.ok(rows.length >= 2);
   for (const original of rows) {
@@ -64,7 +63,7 @@ test('a new category is just a new id prefix', () => {
 });
 
 test('a terrain test keeps its course through the editor and is checked before a run', async () => {
-  const { checkTests } = await import('../../scripts/suiteCheck.mjs');
+  const { checkTests } = await import('./check.js');
   const { defaultTerrain } = await import('../simulation/terrainGen.js');
   const stairs = defaultTerrain('stairs');
   const onStairs = row('loco/stairs', { terrain: stairs });
@@ -75,9 +74,9 @@ test('a terrain test keeps its course through the editor and is checked before a
   assert.ok(validateTestRow(row('loco/a', { terrain: 'terrain/stairs_5cm.xml' })).some((e) => e.includes('terrain')));
   assert.ok(validateTestRow(row('loco/a', { terrain: { ...stairs, steps: 0 } })).some((e) => e.includes('terrain: steps')));
 
-  const s = suite({ tests: [{ config: 'loco' }] });
+  const s = benchmark({ tests: [{ config: 'loco' }] });
   const onSpawn = row('loco/spawn', { terrain: { ...stairs, start_m: 0 } });
-  const { errors, warnings } = checkTests({ suite: s, rows: [onStairs, onSpawn] });
+  const { errors, warnings } = checkTests({ benchmark: s, rows: [onStairs, onSpawn] });
   assert.equal(errors.length, 1);
   assert.match(errors[0], /^loco\/spawn: the course reaches x = 0\.00 m, inside the spawn area/);
   // row() walks 0.5 m/s for 4 s: it reaches the stairs but not their end; that is not a warning
@@ -107,21 +106,16 @@ test('row validation catches bad rows', () => {
   assert.deepEqual(validateTestRow(row('loco/a', { events: [push(1.85, 100)] })), []);
 });
 
-test('push categories, old and new naming', () => {
-  for (const cat of ['push_standing', 'push_walking', 'push/standing', 'push']) assert.ok(isPushCategory(cat), cat);
-  for (const cat of ['locomotion', 'pushover', 'general']) assert.ok(!isPushCategory(cat), cat);
-});
-
-test('suite validation lists every problem at once', () => {
+test('benchmark validation lists every problem at once', () => {
   assert.throws(
-    () => parseSuite({ suite: 's', version: 0, harness: {}, requires: {}, tests: [], tasks: [{ id: 'x_v1', metric: 'nope' }] }),
+    () => parseBenchmark({ name: 's', version: 0, harness: {}, requires: {}, tests: [], tasks: [{ id: 'x_v1', metric: 'nope' }] }),
     (error) => ['version', 'protocol', 'tests', '_v<n>', 'nope'].every((part) => error.message.includes(part)),
   );
-  assert.throws(() => suite({ tasks: [{ id: 'x_v2', metric: 'survival_rate@1', scope: { tier: 'reasonable' } }] }), /scope.tier is unknown/);
+  assert.throws(() => benchmark({ tasks: [{ id: 'x_v2', metric: 'survival_rate@1', scope: { tier: 'reasonable' } }] }), /scope.tier is unknown/);
 });
 
 test('protocol and robot mismatches are reported', () => {
-  const s = suite({ harness: { protocol: BENCHMARK_PROTOCOL + 1, tested_commit: 'abc' }, requires: { robot: { name: 'g1' } } });
+  const s = benchmark({ harness: { protocol: BENCHMARK_PROTOCOL + 1, tested_commit: 'abc' }, requires: { robot: { name: 'g1' } } });
   const problems = compatibilityProblems(s);
   assert.equal(problems.length, 2);
   assert.match(problems[0], /abc/);
@@ -129,14 +123,14 @@ test('protocol and robot mismatches are reported', () => {
 
 test('{ all: true } selects every test, including new categories', () => {
   const rows = [row('loco/a'), row('brand_new/b')];
-  const s = suite({ tests: [{ all: true }] });
+  const s = benchmark({ tests: [{ all: true }] });
   assert.deepEqual(selectTests(s, rows).map(({ row: r }) => r.id), ['loco/a', 'brand_new/b']);
-  assert.throws(() => suite({ tests: [{ all: true, config: 'loco' }] }), /exactly one of id, config or all/);
+  assert.throws(() => benchmark({ tests: [{ all: true, config: 'loco' }] }), /exactly one of id, config or all/);
 });
 
 test('selection merges overrides and refuses identical repeats', () => {
   const rows = [row('loco/a'), row('loco/b'), row('push/c', { events: [push(1, 100)] })];
-  const s = suite({
+  const s = benchmark({
     defaults: { repeats: 3, randomize: { action_delay: 'env_range' } },
     tests: [{ config: 'loco' }, { id: 'loco/b', repeats: 1 }, { config: 'push' }],
   });
@@ -148,9 +142,9 @@ test('selection merges overrides and refuses identical repeats', () => {
   assert.equal(expandCells(selected, { only: ['loco/b'], repeats: 2 }).length, 2);
   assert.throws(() => expandCells(selected, { only: ['loco/zzz'] }), /Unknown test/);
 
-  const noRandom = suite({ defaults: { repeats: 2 } });
+  const noRandom = benchmark({ defaults: { repeats: 2 } });
   assert.throws(() => selectTests(noRandom, rows), /identical/);
-  assert.throws(() => selectTests(suite({ tests: [{ config: 'missing' }] }), rows), /matches no test/);
+  assert.throws(() => selectTests(benchmark({ tests: [{ config: 'missing' }] }), rows), /matches no test/);
   // A run's tests (tests=<id> narrows them) are a subset, so summarizing re-selects without requiring matches.
   const ran = [rows[1]];
   assert.throws(() => selectTests(s, ran), /matches no test/);
@@ -162,7 +156,7 @@ const ran = (fellAt = null) => ({ fell: { fell: fellAt !== null, time: fellAt } 
 test('survival metrics: repeats are averaged, categories weigh equally, errors count as falls', () => {
   // loco: 2 tests; push: 1 test with a tag. duration is 4 s.
   const rows = [row('loco/a'), row('loco/b'), row('push/c', { tags: ['walking'], events: [push(1, 100)] })];
-  const s = suite({
+  const s = benchmark({
     defaults: { repeats: 4, randomize: { action_delay: 'env_range' } },
     tasks: [
       { id: 'survival_rate', metric: 'survival_rate@1' },
@@ -202,7 +196,7 @@ test('survival metrics: repeats are averaged, categories weigh equally, errors c
 });
 
 test('a test survived on every repeat still has an uncertainty', () => {
-  const s = suite({ defaults: { repeats: 5, randomize: { action_delay: 'env_range' } }, tests: [{ config: 'loco' }] });
+  const s = benchmark({ defaults: { repeats: 5, randomize: { action_delay: 'env_range' } }, tests: [{ config: 'loco' }] });
   const cells = [0, 1, 2, 3, 4].map((repeat) => ({ testId: 'loco/a', repeat, metrics: ran() }));
   const [task] = computeTasks(s, summarizeTests(cells, selectTests(s, [row('loco/a')])));
   assert.equal(task.value, 1);
@@ -211,15 +205,15 @@ test('a test survived on every repeat still has an uncertainty', () => {
 });
 
 test('metrics must name a version; aggregate and pass_rule are no longer settings', () => {
-  assert.throws(() => suite({ tasks: [{ id: 'x', metric: 'survival_rate' }] }), /must name a version, e\.g\. "survival_rate@1"/);
-  assert.throws(() => suite({ tasks: [{ id: 'x', metric: 'upright_rate@1' }] }), /unknown; known: survival_rate@1/);
-  assert.throws(() => suite({ defaults: { pass_rule: 'fraction' } }), /defaults\.pass_rule is not a setting.*part of each metric/);
-  assert.throws(() => suite({ tests: [{ config: 'loco', aggregate: 'mean' }] }), /tests\[0\]\.aggregate is not a setting/);
-  assert.throws(() => suite({ tasks: [{ id: 'x', metric: 'survival_rate@1', scope: { body: 'pelvis' } }] }), /scope\.body is unknown/);
+  assert.throws(() => benchmark({ tasks: [{ id: 'x', metric: 'survival_rate' }] }), /must name a version, e\.g\. "survival_rate@1"/);
+  assert.throws(() => benchmark({ tasks: [{ id: 'x', metric: 'upright_rate@1' }] }), /unknown; known: survival_rate@1/);
+  assert.throws(() => benchmark({ defaults: { pass_rule: 'fraction' } }), /defaults\.pass_rule is not a setting.*part of each metric/);
+  assert.throws(() => benchmark({ tests: [{ config: 'loco', aggregate: 'mean' }] }), /tests\[0\]\.aggregate is not a setting/);
+  assert.throws(() => benchmark({ tasks: [{ id: 'x', metric: 'survival_rate@1', scope: { body: 'pelvis' } }] }), /scope\.body is unknown/);
 });
 
 test('eval.yaml tasks carry the version and their dataset config', () => {
-  const s = suite({ tasks: [{ id: 'survival_rate', metric: 'survival_rate@1' }, { id: 'push', metric: 'survival_rate@1', scope: { config: 'push' } }] });
+  const s = benchmark({ tasks: [{ id: 'survival_rate', metric: 'survival_rate@1' }, { id: 'push', metric: 'survival_rate@1', scope: { config: 'push' } }] });
   assert.deepEqual(buildEvalYaml(s, { name: 'N', description: 'D' }).tasks, [
     { id: 'survival_rate_v2', config: 'all', split: 'test' },
     { id: 'push_v2', config: 'push', split: 'test' },
@@ -227,45 +221,60 @@ test('eval.yaml tasks carry the version and their dataset config', () => {
   assert.ok(validateTestRow(row('all/x')).some((e) => e.includes('reserved')));
 });
 
-test('suite init writes a valid starter benchmark', async () => {
-  const { initSuite } = await import('../../scripts/suite.mjs');
-  const { loadSuiteDir } = await import('../../scripts/suiteDir.mjs');
+test('the tracked default benchmark is valid', async () => {
+  const { loadBenchmarkDir, defaultBenchmarkDir } = await import('../../scripts/benchmarkDir.mjs');
+  const { checkTests } = await import('./check.js');
+  const loaded = loadBenchmarkDir(defaultBenchmarkDir(new URL('../../', import.meta.url).pathname));
+  assert.equal(loaded.benchmark.name, 'default');
+  assert.deepEqual(compatibilityProblems(loaded.benchmark), []);
+  assert.deepEqual(checkTests(loaded), { errors: [], warnings: [] });
+});
+
+test('benchmark init copies the default benchmark', async () => {
+  const { initBenchmark } = await import('../../scripts/benchmarkInit.mjs');
+  const { loadBenchmarkDir } = await import('../../scripts/benchmarkDir.mjs');
   const dir = join(mkdtempSync(join(tmpdir(), 'hpv-init-')), 'my-bench');
-  initSuite(dir, { log: () => {} });
-  const loaded = loadSuiteDir(dir);
-  assert.equal(loaded.suite.suite, 'my-bench');
-  assert.deepEqual(compatibilityProblems(loaded.suite), []);
+  initBenchmark(dir, { log: () => {} });
+  const loaded = loadBenchmarkDir(dir);
+  assert.equal(loaded.benchmark.name, 'my-bench');
+  assert.equal(loaded.rawBenchmark.title, 'my-bench');
+  assert.match(readFileSync(join(dir, 'README.md'), 'utf8'), /^# my-bench\n/);
+  assert.deepEqual(compatibilityProblems(loaded.benchmark), []);
   assert.deepEqual(loaded.rows.map((r) => r.id).sort(), ['locomotion/circle_walk', 'locomotion/forward_walk', 'push_standing/four_directions_100n']);
-  assert.equal(expandCells(selectTests(loaded.suite, loaded.rows)).length, 15);
+  assert.equal(expandCells(selectTests(loaded.benchmark, loaded.rows)).length, 15);
   const pushes = loaded.rows.find((r) => r.id === 'push_standing/four_directions_100n').events;
   assert.deepEqual(pushes.map((e) => e.dir), [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0]]);
   assert.ok(pushes.every((e) => e.force === 100));
-  assert.throws(() => initSuite(dir, { log: () => {} }), /not empty/);
+  // A lap of the circle ends back at the start.
+  assert.deepEqual(loaded.rows.find((r) => r.id === 'locomotion/circle_walk').goal, { x: 0.02, y: 0, radius_m: 0.75 });
+  assert.throws(() => initBenchmark(dir, { log: () => {} }), /not empty/);
 
   const empty = join(dirname(dir), 'empty-bench');
-  initSuite(empty, { log: () => {}, title: 'Push: "hard" cases', exampleTest: false });
-  const blank = loadSuiteDir(empty);
-  assert.equal(blank.rawSuite.title, 'Push: "hard" cases');
+  initBenchmark(empty, { log: () => {}, title: 'Push: "hard" $& cases', exampleTest: false });
+  const blank = loadBenchmarkDir(empty);
+  assert.equal(blank.rawBenchmark.title, 'Push: "hard" $& cases');
+  assert.equal(blank.rawBenchmark.description, 'Describe what this benchmark measures.');
+  assert.match(readFileSync(join(empty, 'README.md'), 'utf8'), /^# Push: "hard" \$& cases\n\nDescribe what this benchmark measures\./);
   assert.deepEqual(blank.rows, []);
 });
 
 test('checkTests: player errors stop a run, unselected tests are flagged', async () => {
-  const { checkTests } = await import('../../scripts/suiteCheck.mjs');
-  const s = suite({ tests: [{ config: 'loco' }] });
+  const { checkTests } = await import('./check.js');
+  const s = benchmark({ tests: [{ config: 'loco' }] });
   const late = push(1, 100);
   late.dir = [0, 0];
-  const result = checkTests({ suite: s, rows: [row('loco/a'), row('loco/b', { events: [late] }), row('other/c')] });
+  const result = checkTests({ benchmark: s, rows: [row('loco/a'), row('loco/b', { events: [late] }), row('other/c')] });
   assert.equal(result.errors.length, 1);
   assert.match(result.errors[0], /loco\/b: .*dir/);
   assert.match(result.warnings.join('\n'), /never run: other\/c/);
 });
 
-test('the smoke-suite fixture is valid', async () => {
-  const { loadSuiteDir } = await import('../../scripts/suiteDir.mjs');
-  const loaded = loadSuiteDir(FIXTURE);
+test('the smoke-benchmark fixture is valid', async () => {
+  const { loadBenchmarkDir } = await import('../../scripts/benchmarkDir.mjs');
+  const loaded = loadBenchmarkDir(FIXTURE);
   assert.ok(loaded.rows.length >= 2);
-  assert.deepEqual(compatibilityProblems(loaded.suite), []);
-  assert.ok(expandCells(selectTests(loaded.suite, loaded.rows)).length >= 2);
+  assert.deepEqual(compatibilityProblems(loaded.benchmark), []);
+  assert.ok(expandCells(selectTests(loaded.benchmark, loaded.rows)).length >= 2);
 });
 
 test('an end zone: the run must enter it to count as surviving', () => {
@@ -274,7 +283,7 @@ test('an end zone: the run must enter it to count as surviving', () => {
   assert.ok(validateTestRow(row('terrain/a', { goal: { x: 7, radius_m: 1, z: 0 } })).some((e) => e.includes('"z"')));
 
   const rows = [row('terrain/a', { goal: { x: 5, y: 0, radius_m: 1 } })];
-  const s = suite({ defaults: { repeats: 3, randomize: { action_delay: 'env_range' } }, tests: [{ config: 'terrain' }] });
+  const s = benchmark({ defaults: { repeats: 3, randomize: { action_delay: 'env_range' } }, tests: [{ config: 'terrain' }] });
   const walked = (path, fellAt = null) => ({ ...ran(fellAt), topDown: { actual: path } });
   const cells = [
     { testId: 'terrain/a', repeat: 0, metrics: walked([[0, 0], [2, 0], [4.2, 0.3]]) }, // inside the zone

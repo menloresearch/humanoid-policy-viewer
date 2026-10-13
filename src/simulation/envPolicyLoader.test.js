@@ -39,7 +39,7 @@ async function withFetchAndWarnings(run) {
   }
 }
 
-test('the bundled example checkpoint gets its training settings from the env.yaml beside its onnx', async () => {
+test('the bundled example policy gets its training settings from the env.yaml beside its onnx', async () => {
   await withFetchAndWarnings(async ({ requested }) => {
     const settings = await loadEnvPolicySettings(BUNDLED_ONNX, reference.policy_joint_names);
     assert.deepEqual(requested, [
@@ -52,15 +52,15 @@ test('the bundled example checkpoint gets its training settings from the env.yam
   });
 });
 
-test('a model-library checkpoint looks for env.yaml in its model folder, or in the root when the onnx sits directly in it', async () => {
+test('a policy-library policy looks for env.yaml in its policy folder, or in the root when the onnx sits directly in it', async () => {
   await withFetchAndWarnings(async ({ requested, warnings }) => {
-    await loadEnvPolicySettings('/model-library/hf/Menlo__x/exported/policy.onnx', reference.policy_joint_names);
-    await loadEnvPolicySettings('/model-library/my-run/policy.onnx', reference.policy_joint_names);
+    await loadEnvPolicySettings('/policy-library/hf/Menlo__x/exported/policy.onnx', reference.policy_joint_names);
+    await loadEnvPolicySettings('/policy-library/my-run/policy.onnx', reference.policy_joint_names);
     assert.deepEqual(requested, [
-      '/model-library/hf/Menlo__x/params/env.yaml',
-      '/model-library/hf/Menlo__x/env.yaml',
-      '/model-library/my-run/params/env.yaml',
-      '/model-library/my-run/env.yaml'
+      '/policy-library/hf/Menlo__x/params/env.yaml',
+      '/policy-library/hf/Menlo__x/env.yaml',
+      '/policy-library/my-run/params/env.yaml',
+      '/policy-library/my-run/env.yaml'
     ]);
     assert.equal(warnings.length, 2, 'a missing env.yaml is reported for both');
   });
@@ -77,11 +77,11 @@ test('the reference config points at the bundled onnx and lists the joints in th
   assert.deepEqual(reference.policy_joint_names, trained);
 });
 
-test('a bundled policy with no env.yaml loads silently, a model-library one warns', async () => {
+test('a bundled policy with no env.yaml loads silently, a policy-library one warns', async () => {
   await withFetchAndWarnings(async ({ warnings }) => {
     assert.equal(await loadEnvPolicySettings('./examples/checkpoints/other/policy.onnx', reference.policy_joint_names), null);
     assert.equal(warnings.length, 0);
-    assert.equal(await loadEnvPolicySettings('/model-library/models/m/policy.onnx', reference.policy_joint_names), null);
+    assert.equal(await loadEnvPolicySettings('/policy-library/policies/m/policy.onnx', reference.policy_joint_names), null);
     assert.equal(warnings.length, 1);
     assert.match(warnings[0], /no env\.yaml found/);
   });

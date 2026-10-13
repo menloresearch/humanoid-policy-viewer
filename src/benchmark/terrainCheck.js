@@ -1,5 +1,5 @@
 // Checks a test's terrain against where the robot starts and where its
-// commands send it. Used before a benchmark runs (scripts/suiteCheck.mjs) and
+// commands send it. Used before a benchmark runs (scripts/benchmarkCheck.mjs) and
 // live in the trajectory editor.
 //
 //   error:   the course overlaps the spawn area, so the robot would start

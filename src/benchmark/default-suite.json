@@ -1,5 +1,0 @@
-{
-  "description": "The benchmark dataset `npm run benchmark` uses when no suite is given; none is released yet. Set `dataset` (org/name) and bump the revision (a release tag or commit) in its own commit when a new suite version is released.",
-  "dataset": null,
-  "revision": null
-}

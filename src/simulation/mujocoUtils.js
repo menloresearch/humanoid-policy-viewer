@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Reflector } from './utils/Reflector.js';
 import { PolicyRunner } from './policyRunner.js';
 import { toFloatArray } from './utils/math.js';
-import { loadCheckpointPolicyConfig, loadEnvPolicySettings } from './envPolicyConfig.js';
+import { loadOwnPolicyConfig, loadEnvPolicySettings } from './envPolicyConfig.js';
 import { setActiveCommandLimits } from './commandSequencer.js';
 import { applyTorqueLimits, withActuatorOverlay } from './sceneOverlay.js';
 
@@ -87,6 +87,7 @@ export async function reloadScene(mjcf_path) {
   this.scene.remove(this.scene.getObjectByName('MuJoCo Root'));
   const mujoco = this.mujoco;
   console.log('Loading scene:', mjcf_path);
+  await stageSceneFolder(mujoco, mjcf_path);
 
   [this.model, this.data, this.simulation, this.bodies, this.lights] =
     await loadSceneFromURL(mujoco, mjcf_path, this);
@@ -150,10 +151,10 @@ async function reloadPolicyUnguarded(policy_path, options = {}) {
   }
   let config = await response.json();
   if (options?.onnxPath) {
-    // Fields a checkpoint declares in its own tracking_policy.json replace the
+    // Fields a policy declares in its own tracking_policy.json replace the
     // base config's (onnx is merged one level deep so its path still follows
-    // the checkpoint). Checkpoints without one are loaded exactly as before.
-    const own = await loadCheckpointPolicyConfig(options.onnxPath);
+    // the policy). Policies without one are loaded exactly as before.
+    const own = await loadOwnPolicyConfig(options.onnxPath);
     if (own) {
       config = { ...config, ...own, onnx: { ...(config.onnx ?? {}), ...(own.onnx ?? {}) } };
     }
@@ -611,9 +612,34 @@ function configureJointMappings(demo, jointNames) {
   demo.defaultJposPolicy.fill(0.0);
 }
 
-export async function downloadExampleScenesFolder(mujoco) {
-  const response = await fetch('./examples/scenes/files.json');
-  const allFiles = await response.json();
+let sceneIndex = null; // examples/scenes/files.json, fetched once
+const stagedFolders = new WeakMap(); // mujoco -> Map(folder -> promise of its copy)
+
+/**
+ * Copies the scene folder holding `scenePath` (its first segment under
+ * examples/scenes/, e.g. asimov-1/) into MuJoCo's /working/, once per mujoco
+ * instance. Only that folder is fetched: the others (g1/) cost nothing until a
+ * scene in them is loaded.
+ */
+export async function stageSceneFolder(mujoco, scenePath) {
+  const folder = scenePath.split('/')[0] + '/';
+  if (!stagedFolders.has(mujoco)) stagedFolders.set(mujoco, new Map());
+  const staged = stagedFolders.get(mujoco);
+  if (!staged.has(folder)) {
+    staged.set(folder, copySceneFolder(mujoco, folder).catch((error) => {
+      staged.delete(folder);
+      throw error;
+    }));
+  }
+  await staged.get(folder);
+}
+
+async function copySceneFolder(mujoco, folder) {
+  sceneIndex ??= fetch('./examples/scenes/files.json').then((response) => response.json()).catch((error) => {
+    sceneIndex = null;
+    throw error;
+  });
+  const allFiles = (await sceneIndex).filter((file) => file.startsWith(folder));
 
   const requests = allFiles.map((url) => fetch('./examples/scenes/' + url));
   const responses = await Promise.all(requests);

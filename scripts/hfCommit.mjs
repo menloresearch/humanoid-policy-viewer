@@ -6,10 +6,12 @@
 // retried once as a pull request. Used for model .eval_results uploads and for
 // publishing benchmark datasets.
 
+import { explainAuthError, hubToken, requireToken } from './hfAuth.mjs';
+
 const RETRY_AS_PR_STATUS = [401, 403, 409, 412];
 
 export function hubCredentials(env = process.env) {
-  const accessToken = env.HF_TOKEN || env.HUGGING_FACE_HUB_TOKEN || null;
+  const accessToken = hubToken(env).token;
   const hubUrl = (env.HF_ENDPOINT || 'https://huggingface.co').replace(/\/+$/, '');
   return { accessToken, hubUrl };
 }
@@ -56,10 +58,12 @@ export async function commitFiles({
   hub = null,
   log = () => {},
 }) {
+  requireToken(env, `Uploading to ${repo.name}`);
   const { accessToken, hubUrl } = hubCredentials(env);
-  if (!accessToken) throw new Error('Uploading needs a Hugging Face token: run `hf auth login` or set HF_TOKEN');
   const lib = hub ?? await loadHub();
-  const who = await whoAmIOrNull({ accessToken, hubUrl, hub: lib });
+  const who = await whoAmIOrNull({ accessToken, hubUrl, hub: lib }).catch((error) => {
+    throw explainAuthError(error, env, `Uploading to ${repo.name}`);
+  });
   const decision = decideCommitMode(who, repo.name, { forcePr });
   log(`Writing to ${repo.type === 'dataset' ? 'datasets/' : ''}${repo.name} as ${who?.name ?? 'unknown'}: ${decision.mode === 'pr' ? 'pull request' : 'direct commit'} (${decision.reason})`);
 

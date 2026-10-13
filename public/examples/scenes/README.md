@@ -3,6 +3,9 @@
 MJCF files + meshes staged into MuJoCo's in-browser filesystem. Every file
 used by a scene must be listed in `files.json` (regenerate it with
 `python3 generate_index.py` after adding files) or the loader won't fetch it.
+A scene must keep everything it uses inside its top folder (`asimov-1/`, `g1/`):
+loading a scene fetches only that folder (`stageSceneFolder` in
+`src/simulation/mujocoUtils.js`), once.
 
 ## `asimov-1/` — the Asimov robot (git submodule)
 
@@ -20,7 +23,7 @@ either way.
 `asimov_1.xml` defines no actuators (the training sim adds them in Python).
 `src/simulation/sceneOverlay.js` splices one torque motor per `class="motor"`
 joint into the XML in memory just before it is compiled. Those motors start
-unclamped: each checkpoint's torque limits come from the `effort_limit` in its
+unclamped: each policy's torque limits come from the `effort_limit` in its
 training `env.yaml` (applied on policy load), because the robot model's own
 limits are hardware maxima that usually differ from what a policy trained with.
 
