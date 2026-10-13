@@ -27,9 +27,9 @@
           <v-window-item value="form">
             <div v-if="form">
               <div class="text-caption text-medium-emphasis mb-3">
-                These settings are how <code>npm run benchmark</code> runs and scores this benchmark (repeats,
-                seeds, randomisation, leaderboard tasks). The viewer's Run button plays each test once and does
-                not use them.
+                These settings are how this benchmark is run and scored (repeats, seeds, randomisation,
+                leaderboard tasks), by <code>npm run benchmark</code> and by <b>Run Benchmark</b> here alike.
+                Playing a single test does not use them.
               </div>
 
               <v-text-field v-model="form.title" label="Title" density="compact" variant="outlined" hide-details class="mb-3" />

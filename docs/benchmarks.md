@@ -100,7 +100,7 @@ tags: [humanoid, locomotion]       # added to the card after humanoid-policy-vie
 harness:
   repo: https://github.com/menloresearch/humanoid-policy-viewer
   protocol: 1                      # the viewer's BENCHMARK_PROTOCOL this benchmark was validated with
-  tested_commit: <viewer commit>   # set by `npm run hf publish`: the viewer commit that checked this benchmark
+  tested_commit: <viewer commit>   # set by `npm run benchmark init` and `npm run hf publish`: the viewer commit that checked this benchmark
 requires: { robot: { name: asimov-1 }, policy_interface: velocity-command }
 defaults:
   repeats: 5
@@ -146,8 +146,8 @@ Keys left out of `defaults` take these values:
 
 `npm run benchmark init` (and a new benchmark in the viewer) starts from `repeats: 5`, `seed: 0`,
 `randomize: { action_delay: env_range, initial_joint_noise_rad: 0.02 }`, `timeout_s: 600`, `tests: [{ all: true }]`,
-the tasks `survival_rate` and `survival_time`, `version: 1` and `requires: { robot: asimov-1, policy_interface:
-velocity-command }`. A test entry can override `repeats`; a later entry wins over an earlier one.
+the tasks `survival_rate` and `survival_time`, `version: 1` and `requires: { robot: { name: asimov-1 },
+policy_interface: velocity-command }`. A test entry can override `repeats`; a later entry wins over an earlier one.
 
 ### Metrics and repeats
 
@@ -248,8 +248,8 @@ forward walk, a 1 m radius circle walk, and one test with four 100 N chest pushe
 
 Or start in the viewer: the **Tests & Benchmark** panel lists every benchmark the dev server knows (the one
 `npm run dev` opened and each folder under `./benchmarks/`). **New benchmark** asks for a
-folder name and an optional title and creates an empty `./benchmarks/<name>/` (gitignored) (`HPV_BENCHMARKS_DIR` moves that
-folder); **Add test** inside an open benchmark opens the editor, and Save writes into that benchmark. Click a
+folder name and an optional title and creates `./benchmarks/<name>/` (gitignored) from the starter `benchmark.yaml` and
+README, with no tests (`HPV_BENCHMARKS_DIR` moves that folder); **Add test** inside an open benchmark opens the editor, and Save writes into that benchmark. Click a
 benchmark to open it, double-click it to run its tests. The folder is the same working copy `npm run benchmark init` makes, so
 `npm run benchmark <policy> ./benchmarks/<name>` and `npm run hf publish` work on it as above.
 
@@ -261,8 +261,8 @@ The gear on a benchmark's row in **Tests & Benchmark** opens **Benchmark setting
   noise), the `tests` selection (all tests, a category or one test, each with an optional repeats override) and the
   leaderboard `tasks` (id, metric, an optional category or tag scope). A scope that is not a plain category or tag
   is shown read-only and kept as written.
-- **benchmark.yaml** tab: the file itself, for anything the form does not cover (`harness`, `requires`,
-  `reference_policies`). Saving here replaces the file with this text, so form changes not yet saved are dropped.
+- **benchmark.yaml** tab: the file itself, for anything the form does not cover (`license`, `tags`, `harness`,
+  `requires`, `reference_policies`). Saving here replaces the file with this text, so form changes not yet saved are dropped.
 - Saving applies the same checks as `npm run benchmark`. An invalid result is not written and every problem is
   listed. A selector that matches no test in the benchmark is a warning: the file is written and the dialog stays
   open to show it. If the file changed on disk after the dialog loaded it, the save is refused; reopen the dialog.
@@ -283,12 +283,15 @@ and a side profile, with the same spawn error and path warnings `npm run benchma
 the course overlaps the spawn. **Apply to viewer** loads the course into the 3D view.
 
 To appear as a Hub benchmark, `eval.yaml`'s `evaluation_framework: humanoid-policy-viewer` must be in the Hub's
-list of frameworks (a pull request to `huggingface/huggingface.js`, `packages/tasks/src/eval.ts`), and the
+list of frameworks (a pull request to `huggingface/huggingface.js`, `packages/tasks/src/eval.ts`; or the field
+omitted, since an unknown value makes the Hub reject `eval.yaml`), and the
 dataset must be allow-listed by Hugging Face (beta). Until then results still land in model repos; they just are
 not aggregated into a leaderboard.
 
 Until both are done, each model repo's `.eval_results` file shows a Hub banner per entry, `Task ID "survival_rate_v1"
-does not match any task in dataset "org/bench". Available: none`. The entries are fine: the Hub did not read the
-dataset's `eval.yaml` (an unknown framework leaves the dataset without the `benchmark:eval-yaml` tag, which
-registered benchmarks such as `Idavidrein/gpqa` carry), so it knows no tasks. The banner clears once the framework
-is registered and the dataset's `eval.yaml` is re-read; push a new commit to the dataset if it does not.
+does not match any task in dataset "org/bench". Available: none`. The entries are fine: the Hub reads the dataset's
+`eval.yaml` but rejects it, because `evaluation_framework: humanoid-policy-viewer` is not a framework it knows (it
+accepts a known one, or none), so the dataset registers no tasks and carries no `benchmark:eval-yaml` tag (the Hub
+derives that tag from a valid `eval.yaml`; registered benchmarks such as `Idavidrein/gpqa` have it). The banner
+clears once the framework is registered and the dataset's `eval.yaml` is re-read; push a new commit to the dataset
+if it does not.
