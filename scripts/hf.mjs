@@ -43,9 +43,10 @@ Verbs, for a benchmark dataset on the Hub:
                                            writes <dir>/baseline.md
   publish <dir> [repo=<org/name>] [base=<rev>] [pr] [create] [dry-run]
                                            check against main (or base=, which must still be main), build
-                                           eval.yaml + the dataset card, then commit and tag v<version>
-                                           (owner) or open a pull request; "create" makes a new PRIVATE
-                                           dataset repo
+                                           eval.yaml + the dataset card, then commit (owner), tagged
+                                           v<version> when that version is new, or open a pull request
+                                           (tag it with release after merging); "create" makes a new
+                                           PRIVATE dataset repo
   release <dataset> rev=<commit>           tag a revision v<version> (a merged pull request)
 
   repo= is the dataset (org/name); it can be left out for a folder made by pull.
