@@ -22,7 +22,7 @@ import { BENCHMARK_FILE, defaultBenchmarkDir } from './benchmarkDir.mjs';
 import { classifyTarget } from './benchmarkTargets.mjs';
 import { HF_POLICY_ROOT, defaultCacheDir, ensurePolicy, normalizeRepoId } from './hfPolicy.mjs';
 import { checkPolicyDir, readReferenceJointNames } from './policyChecks.mjs';
-import { DEFAULT_POLICY_ROOT } from './policyLibraryConfig.mjs';
+import { DEFAULT_POLICY_ROOT, readEnv } from './policyLibraryConfig.mjs';
 import { pull, pulledFrom } from './hfBenchmark.mjs';
 
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -49,7 +49,7 @@ export async function startViewer({
   if (policyLibrary) {
     options.policyLibraryDir = resolve(policyLibrary.dir);
     options.policyRoots = policyLibrary.roots;
-  } else if (env.HPV_POLICY_LIBRARY_DIR === undefined && env.HPV_POLICY_ROOTS === undefined) {
+  } else if (readEnv(env, 'HPV_POLICY_LIBRARY_DIR', log) === undefined && readEnv(env, 'HPV_POLICY_ROOTS', log) === undefined) {
     options.policyLibraryDir = linkedLibrary(cacheDir);
     options.policyRoots = [DEFAULT_POLICY_ROOT, HF_POLICY_ROOT];
   }
