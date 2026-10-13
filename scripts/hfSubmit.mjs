@@ -5,7 +5,9 @@
 // repo, straight to main when the token's owner owns the repo's namespace,
 // otherwise (or with pr) as a pull request. Only results that can be reproduced
 // are submitted; uploadBlockers decides from what result.json recorded at run
-// time, so a result cannot be made submittable after the fact.
+// time (benchmark source, uncommitted changes), so a blocked result is rerun,
+// not resubmitted. result.json is plain JSON, so this is a guard against
+// mistakes, not proof of where a result came from.
 // It imports npm packages, so scripts/hf.mjs loads it after setup().
 
 import { existsSync, readFileSync, statSync } from 'node:fs';

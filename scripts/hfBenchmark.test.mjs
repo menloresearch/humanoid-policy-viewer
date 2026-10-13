@@ -325,6 +325,8 @@ test('submit refuses a result on a local benchmark and says why', async () => {
   run.provenance.hpv.dirty = true;
   await assert.rejects(() => submit(writeResult(run), { dryRun: true }, fake.io), /Not submitted: me\/model/);
   assert.match(fake.output(), /Not submitted:\n {4}- the benchmark is a local folder[^]*uncommitted changes/);
+  // A real submit is refused the same way, before anything reaches the repo (only the seed commit).
+  await assert.rejects(() => submit(writeResult(run), {}, fake.io), /Not submitted: me\/model/);
   assert.equal(fake.model('me/model').commits.size, 1);
 });
 

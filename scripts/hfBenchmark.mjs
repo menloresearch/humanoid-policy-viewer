@@ -39,9 +39,6 @@ function viewerCheckout() {
   return { commit, dirty, public: onPublicRepo(appDir, commit) };
 }
 
-// Where the Hub is. Tests pass a fake one: env (HF_ENDPOINT, HF_TOKEN), fetchImpl,
-// hub (the @huggingface/hub functions used), cacheDir and log; and viewer, this
-// checkout as viewerCheckout() describes it.
 /** true or false for a typed answer; null when there is no terminal to ask on. */
 async function askYesNo(question) {
   if (!process.stdin.isTTY) return null;
@@ -53,6 +50,9 @@ async function askYesNo(question) {
   }
 }
 
+// Where the Hub is. Tests pass a fake one: env (HF_ENDPOINT, HF_TOKEN), fetchImpl,
+// hub (the @huggingface/hub functions used), cacheDir, log and confirm; and viewer,
+// this checkout as viewerCheckout() describes it.
 function hubIo(io = {}) {
   return { env: process.env, fetchImpl: fetch, hub: null, cacheDir: undefined, log: console.log, confirm: askYesNo, viewer: viewerCheckout, ...io };
 }
