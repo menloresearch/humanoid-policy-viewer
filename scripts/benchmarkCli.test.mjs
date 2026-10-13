@@ -25,7 +25,10 @@ test('words, key=value options and flags', () => {
   assert.throws(() => parseWords(['jobs=1', 'jobs=2'], { keys: ['jobs'] }), /twice/);
   // A path containing "=" is a positional, not an option.
   assert.deepEqual(parseWords(['./a=b/model'], { keys: [] }).positionals, ['./a=b/model']);
-  assert.deepEqual(swallowedNpmFlags({ npm_config_pr: 'true', npm_config_no_upload: '' }, ['pr', 'no-upload', 'watch']), ['pr', 'no-upload']);
+  assert.deepEqual(swallowedNpmFlags({ npm_config_pr: 'true' }, ['pr', 'watch']), ['pr']);
+  // What npm really sets: `--no-open` -> npm_config_open='', `--verbose` -> npm_config_loglevel=verbose (the default is notice).
+  assert.deepEqual(swallowedNpmFlags({ npm_config_open: '', npm_config_loglevel: 'verbose' }, ['no-open', 'verbose', 'watch']), ['no-open', 'verbose']);
+  assert.deepEqual(swallowedNpmFlags({ npm_config_loglevel: 'notice' }, ['no-open', 'verbose']), []);
 });
 
 test('a "--" word is refused with the words form to write instead', () => {
