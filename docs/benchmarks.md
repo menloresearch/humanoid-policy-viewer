@@ -286,3 +286,9 @@ To appear as a Hub benchmark, `eval.yaml`'s `evaluation_framework: humanoid-poli
 list of frameworks (a pull request to `huggingface/huggingface.js`, `packages/tasks/src/eval.ts`), and the
 dataset must be allow-listed by Hugging Face (beta). Until then results still land in model repos; they just are
 not aggregated into a leaderboard.
+
+Until both are done, each model repo's `.eval_results` file shows a Hub banner per entry, `Task ID "survival_rate_v1"
+does not match any task in dataset "org/bench". Available: none`. The entries are fine: the Hub did not read the
+dataset's `eval.yaml` (an unknown framework leaves the dataset without the `benchmark:eval-yaml` tag, which
+registered benchmarks such as `Idavidrein/gpqa` carry), so it knows no tasks. The banner clears once the framework
+is registered and the dataset's `eval.yaml` is re-read; push a new commit to the dataset if it does not.
