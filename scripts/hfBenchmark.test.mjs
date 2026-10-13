@@ -401,7 +401,7 @@ test('a blank license: is on purpose: publish warns and asks; no (or no terminal
   assert.equal(no.result, 'published');
   assert.equal(no.card.license, undefined);
   assert.ok(no.warnings.some((line) => /blank license/.test(line)));
-  assert.match(no.questions[0], /Use bsd-3-clause instead\? \[y\/N\]/); // "no" does not cancel here
+  assert.match(no.questions[0], /Use bsd-3-clause instead\? \(N to publish with no license\)/); // "no" does not cancel here
 
   const noTerminal = await publishAsking(fake, blank(), 'me/blank-pipe', null);
   assert.equal(noTerminal.result, 'published');

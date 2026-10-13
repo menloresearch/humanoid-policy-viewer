@@ -127,8 +127,8 @@ version bump.
 A new benchmark (`npm run benchmark init`, **New benchmark**) starts with no `license:` line, so that its first
 `hf publish` asks. If `license:` is missing, `hf publish` warns and asks `Use bsd-3-clause instead? (N to cancel this workflow to specify your own)`: yes publishes with
 `bsd-3-clause`, no cancels before anything is uploaded (with no terminal to ask on, it cancels too). A blank
-`license:` means no license on purpose: it warns and asks the same question, but no (or no terminal) publishes without
-one. `dry-run` never asks.
+`license:` means no license on purpose: it warns and asks `Use bsd-3-clause instead? (N to publish with no license)`:
+yes uses `bsd-3-clause`, no (or no terminal) goes ahead and publishes without one. `dry-run` never asks.
 
 The simulation is deterministic, so `repeats > 1` only makes sense with something randomised; the runner refuses
 otherwise. A scope narrows a task to `config`, `id` and/or `tag` (a test's tags);

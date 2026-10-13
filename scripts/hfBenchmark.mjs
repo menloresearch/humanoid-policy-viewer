@@ -77,9 +77,9 @@ async function chooseLicense(raw, { confirm, log }, dryRun) {
     return blank ? null : DEFAULT_LICENSE;
   }
   // With no key, "no" cancels, so the prompt says how to choose another license; a blank key publishes without one.
-  const answer = await confirm(blank
-    ? `Use ${DEFAULT_LICENSE} instead? [y/N] `
-    : `Use ${DEFAULT_LICENSE} instead? (N to cancel this workflow to specify your own) `);
+  const answer = await confirm(`Use ${DEFAULT_LICENSE} instead? ${blank
+    ? '(N to publish with no license)'
+    : '(N to cancel this workflow to specify your own)'} `);
   if (answer) return DEFAULT_LICENSE;
   if (blank) return null;
   throw new Error(answer === null
