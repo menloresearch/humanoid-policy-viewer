@@ -46,6 +46,9 @@ async function withLiveness(task, message, log, everyMs = LIVENESS_MS) {
  * @param policies    policyKey -> { onnxPath } as the page should load it
  * @param sequences   testId -> sequence object (rowToSequence)
  * @param onResult    called with (job, cell, result) for each cell as its job finishes
+ *
+ * A page that dies and cannot be reopened retires its worker; the other pages finish the queue.
+ * Only if none is left do the remaining cells come back as errors, so the run still has a result.
  */
 export async function runJobs({
   url,
@@ -58,8 +61,9 @@ export async function runJobs({
   verbose = false,
   onResult,
   log = console.log,
+  chromium = null, // tests pass a fake
 }) {
-  const { chromium } = await import('@playwright/test');
+  if (!chromium) ({ chromium } = await import('@playwright/test'));
   const queue = jobs.slice();
   // The page draws only when someone watches: a visible browser or a real-time run (as runBenchmarkGroupOnPage).
   const draw = !headless || realtime;
@@ -96,6 +100,8 @@ export async function runJobs({
     // A policy that cannot be loaded fails all its cells at once, instead of
     // each one waiting for a load that will fail the same way.
     const unloadable = new Map();
+    // Why a worker had to stop, if one did; the reason for the jobs no page was left to run.
+    let lostPages = null;
 
     const worker = async (firstPage) => {
       let page = firstPage;
@@ -136,12 +142,20 @@ export async function runJobs({
           outcome = { error: message, metrics: null };
           // The page may be wedged or have lost its policy; start a fresh one.
           await page.close().catch(() => {});
-          page = await withLiveness(openPage, 'Reopening a page', log);
           lastPolicyKey = null;
+          try {
+            page = await withLiveness(openPage, 'Reopening a page', log);
+          } catch (reopenError) {
+            // This worker is done; the others keep taking jobs from the queue.
+            page = null;
+            lostPages = `could not reopen a page: ${(reopenError?.message || String(reopenError)).split('\n')[0]}`;
+            log(`[worker] ${lostPages}; its jobs go to the other pages`);
+          }
         }
         // A group shares its wall time; each cell is charged its share.
         const wallMs = Math.round((Date.now() - started) / cells.length);
         finish((i) => ({ ...(outcome.results ? outcome.results[i] : outcome), wallMs }));
+        if (!page) return;
       }
       await page.close().catch(() => {});
     };
@@ -153,6 +167,10 @@ export async function runJobs({
       return [first, ...others];
     }, 'Loading the viewer', log);
     await Promise.all(pages.map((page) => worker(page)));
+    // Only when every page was lost is anything left; report those cells so result.json is still written.
+    for (const job of queue.splice(0)) {
+      job.cells.forEach((cell) => onResult(job, cell, { error: lostPages, metrics: null, wallMs: 0 }));
+    }
     return { browserVersion };
   } finally {
     await browser.close();
