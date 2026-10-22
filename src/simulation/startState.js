@@ -20,7 +20,7 @@ export const FALLBACK_INIT_STATE = { pos: [0, 0, 0.614], rot: [1, 0, 0, 0], lin_
 // Joint damping (N*m*s/rad) while the robot settles: limp, but not so free
 // that joints swing for seconds.
 export const SETTLE_JOINT_DAMPING = 0.5;
-export const DEFAULT_SETTLE_S = 2.5;
+export const DEFAULT_SETTLE_S = 1;
 export const MAX_SETTLE_S = 10;
 
 // Lying on its back: pitched 90 degrees backwards about y, so the chest faces up,

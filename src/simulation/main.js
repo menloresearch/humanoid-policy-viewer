@@ -48,6 +48,8 @@ export class MuJoCoDemo {
     this.actionDelayBuffer = [];
     this.maxRawAction = 0;
     this.fallen = false;
+    // Policy ticks of a live drop and settle still to run (resetSimulation).
+    this.settleTicksLeft = 0;
     // How the viewer's Reset starts the robot: a start override in env.yaml
     // init_state shape (null = the policy's own) and the drop-and-settle
     // seconds (null = off). A benchmark test passes its own.
@@ -654,6 +656,7 @@ export class MuJoCoDemo {
         actionDelayBuffer: [],
         benchmarkRandomization: null,
         fallen: false,
+        settleTicksLeft: 0,
         _activePushes: [],
         idealPath: new IdealPathTracker(),
         lastSimState: { bodies: new Map() },
@@ -848,6 +851,10 @@ export class MuJoCoDemo {
    */
   async _stepRobot(robot) {
     const sim = robot.simulation;
+    if (robot.settleTicksLeft > 0) {
+      this._stepSettling(robot);
+      return true;
+    }
 
     // Integrate the idealized command path and sample both traces. Uses the
     // same command the policy sees this tick; CoM is read from raw MjData.
@@ -1175,35 +1182,62 @@ export class MuJoCoDemo {
   }
 
   /**
-   * Drop and settle: steps `robot` for `seconds` with no motor torque and
-   * light joint damping, so it comes to rest where gravity puts it, then
-   * zeroes its velocities. Nothing else moves the sim meanwhile (no policy,
-   * pushes or command clock).
+   * Drop and settle lasts whole policy ticks, so it is the same physics
+   * whether it runs inside a reset (benchmarks) or live, one tick at a time
+   * (the viewer).
    */
-  _settle(robot, seconds) {
+  _settleTicks(seconds) {
+    return seconds > 0 ? Math.max(1, Math.round(seconds / (this.timestep * this.decimation))) : 0;
+  }
+
+  /** One physics step of drop and settle: no motor torque, light joint damping. */
+  _settleSubstep(robot) {
     const sim = robot.simulation;
-    const steps = Math.round(seconds / this.timestep);
-    for (let step = 0; step < steps; step++) {
-      sim.ctrl.fill(0);
-      sim.qfrc_applied.fill(0);
-      for (let i = 0; i < this.numActions; i++) {
-        const adr = this.qvel_adr_policy[i];
-        sim.qfrc_applied[adr] = -SETTLE_JOINT_DAMPING * sim.qvel[adr];
-      }
-      sim.step();
+    sim.ctrl.fill(0);
+    sim.qfrc_applied.fill(0);
+    for (let i = 0; i < this.numActions; i++) {
+      const adr = this.qvel_adr_policy[i];
+      sim.qfrc_applied[adr] = -SETTLE_JOINT_DAMPING * sim.qvel[adr];
     }
+    sim.step();
+  }
+
+  /** Ends drop and settle: the robot at rest where it came down. */
+  _endSettle(robot) {
+    const sim = robot.simulation;
     sim.qfrc_applied.fill(0);
     sim.qvel.fill(0);
     sim.forward();
   }
 
   /**
+   * One policy tick of a live drop and settle (the viewer's Reset): the
+   * robot stays limp and the policy is not run. On the last tick the
+   * policy takes over from rest, with its history started afresh.
+   */
+  _stepSettling(robot) {
+    for (let substep = 0; substep < this.decimation; substep++) this._settleSubstep(robot);
+    robot.settleTicksLeft -= 1;
+    if (robot.settleTicksLeft === 0) {
+      this._endSettle(robot);
+      robot.actionTarget = null;
+      robot.filteredActionTarget = null;
+      robot.rawActions = null;
+      robot.policyRunner?.reset(this.readPolicyState(robot));
+      this.reanchorIdealPath(robot);
+    }
+    robot.fallen = hasFailed(this, robot);
+  }
+
+  /**
    * Puts `robot` back at the start: the policy's init_state with `start`
    * (env.yaml init_state shape, see startState.js) applied, then, with
-   * `settleS`, left limp for that many seconds before the policy takes over.
-   * Without options it uses the viewer's own start settings (viewerStart).
+   * `settleS`, left limp for that many seconds before the policy takes over:
+   * inside this call, or with `settleLive` over the next policy ticks, so the
+   * viewer shows the drop. Without options it uses the viewer's own start
+   * settings (viewerStart).
    */
-  resetSimulation(robot = this, { start = this.viewerStart.start, settleS = this.viewerStart.settleS } = {}) {
+  resetSimulation(robot = this, { start = this.viewerStart.start, settleS = this.viewerStart.settleS, settleLive = false } = {}) {
     if (!robot.simulation) {
       return;
     }
@@ -1233,7 +1267,12 @@ export class MuJoCoDemo {
     }
 
     sim.forward();
-    if (settleS > 0) this._settle(robot, settleS);
+    const settleTicks = this._settleTicks(settleS);
+    robot.settleTicksLeft = settleLive ? settleTicks : 0;
+    if (!settleLive && settleTicks > 0) {
+      for (let step = 0; step < settleTicks * this.decimation; step++) this._settleSubstep(robot);
+      this._endSettle(robot);
+    }
     robot.actionTarget = null;
     robot.filteredActionTarget = null;
     robot.rawActions = null;

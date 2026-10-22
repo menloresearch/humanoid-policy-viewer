@@ -445,7 +445,7 @@
             <div><b>Pull force:</b> {{ telemetry.pullForce }}N (peak: {{ telemetry.peakPullForce }}N)</div>
             <div><b>Max action:</b> {{ telemetry.maxAction }}</div>
             <div><b>Gyro mag:</b> {{ telemetry.gyroMag }} rad/s</div>
-            <div><b>Grav:</b> {{ telemetry.gravX }} {{ telemetry.gravY }} {{ telemetry.gravZ }} <span :style="{color: telemetry.fallen ? '#ff4444' : '#44ff44', fontWeight: 'bold'}">{{ telemetry.fallen ? 'FALLEN' : 'OK' }}</span></div>
+            <div><b>Grav:</b> {{ telemetry.gravX }} {{ telemetry.gravY }} {{ telemetry.gravZ }} <span :style="{color: telemetry.settling ? '#ffaa00' : telemetry.fallen ? '#ff4444' : '#44ff44', fontWeight: 'bold'}">{{ telemetry.settling ? 'SETTLING' : telemetry.fallen ? 'FALLEN' : 'OK' }}</span></div>
             <div><b>Peak gyro:</b> {{ telemetry.peakGyro }} rad/s</div>
             <div><b>Joint vel RMS:</b> {{ telemetry.jointVelRms }} rad/s</div>
             <div><b>Action jitter:</b> {{ telemetry.actionJitter }}</div>
@@ -1094,6 +1094,7 @@ export default {
       gravY: '0.00',
       gravZ: '-1.00',
       fallen: false,
+      settling: false,
       peakGyro: '0.00',
       tumbling: false,
       torques: [],
@@ -1666,7 +1667,8 @@ export default {
         start: START_PRESETS.find((p) => p.value === this.startPreset)?.start ?? null,
         settleS: this.settleOn ? Number(this.settleSeconds) : null,
       };
-      this.demo.resetSimulation();
+      // The viewer shows the drop: it settles over the next policy ticks, not inside Reset.
+      this.demo.resetSimulation(this.demo, { settleLive: true });
       this._peakGyroValue = 0;
       this.telemetry.peakGyro = '0.00';
       this._peakPullForceValue = 0;
@@ -2478,6 +2480,7 @@ export default {
         this.telemetry.gravY = f(gravYval);
         this.telemetry.gravZ = f(gravZval);
         this.telemetry.fallen = this.demo.fallen || false;
+        this.telemetry.settling = this.demo.settleTicksLeft > 0;
         if (gyroMag > this._peakGyroValue) {
           this._peakGyroValue = gyroMag;
           this.telemetry.peakGyro = f(gyroMag);
