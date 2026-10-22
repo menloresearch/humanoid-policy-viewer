@@ -5,6 +5,7 @@ import { toFloatArray } from './utils/math.js';
 import { loadOwnPolicyConfig, loadEnvPolicySettings } from './envPolicyConfig.js';
 import { setActiveCommandLimits } from './commandSequencer.js';
 import { applyTorqueLimits, withActuatorOverlay } from './sceneOverlay.js';
+import { FALLBACK_INIT_STATE } from './startState.js';
 
 const MOTION_INDEX_FORMAT = 'tracking-motion-index-v1';
 
@@ -211,6 +212,12 @@ async function reloadPolicyUnguarded(policy_path, options = {}) {
     }
     this.defaultJposPolicy = new Float32Array(configDefaultJointPos);
   }
+  // Where a run starts (startState.js): env.yaml's init_state, or the
+  // fallback pose in the default joint pose for a policy without one.
+  this.initStatePolicy = {
+    ...(config.init_state ?? FALLBACK_INIT_STATE),
+    joint_pos: Array.from(this.defaultJposPolicy ?? new Float32Array(this.numActions)),
+  };
   this.kpPolicy = toFloatArray(config.stiffness, this.numActions, 0.0);
   this.kdPolicy = toFloatArray(config.damping, this.numActions, 0.0);
   this.kdFfPolicy = Array.isArray(config.kd_ff) ? toFloatArray(config.kd_ff, this.numActions, 0.0) : null;

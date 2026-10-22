@@ -23,6 +23,7 @@ import { explainAuthError, requireToken } from './hfAuth.mjs';
 import { commitFiles, hubCredentials } from './hfCommit.mjs';
 import { BENCHMARK_FILES, ensureDataset, fetchDatasetInfo, hubSettings } from './hfDataset.mjs';
 import { checkTests } from '../src/benchmark/check.js';
+import { rowToHub } from '../src/benchmark/testRow.js';
 import { hubFiles, loadBenchmarkDir, readYamlFile } from './benchmarkDir.mjs';
 
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -272,6 +273,15 @@ export async function baseline(dir, policies, { repo, base: rev } = {}, io) {
   io.log(`\n${text}\nWrote ${join(dir, 'baseline.md')}`);
 }
 
+/** A test.jsonl's text with every row in its published form (rowToHub); rows without a start are left as written. */
+export function hubRowsText(text) {
+  return text.split('\n').map((line) => {
+    if (!line.trim()) return line;
+    const row = JSON.parse(line);
+    return row.start && typeof row.start === 'object' ? JSON.stringify(rowToHub(row)) : line;
+  }).join('\n');
+}
+
 // eval.yaml and README.md are built by hubFiles(), never taken from disk.
 function publishableFiles(dir) {
   const files = [];
@@ -331,7 +341,10 @@ export async function publish(dir, { repo, base: rev, pr = false, create = false
   const files = [
     ...publishableFiles(dir).map((path) => {
       const content = readFileSync(join(dir, path), 'utf8');
-      return { path, content: path === 'benchmark.yaml' ? withTestedCommit(content, viewer.commit) : content };
+      if (path === 'benchmark.yaml') return { path, content: withTestedCommit(content, viewer.commit) };
+      // Each row's start as JSON text, the type the dataset card declares (testRow.js).
+      if (path.endsWith('/test.jsonl')) return { path, content: hubRowsText(content) };
+      return { path, content };
     }),
     ...hubFiles(loaded, { previousEvalYaml }),
   ];

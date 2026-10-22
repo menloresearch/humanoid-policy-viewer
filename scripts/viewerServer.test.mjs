@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { RESULT_SCHEMA, planCells, cellResult } from '../src/benchmark/run.js';
 import { parseBenchmark } from '../src/benchmark/settings.js';
 import { viewerServer } from './viewerServer.mjs';
+import { BENCHMARK_PROTOCOL } from '../src/benchmark/protocol.js';
 
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const tempDirs = [];
@@ -115,7 +116,7 @@ test('a Run is saved as <timestamp>/result.json with server provenance, then lis
     assert.ok(existsSync(join(viewer.resultsDir, dirname(saved.json.file), 'report.html')));
 
     const result = JSON.parse(readFileSync(join(viewer.resultsDir, saved.json.file), 'utf8'));
-    assert.equal(result.provenance.hpv.protocol, 1);
+    assert.equal(result.provenance.hpv.protocol, BENCHMARK_PROTOCOL);
     assert.equal(result.provenance.runtime.node, process.version);
     assert.equal(result.provenance.runtime.chromium, '140.0.0.0');
     const [recorded] = result.policies;

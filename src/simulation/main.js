@@ -5,6 +5,8 @@ import { createSimulationWrapper, getPosition, getQuaternion, toMujocoPos, reloa
 import { commandSequencer } from './commandSequencer.js';
 import { asimovCommandState } from './observationHelpers.js';
 import { IdealPathTracker, yawFromQuat } from './idealPath.js';
+import { hasFailed } from './benchmarkRunner.js';
+import { resolveStartState, SETTLE_JOINT_DAMPING, worldToBody } from './startState.js';
 
 const defaultPolicy = "./examples/checkpoints/asimov/reference_policy_config.json";
 // The canonical Asimov model from the asimov-1 submodule; see
@@ -19,6 +21,9 @@ const defaultScene = "asimov-1/sim-model/xmls/asimov_1.xml";
 const EXTRA_ROBOT_LAYER = 1;
 const EXTRA_ROBOT_OPACITY = 0.35;
 const FALLEN_ROBOT_OPACITY = 0.15;
+// DAMP: joint gains while the Damp button holds the robot (the policy is not run).
+const DAMP_KP = 10.0;
+const DAMP_KD = 3.0;
 const EXTRA_ROBOT_TINTS = [0x4fc3f7, 0xffb74d, 0xba68c8, 0x81c784];
 
 export class MuJoCoDemo {
@@ -45,6 +50,16 @@ export class MuJoCoDemo {
     this.actionDelayLag = 0;
     this.actionDelayBuffer = [];
     this.maxRawAction = 0;
+    this.fallen = false;
+    // Policy ticks of a live drop and settle still to run (resetSimulation).
+    this.settleTicksLeft = 0;
+    // DAMP instead of the policy (setDamp); a reset turns it off.
+    this.damp = false;
+    // How the viewer's Reset starts the robot: a start override in env.yaml
+    // init_state shape (null = the policy's own) and the drop-and-settle
+    // seconds (null = off). A benchmark test passes its own.
+    this.viewerStart = { start: null, settleS: null };
+    this.initStatePolicy = null;
     this.rawActions = null;
     this.model = null;
     this.data = null;
@@ -645,7 +660,9 @@ export class MuJoCoDemo {
         actionDelayLag: 0,
         actionDelayBuffer: [],
         benchmarkRandomization: null,
-        _tumbling: false,
+        fallen: false,
+        settleTicksLeft: 0,
+        damp: false,
         _activePushes: [],
         idealPath: new IdealPathTracker(),
         lastSimState: { bodies: new Map() },
@@ -840,6 +857,10 @@ export class MuJoCoDemo {
    */
   async _stepRobot(robot) {
     const sim = robot.simulation;
+    if (robot.settleTicksLeft > 0) {
+      this._stepSettling(robot);
+      return true;
+    }
 
     // Integrate the idealized command path and sample both traces. Uses the
     // same command the policy sees this tick; CoM is read from raw MjData.
@@ -852,37 +873,17 @@ export class MuJoCoDemo {
       );
     }
 
-    // Tumble/fall detection BEFORE policy inference
-    const gyroMag = Math.abs(sim.qvel[3] || 0)
-                  + Math.abs(sim.qvel[4] || 0)
-                  + Math.abs(sim.qvel[5] || 0);
-
-    // Compute projected gravity z in body frame from quaternion
-    // quat = [w, x, y, z] at qpos[3:7]
-    const qw = sim.qpos[3], qx = sim.qpos[4];
-    const qy = sim.qpos[5], qz = sim.qpos[6];
-    // gravity_z_body = R^T * [0,0,-1] dot [0,0,1] = -(1 - 2(qx²+qy²))
-    const gravZ = -(1.0 - 2.0 * (qx * qx + qy * qy));
-
-    // Fall detection: gravity_z > -0.866 means >30° tilt → DAMP mode
-    if (gravZ > -0.166) robot._tumbling = true;
-
-    if (robot._tumbling) {
-      // DAMP mode: skip policy, hold current positions with KP=10 KD=3
-      if (!robot.actionTarget) {
-        robot.actionTarget = new Float32Array(this.numActions);
-      }
-      for (let i = 0; i < this.numActions; i++) {
-        const qpos_adr = this.qpos_adr_policy[i];
-        robot.actionTarget[i] = sim.qpos[qpos_adr];
-      }
-      if (robot.filteredActionTarget) {
-        robot.filteredActionTarget.set(robot.actionTarget);
-      } else {
-        robot.filteredActionTarget = new Float32Array(robot.actionTarget);
-      }
+    if (robot.damp) {
+      // DAMP (the viewer's Damp button): the policy is not run; each joint is
+      // held where it is with weak gains (DAMP_KP, DAMP_KD), so the robot goes
+      // limp but slowly.
+      robot.actionTarget = Float32Array.from(this.qpos_adr_policy, (adr) => sim.qpos[adr]);
+      robot.filteredActionTarget = new Float32Array(robot.actionTarget);
     } else {
-      // Normal mode: run policy
+      // The policy keeps control whatever the robot's pose: a fall is recorded
+      // (robot.fallen, set after the physics substeps) but never stops the
+      // policy, so policies that act while falling or lying down (safe-fall,
+      // get-up) run as trained.
       const state = this.readPolicyState(robot);
       try {
         robot.actionTarget = await robot.policyRunner.step(state);
@@ -892,7 +893,7 @@ export class MuJoCoDemo {
         return false;
       }
 
-      // Track raw action magnitudes — DAMP if any action saturates
+      // Track raw action magnitudes for the telemetry panel
       if (robot.actionTarget) {
         robot.rawActions = robot.actionTarget;
         let maxAbs = 0;
@@ -901,7 +902,6 @@ export class MuJoCoDemo {
           if (abs > maxAbs) maxAbs = abs;
         }
         robot.maxRawAction = maxAbs;
-        if (maxAbs > 100.0) robot._tumbling = true;
       }
 
       // Jitter computation at policy rate (50Hz) — 3rd finite difference (jerk)
@@ -977,9 +977,7 @@ export class MuJoCoDemo {
 
     for (let substep = 0; substep < this.decimation; substep++) {
       const sourceTarget = robot.filteredActionTarget ?? robot.actionTarget;
-      const delayedActionTarget = robot._tumbling
-        ? sourceTarget
-        : this.getDelayedActionTarget(sourceTarget, robot);
+      const delayedActionTarget = robot.damp ? sourceTarget : this.getDelayedActionTarget(sourceTarget, robot);
 
       if (this.control_type === 'joint_position') {
         for (let i = 0; i < this.numActions; i++) {
@@ -988,17 +986,17 @@ export class MuJoCoDemo {
           const ctrl_adr = this.ctrl_adr_policy[i];
 
           const targetJpos = delayedActionTarget ? delayedActionTarget[i] : 0.0;
-          const kp = robot._tumbling ? 10.0 : (this.kpPolicy ? this.kpPolicy[i] : 0.0);
+          const kp = robot.damp ? DAMP_KP : (this.kpPolicy ? this.kpPolicy[i] : 0.0);
           const vel = sim.qvel[qvel_adr];
 
           // When feedforward damping is configured, split kd into kd_hw and kd_ff
           const hasFf = this.kdFfPolicy !== null && this.kdFfPolicy !== undefined;
-          const kd = robot._tumbling ? 3.0 : (this.kdPolicy ? this.kdPolicy[i] : 0.0);
-          const kd_hw = robot._tumbling ? 3.0 : (hasFf ? Math.min(kd, 5.0) : kd);
+          const kd = robot.damp ? DAMP_KD : (this.kdPolicy ? this.kdPolicy[i] : 0.0);
+          const kd_hw = hasFf && !robot.damp ? Math.min(kd, 5.0) : kd;
           let torque = kp * (targetJpos - sim.qpos[qpos_adr]) + kd_hw * (0 - vel);
 
-          // Feedforward damping (only when kd_ff array is provided, skip in DAMP mode)
-          if (hasFf && !robot._tumbling) {
+          // Feedforward damping (only when kd_ff array is provided, not in DAMP)
+          if (hasFf && !robot.damp) {
             const kd_ff = this.kdFfPolicy[i] ?? 0.0;
             if (kd_ff > 0) {
               const tau_ff = Math.max(-30, Math.min(30, -kd_ff * vel));
@@ -1074,6 +1072,9 @@ export class MuJoCoDemo {
       sim.step();
     }
 
+    // Whether the robot is down right now, by the benchmark's fall criterion.
+    // Not latched: a robot that gets back up reads as standing again.
+    robot.fallen = hasFailed(this, robot);
     return true;
   }
 
@@ -1194,32 +1195,114 @@ export class MuJoCoDemo {
     };
   }
 
-  resetSimulation(robot = this) {
+  /**
+   * Switches `robot` to DAMP (no policy, joints held weakly where they are)
+   * or back to the policy, which then starts afresh from the current state.
+   */
+  setDamp(on, robot = this) {
+    if (robot.damp === on) return;
+    robot.damp = on;
+    if (on) return;
+    robot.actionTarget = null;
+    robot.filteredActionTarget = null;
+    robot.rawActions = null;
+    this.resetActionDelay(null, robot);
+    robot.policyRunner?.reset(this.readPolicyState(robot));
+  }
+
+  /**
+   * Drop and settle lasts whole policy ticks, so it is the same physics
+   * whether it runs inside a reset (benchmarks) or live, one tick at a time
+   * (the viewer).
+   */
+  _settleTicks(seconds) {
+    return seconds > 0 ? Math.max(1, Math.round(seconds / (this.timestep * this.decimation))) : 0;
+  }
+
+  /** One physics step of drop and settle: no motor torque, light joint damping. */
+  _settleSubstep(robot) {
+    const sim = robot.simulation;
+    sim.ctrl.fill(0);
+    sim.qfrc_applied.fill(0);
+    for (let i = 0; i < this.numActions; i++) {
+      const adr = this.qvel_adr_policy[i];
+      sim.qfrc_applied[adr] = -SETTLE_JOINT_DAMPING * sim.qvel[adr];
+    }
+    sim.step();
+  }
+
+  /** Ends drop and settle: the robot at rest where it came down. */
+  _endSettle(robot) {
+    const sim = robot.simulation;
+    sim.qfrc_applied.fill(0);
+    sim.qvel.fill(0);
+    sim.forward();
+  }
+
+  /**
+   * One policy tick of a live drop and settle (the viewer's Reset): the
+   * robot stays limp and the policy is not run. On the last tick the
+   * policy takes over from rest, with its history started afresh.
+   */
+  _stepSettling(robot) {
+    for (let substep = 0; substep < this.decimation; substep++) this._settleSubstep(robot);
+    robot.settleTicksLeft -= 1;
+    if (robot.settleTicksLeft === 0) {
+      this._endSettle(robot);
+      robot.actionTarget = null;
+      robot.filteredActionTarget = null;
+      robot.rawActions = null;
+      robot.policyRunner?.reset(this.readPolicyState(robot));
+      this.reanchorIdealPath(robot);
+    }
+    robot.fallen = hasFailed(this, robot);
+  }
+
+  /**
+   * Puts `robot` back at the start: the policy's init_state with `start`
+   * (env.yaml init_state shape, see startState.js) applied, then, with
+   * `settleS`, left limp for that many seconds before the policy takes over:
+   * inside this call, or with `settleLive` over the next policy ticks, so the
+   * viewer shows the drop. Without options it uses the viewer's own start
+   * settings (viewerStart).
+   */
+  resetSimulation(robot = this, { start = this.viewerStart.start, settleS = this.viewerStart.settleS, settleLive = false } = {}) {
     if (!robot.simulation) {
       return;
     }
     this.params.paused = true;
-    robot.simulation.resetData();
-    robot._tumbling = false;
+    const sim = robot.simulation;
+    sim.resetData();
+    robot.fallen = false;
+    robot.damp = false;
 
-    // Apply keyframe: set root height and joint positions
-    // Freejoint qpos: [x, y, z, qw, qx, qy, qz] at indices 0-6
-    robot.simulation.qpos[2] = 0.614;  // standing height (shallow crouch)
-    robot.simulation.qpos[3] = 1.0;    // quat w (upright)
-    robot.simulation.qpos[4] = 0.0;
-    robot.simulation.qpos[5] = 0.0;
-    robot.simulation.qpos[6] = 0.0;
-    if (this.defaultJposPolicy && this.qpos_adr_policy) {
+    // Freejoint qpos: [x, y, z, qw, qx, qy, qz]; qvel: world linear velocity,
+    // then angular velocity in the body frame.
+    const initial = resolveStartState(this.initStatePolicy, start, this.policyJointNames ?? []);
+    for (let k = 0; k < 3; k++) sim.qpos[k] = initial.pos[k];
+    for (let k = 0; k < 4; k++) sim.qpos[3 + k] = initial.rot[k];
+    const angVelBody = worldToBody(initial.rot, initial.angVel);
+    for (let k = 0; k < 3; k++) {
+      sim.qvel[k] = initial.linVel[k];
+      sim.qvel[3 + k] = angVelBody[k];
+    }
+    if (this.qpos_adr_policy) {
       const noise = robot.benchmarkRandomization?.initialJointNoiseRad || 0;
       const random = robot.benchmarkRandomization?.random;
       for (let i = 0; i < this.numActions; i++) {
-        const qpos_adr = this.qpos_adr_policy[i];
         const offset = noise > 0 && random ? (random() * 2 - 1) * noise : 0;
-        robot.simulation.qpos[qpos_adr] = this.defaultJposPolicy[i] + offset;
+        sim.qpos[this.qpos_adr_policy[i]] = initial.jointPos[i] + offset;
+        sim.qvel[this.qvel_adr_policy[i]] = initial.jointVel[i];
       }
     }
 
-    robot.simulation.forward();
+    sim.forward();
+    const settleTicks = this._settleTicks(settleS);
+    robot.settleTicksLeft = settleLive ? settleTicks : 0;
+    if (!settleLive && settleTicks > 0) {
+      for (let step = 0; step < settleTicks * this.decimation; step++) this._settleSubstep(robot);
+      this._endSettle(robot);
+    }
     robot.actionTarget = null;
     robot.filteredActionTarget = null;
     robot.rawActions = null;
@@ -1267,7 +1350,7 @@ export class MuJoCoDemo {
         }
       }
       // A fallen robot fades further, so the ones still walking stand out.
-      const opacity = robot._tumbling ? FALLEN_ROBOT_OPACITY : EXTRA_ROBOT_OPACITY;
+      const opacity = robot.fallen ? FALLEN_ROBOT_OPACITY : EXTRA_ROBOT_OPACITY;
       if (robot._shownOpacity !== opacity) {
         for (const material of robot.materials) material.opacity = opacity;
         robot._shownOpacity = opacity;

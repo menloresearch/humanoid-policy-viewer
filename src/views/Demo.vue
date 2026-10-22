@@ -40,30 +40,14 @@
       @dblclick="resetPanelWidth"
     ><span class="grip"></span></div>
     <v-card class="controls-card">
-      <v-card-title>Humanoid Policy Viewer</v-card-title>
+      <v-card-title class="pb-0">Humanoid Policy Viewer</v-card-title>
+      <div class="viewer-subtitle">
+        <span class="made-for">made for</span>
+        <a href="https://github.com/menloresearch/cyclotron" target="_blank" rel="noopener">
+          <v-icon icon="mdi-github" size="small"></v-icon>Cyclotron
+        </a>
+      </div>
       <v-card-text class="py-0 controls-body">
-          <v-btn
-            href="https://github.com/menloresearch/humanoid-policy-viewer"
-            target="_blank"
-            variant="text"
-            size="small"
-            color="primary"
-            class="text-capitalize"
-          >
-            <v-icon icon="mdi-github" class="mr-1"></v-icon>
-            Demo Code
-          </v-btn>
-          <v-btn
-            href="https://github.com/menloresearch/cyclotron"
-            target="_blank"
-            variant="text"
-            size="small"
-            color="primary"
-            class="text-capitalize"
-          >
-            <v-icon icon="mdi-github" class="mr-1"></v-icon>
-            Training Code
-          </v-btn>
         <v-divider class="my-2"/>
         <span class="status-name">Policy</span>
         <div v-if="policyDescription" class="text-caption">{{ policyDescription }}</div>
@@ -123,6 +107,24 @@
           ></v-slider>
         </template>
 
+        <v-divider class="my-2"/>
+        <!-- How Reset starts the robot; a benchmark test sets its own -->
+        <v-select
+          v-model="startPreset" :items="START_PRESETS" item-title="title" item-value="value"
+          label="Start pose" density="compact" hide-details class="mb-1"
+          title="Where Reset puts the robot. Policy default is the policy's own start (env.yaml init_state); loading a policy always starts it there"
+        ></v-select>
+        <div class="d-flex align-center ga-2">
+          <v-checkbox
+            v-model="settleOn" label="Drop and settle" density="compact" hide-details
+            title="On Reset, leave the robot limp until it comes to rest before the policy takes over"
+          ></v-checkbox>
+          <v-text-field
+            v-if="settleOn"
+            v-model.number="settleSeconds" label="settle (s)" type="number" min="0.1" :max="MAX_SETTLE_S" step="0.5"
+            density="compact" hide-details="auto" :error-messages="settleError" style="max-width: 110px"
+          ></v-text-field>
+        </div>
         <template v-if="isVelocityCommandPolicy">
           <v-divider class="my-2"/>
           <span class="status-name">Velocity Command</span>
@@ -437,7 +439,11 @@
           ></v-switch>
 
           <v-divider class="my-2"/>
-          <span class="status-name">Telemetry</span>
+          <details>
+          <summary style="cursor:pointer; font-size: 12px;">
+            <b>Telemetry</b>
+            <span :style="{color: robotStatus.color, fontWeight: 'bold', marginLeft: '6px'}">{{ robotStatus.label }}</span>
+          </summary>
           <div class="telemetry-grid mt-1" style="font-family: monospace; font-size: 11px; line-height: 1.4;">
             <div><b>Base vel:</b> x={{ telemetry.vx }} y={{ telemetry.vy }} z={{ telemetry.vz }}</div>
             <div><b>Ang vel:</b> {{ telemetry.wx }} {{ telemetry.wy }} {{ telemetry.wz }}</div>
@@ -445,13 +451,14 @@
             <div><b>Pull force:</b> {{ telemetry.pullForce }}N (peak: {{ telemetry.peakPullForce }}N)</div>
             <div><b>Max action:</b> {{ telemetry.maxAction }}</div>
             <div><b>Gyro mag:</b> {{ telemetry.gyroMag }} rad/s</div>
-            <div><b>Grav:</b> {{ telemetry.gravX }} {{ telemetry.gravY }} {{ telemetry.gravZ }} <span :style="{color: telemetry.fallen ? '#ff4444' : '#44ff44', fontWeight: 'bold'}">{{ telemetry.fallen ? 'FALLEN (DAMP)' : 'OK' }}</span></div>
+            <div><b>Grav:</b> {{ telemetry.gravX }} {{ telemetry.gravY }} {{ telemetry.gravZ }}</div>
             <div><b>Peak gyro:</b> {{ telemetry.peakGyro }} rad/s</div>
             <div><b>Joint vel RMS:</b> {{ telemetry.jointVelRms }} rad/s</div>
             <div><b>Action jitter:</b> {{ telemetry.actionJitter }}</div>
             <div><b>Torque jitter:</b> {{ telemetry.torqueJitter }}</div>
             <div><b>Vel jerk:</b> {{ telemetry.velJerk }} rad/s³</div>
           </div>
+          </details>
           <v-divider class="my-1"/>
           <details>
             <summary style="cursor:pointer; font-size: 12px;"><b>Joint Torques</b></summary>
@@ -469,7 +476,7 @@
               </div>
             </div>
           </details>
-          <details open>
+          <details>
             <summary style="cursor:pointer; font-size: 12px;"><b>L/R Symmetry Debug</b> (Δ=|L+R|, should be ~0)</summary>
             <div style="font-family: monospace; font-size: 10px; line-height: 1.3;">
               <div>Total asymmetry: <b :style="{color: parseFloat(telemetry.lrAsymmetryTotal) > 0.3 ? '#ff4444' : '#44ff44'}">{{ telemetry.lrAsymmetryTotal }}</b></div>
@@ -892,7 +899,11 @@
         ></v-slider>
       </v-card-text>
       <v-card-actions>
-        <v-btn color="primary" block @click="reset">Reset</v-btn>
+        <v-btn
+          :color="damped ? 'success' : 'warning'" variant="tonal" :disabled="state !== 1" @click="toggleDamp"
+          :title="damped ? 'Turn the policy back on, starting from where the robot is now' : 'Stop the policy and hold the joints weakly where they are (DAMP)'"
+        >{{ damped ? 'Resume policy' : 'Damp' }}</v-btn>
+        <v-btn color="primary" variant="tonal" class="flex-grow-1" :disabled="!!settleError" @click="reset">Reset</v-btn>
       </v-card-actions>
     </v-card>
   </div>
@@ -931,6 +942,7 @@ import {
 } from '@/benchmark/run.js';
 import { compatibilityProblems, parseBenchmark } from '@/benchmark/settings.js';
 import { rowToSequence } from '@/benchmark/testRow.js';
+import { DEFAULT_SETTLE_S, MAX_SETTLE_S, START_PRESETS, validateSettle } from '@/simulation/startState.js';
 import { appState, openEditor, newBlankSequence, openResults, setBenchmarkResults } from '@/state/appState.js';
 import { demoRef } from '@/state/demoRef.js';
 import { loadBenchmarkDataset, loadTest, saveTest } from '@/state/testStore.js';
@@ -1056,6 +1068,13 @@ export default {
     playbackError: '',
     playbackWarning: '',
     currentTestFile: null, // on-disk file the loaded test came from
+    // How Reset starts the robot (startState.js).
+    START_PRESETS,
+    MAX_SETTLE_S,
+    startPreset: 'policy_default',
+    settleOn: false,
+    settleSeconds: DEFAULT_SETTLE_S,
+    damped: false, // the Damp button's state (demo.damp)
     minimapError: '0.00',
     telemetry: {
       vx: '0.00', vy: '0.00', vz: '0.00',
@@ -1069,6 +1088,7 @@ export default {
       gravY: '0.00',
       gravZ: '-1.00',
       fallen: false,
+      settling: false,
       peakGyro: '0.00',
       tumbling: false,
       torques: [],
@@ -1084,6 +1104,15 @@ export default {
     _peakPullForceValue: 0
   }),
   computed: {
+    robotStatus() {
+      if (this.damped) return { label: 'DAMP', color: '#ffaa00' };
+      if (this.telemetry.settling) return { label: 'SETTLING', color: '#ffaa00' };
+      if (this.telemetry.fallen) return { label: 'FALLEN', color: '#ff4444' };
+      return { label: 'OK', color: '#44ff44' };
+    },
+    settleError() {
+      return this.settleOn ? (validateSettle(Number(this.settleSeconds))[0] ?? '') : '';
+    },
     appState() {
       return appState;
     },
@@ -1189,7 +1218,7 @@ export default {
       return this.policyCatalog.map((entry) => ({
         value: `lib:${entry.path}`,
         title: entry.label ?? entry.path,
-        description: `Policy ${entry.path} (reference config: ${REFERENCE_POLICY_CONFIG.split('/').pop()})`,
+        description: `${entry.path} (reference config: ${REFERENCE_POLICY_CONFIG.split('/').pop()})`,
         policyPath: REFERENCE_POLICY_CONFIG,
         onnxPath: entry.url,
         supportsVelocityCommands: true
@@ -1352,6 +1381,7 @@ export default {
         demoRef.current = this.demo;
         this.demo.setFollowEnabled?.(this.cameraFollowEnabled);
         await this.demo.init();
+        this.startAtPolicyDefault();
         window.__humanoidViewerDemo = this.demo;
         demoRef.current = this.demo;
         this.syncCommandLimits();
@@ -1612,6 +1642,7 @@ export default {
         await this.demo.reloadPolicy(selected.policyPath, {
           onnxPath: selected.onnxPath || undefined
         });
+        this.startAtPolicyDefault();
         this.syncCommandLimits();
         this.policyLabel = selected.policyPath?.split('/').pop() ?? this.policyLabel;
         this.reapplyCustomMotions();
@@ -1634,7 +1665,13 @@ export default {
       if (!this.demo) {
         return;
       }
-      this.demo.resetSimulation();
+      this.demo.viewerStart = {
+        start: START_PRESETS.find((p) => p.value === this.startPreset)?.start ?? null,
+        settleS: this.settleOn ? Number(this.settleSeconds) : null,
+      };
+      // The viewer shows the drop: it settles over the next policy ticks, not inside Reset.
+      this.demo.resetSimulation(this.demo, { settleLive: true });
+      this.damped = false;
       this._peakGyroValue = 0;
       this.telemetry.peakGyro = '0.00';
       this._peakPullForceValue = 0;
@@ -2394,6 +2431,17 @@ export default {
         this.demo.simulation.qvel[1] += Math.sin(angle) * force;
       }
     },
+    // A newly loaded policy starts at its own start pose (env.yaml init_state),
+    // whatever Reset's Start pose and drop-and-settle settings are.
+    startAtPolicyDefault() {
+      this.demo.resetSimulation(this.demo, { start: null, settleS: null });
+      this.damped = false;
+    },
+    toggleDamp() {
+      if (!this.demo) return;
+      this.demo.setDamp(!this.demo.damp);
+      this.damped = this.demo.damp;
+    },
     resetVelocities() {
       if (!this.demo?.simulation) return;
       const qvel = this.demo.simulation.qvel;
@@ -2445,7 +2493,9 @@ export default {
         this.telemetry.gravX = f(gravXval);
         this.telemetry.gravY = f(gravYval);
         this.telemetry.gravZ = f(gravZval);
-        this.telemetry.fallen = this.demo._tumbling || false;
+        this.telemetry.fallen = this.demo.fallen || false;
+        this.telemetry.settling = this.demo.settleTicksLeft > 0;
+        this.damped = !!this.demo.damp;
         if (gyroMag > this._peakGyroValue) {
           this._peakGyroValue = gyroMag;
           this.telemetry.peakGyro = f(gyroMag);
@@ -2672,6 +2722,33 @@ export default {
 </script>
 
 <style scoped>
+.viewer-subtitle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 16px 4px;
+  font-size: 12px;
+}
+
+.viewer-subtitle .made-for {
+  font-family: Georgia, 'Times New Roman', serif;
+  font-style: italic;
+  opacity: 0.7;
+}
+
+.viewer-subtitle a {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: rgb(var(--v-theme-primary));
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.viewer-subtitle a:hover {
+  text-decoration: underline;
+}
+
 /* Policy picker: a plain checkbox list, no dropdown to open. */
 .policy-picker {
   max-height: 148px;

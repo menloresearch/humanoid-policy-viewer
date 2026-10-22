@@ -246,8 +246,9 @@ async function runBenchmarkCommand(args) {
       log,
       onResult: (job, cell, result) => {
         results.push(cellResult(job.policyKey, cell, result, result.wallMs));
+        const ending = result.metrics?.ending;
         const status = result.error ? `ERROR ${result.error}`
-          : result.metrics?.fell?.fell ? `fell at ${result.metrics.fell.time}s`
+          : ending?.down ? (ending.stood ? `fell at ${ending.last_fall_time}s` : 'never stood up')
           : result.metrics?.goal && !result.metrics.goal.reached ? `upright, missed end zone by ${result.metrics.goal.miss_m ?? '?'} m`
           : 'ok';
         console.log(`[${results.length}/${runCells}] ${policies.find((p) => p.key === job.policyKey).label} ${cell.cellId}: ${status} (${(result.wallMs / 1000).toFixed(1)}s)`);

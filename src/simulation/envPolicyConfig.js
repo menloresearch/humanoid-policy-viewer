@@ -204,6 +204,35 @@ function commandRangesFor(lines) {
   return { command_limits: { vx, vy, wz } };
 }
 
+// A fixed-size vector setting, written as a YAML block list (Isaac Lab's
+// `!!python/tuple` followed by `- x` lines) or a flow list (`[x, y, z]`).
+// Null when absent; throws when present but not `size` numbers.
+function vectorAt(lines, key, size) {
+  const line = lines.find((item) => item.text.startsWith(`${key}:`));
+  if (!line) return null;
+  const inline = line.text.slice(key.length + 1).trim();
+  const items = inline.startsWith('[')
+    ? inline.replace(/^\[|\]$/g, '').split(',').map((item) => item.trim()).filter(Boolean)
+    : listAfter(lines, key);
+  const values = items.map(Number);
+  if (values.length !== size || !values.every(Number.isFinite)) throw new Error(`env.yaml init_state.${key} must be ${size} numbers`);
+  return values;
+}
+
+// The robot's state at reset (init_state): base pose and velocities, and the
+// joint velocities aligned with jointNames. The joint positions are the
+// default pose, read separately as default_joint_pos.
+function initStateFor(initState, jointNames) {
+  const state = {};
+  for (const [key, size] of [['pos', 3], ['rot', 4], ['lin_vel', 3], ['ang_vel', 3]]) {
+    const value = vectorAt(initState, key, size);
+    if (value) state[key] = value;
+  }
+  const jointVel = block(initState, ['joint_vel']);
+  if (jointVel?.length) state.joint_vel = valuesForJoints(directFields(jointVel), jointNames, 'initial joint velocity');
+  return state;
+}
+
 // Children of a YAML block that are themselves maps, as [name, lines] pairs.
 function mapEntries(lines) {
   const entries = [];
@@ -380,9 +409,10 @@ export function parseEnvPolicySettings(yaml, jointNames) {
   const lines = linesOf(yaml);
   const isaac = block(lines, ['scene', 'robot', 'actuators']);
   const mjlab = !isaac && block(lines, ['scene', 'entities', 'robot', 'articulation', 'actuators']);
-  const pose = isaac
-    ? block(lines, ['scene', 'robot', 'init_state', 'joint_pos'])
-    : block(lines, ['scene', 'entities', 'robot', 'init_state', 'joint_pos']);
+  const initState = isaac
+    ? block(lines, ['scene', 'robot', 'init_state'])
+    : block(lines, ['scene', 'entities', 'robot', 'init_state']);
+  const pose = initState && block(initState, ['joint_pos']);
   const action = block(lines, ['actions', 'joint_pos']);
   if (!pose || !action || (!isaac && !mjlab)) throw new Error('env.yaml is missing robot joint pose, actuators, or joint position action');
 
@@ -416,6 +446,7 @@ export function parseEnvPolicySettings(yaml, jointNames) {
     actionScale = valuesForJoints(directFields(action.slice(index + 1, end)), jointNames, 'action scale');
   }
 
+  const defaultJointPos = valuesForJoints(directFields(pose), jointNames, 'default pose');
   const delay = delayForJoints(actuators, jointNames, matchOneActuator);
   const commandRanges = commandRangesFor(lines);
   const torqueLimit = torqueLimitsFor(jointNames, matchOneActuator);
@@ -426,7 +457,8 @@ export function parseEnvPolicySettings(yaml, jointNames) {
     action_scale: actionScale,
     stiffness: jointNames.map((name) => gainFor(name, 'stiffness')),
     damping: jointNames.map((name) => gainFor(name, 'damping')),
-    default_joint_pos: valuesForJoints(directFields(pose), jointNames, 'default pose'),
+    default_joint_pos: defaultJointPos,
+    init_state: { ...initStateFor(initState, jointNames), joint_pos: defaultJointPos },
     ...(delay ?? {}),
     ...(commandRanges ?? {}),
     ...(policyObsConfigFor(lines, jointNames) ?? {}),

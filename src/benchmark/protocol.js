@@ -13,7 +13,7 @@
 // `npm run benchmark:golden` catches an accidental change: it compares a smoke
 // run with test/fixtures/smoke-benchmark/golden.json.
 
-export const BENCHMARK_PROTOCOL = 1;
+export const BENCHMARK_PROTOCOL = 2;
 
 // Shape of one test row in a benchmark dataset (see testRow.js).
 export const TEST_SCHEMA_VERSION = 1;

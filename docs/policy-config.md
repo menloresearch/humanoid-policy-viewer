@@ -23,6 +23,7 @@ Three kinds of file describe a policy, and they have different owners:
 | Action delay range | fallback only | if declared | `env.yaml` if declared, else the JSON |
 | Command limits (`vx`, `vy`, `wz`) | - | if declared | `env.yaml` if declared, else a global default |
 | Torque limits | - | `effort_limit` | **`env.yaml`**; without it torque is unclamped and the console warns |
+| Start pose (base `pos`, `rot`, velocities, joint velocities) | - | `scene.robot.init_state` | **`env.yaml`**; without it the robot starts upright at 0.614 m. A benchmark test's `start`, or the viewer's Start pose, replaces parts of it |
 
 ## Precedence rule
 

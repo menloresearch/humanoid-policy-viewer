@@ -53,7 +53,10 @@ export function formatTask(task, digits = 2) {
 function outcomeOf(cell, fellAt, missed, row) {
   const base = { repeat: cell.repeat, seed: cell.seed, cell, detail: cell.warning || null };
   if (cell.error || !cell.metrics) return { ...base, kind: 'error', text: 'error', detail: cell.error || 'no metrics recorded' };
-  if (fellAt !== null) return { ...base, kind: 'fell', text: `fell at ${fmt(fellAt, 1)} s`, fellAt };
+  if (fellAt !== null) {
+    const text = cell.metrics.ending?.stood === false ? 'never stood up' : `fell at ${fmt(fellAt, 1)} s`;
+    return { ...base, kind: 'fell', text, fellAt };
+  }
   if (missed) {
     const missBy = cell.metrics.goal?.miss_m ?? goalOutcome(cell.metrics.topDown?.actual, row.goal).miss_m;
     return { ...base, kind: 'missed', text: missBy === null ? 'missed end zone' : `missed end zone by ${fmt(missBy, 2)} m`, missBy };

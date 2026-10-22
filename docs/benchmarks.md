@@ -32,7 +32,8 @@ A test describes a scenario and nothing else; it does not know how often it runs
  "duration": 12, "commands": [{"t": 0, "vx": 0.6, "vy": 0, "wz": 0}],
  "events": [{"t": 2, "type": "push", "dir": [-1, 0, 0], "force": 450, "duration": 0.15, "targetBody": "pelvis_link",
              "torqueAxis": null, "torqueMag": null, "label": "pelvis back (450N)"}],
- "limits": null, "foot_friction": null, "terrain": null, "goal": null, "metrics_opt_in": []}
+ "limits": null, "foot_friction": null, "terrain": null, "goal": null, "metrics_opt_in": [],
+ "start": null, "drop_settle_s": null}
 ```
 
 `id` is `<config>/<name>` and is how results refer to the test. A benchmark without categories puts every test
@@ -43,17 +44,28 @@ settles first) and ends at least 2 s before the test does (time to recover), so 
 range, so leave it `null` unless the test needs it. `foot_friction` overrides the feet's sliding friction (the
 scene's is 0.6). `terrain` describes the course the test walks on (below). `goal` is an optional end zone,
 `{"x": 7, "y": 0, "radius_m": 1}` in metres from the robot's start (+x ahead, +y to its left, radius at least
-0.25 m): a run counts as surviving only if the robot's base entered that circle and it never fell. Without one, a
+0.25 m): a run counts as surviving only if the robot's base entered that circle and it ended up. Without one, a
 policy could "survive" a course by stopping in front of it. Missing the zone fails `survival_rate` but not
 `survival_time` (the robot stayed upright the whole time). Results keep the two failures apart: a run that fell
-shows "fell at T s", one that stayed upright but never got there shows "missed end zone by D m" (amber in the
+shows "fell at T s" (when it last went down) or "never stood up", one that ended upright but never got there shows "missed end zone by D m" (amber in the
 report), and each run records `metrics.goal` (`reached`, `miss_m`). `x` and `y` have at most 2 decimals (1 cm). In the
 editor's Environment tab, drag the zone in the top view (hold Shift to move along one axis); it snaps to the end of
 the commanded path (the ✕), as does **Snap to path end**. From a script or an agent:
 `npm run benchmark path-end <dir> [<test id>...]` prints one JSON line per test with `path_end` (where the velocity
 commands, integrated exactly, leave the robot), its `goal`, and whether the path enters it; the checks before a run
 warn when the commanded path never enters a test's end zone. `metrics_opt_in: ["gait_symmetry"]` turns on
-the gait symmetry metric (straight, steady walking only). The full schema is in `src/benchmark/testRow.js`.
+the gait symmetry metric (straight, steady walking only).
+
+`start` is where the robot starts, written like the robot's `init_state` in env.yaml: `pos` [x, y, z], `rot`
+[w, x, y, z], `lin_vel` and `ang_vel` (world frame), and `joint_pos` / `joint_vel` mapping joint names or regex
+patterns to values. The keys it gives replace the policy's own `init_state`, and its joint entries replace only the
+joints they match; `null` starts from the policy's own. For example, lying on its back with bent knees:
+`{"pos": [0, 0, 0.16], "rot": [0.7071068, 0, -0.7071068, 0], "joint_pos": {".*_knee_joint": 0.6}}`. On the Hub the
+column is JSON text (a dataset cannot declare a map keyed by joint patterns); `hf publish` writes it that way and
+everything that reads a benchmark accepts both. `drop_settle_s` (seconds, at most 10, or `null` for off) leaves the
+robot limp (no motor torque, light joint damping) until it comes to rest before the test's clock starts. The
+editor's Environment tab offers Policy default (the policy's own `init_state`) and two fixed poses, Standing and Lying on back, and the drop-and-settle checkbox; anything
+finer is written in the row by hand. The full schema is in `src/benchmark/testRow.js`.
 
 ### Terrain
 
@@ -99,7 +111,7 @@ license: bsd-3-clause              # a Hugging Face license id, or a file in thi
 tags: [humanoid, locomotion]       # added to the card after humanoid-policy-viewer
 harness:
   repo: https://github.com/menloresearch/humanoid-policy-viewer
-  protocol: 1                      # the viewer's BENCHMARK_PROTOCOL this benchmark was validated with
+  protocol: 2                      # the viewer's BENCHMARK_PROTOCOL this benchmark was validated with
   tested_commit: <viewer commit>   # set by `npm run benchmark init` and `npm run hf publish`: the viewer commit that checked this benchmark
 requires: { robot: { name: asimov-1 }, policy_interface: velocity-command }
 defaults:
@@ -112,9 +124,9 @@ tests:                             # { all: true }, { config: … } or { id: …
   - { config: push_walking }
   - { id: distance/square_lap_100m, repeats: 2 }
 tasks:                             # leaderboard numbers; ids get _v<version> appended
-  - { id: survival_rate, metric: survival_rate@1 }
-  - { id: survival_time, metric: survival_time@1 }
-  - { id: push_walking_survival_rate, metric: survival_rate@1, scope: { config: push_walking } }
+  - { id: survival_rate, metric: survival_rate@2 }
+  - { id: survival_time, metric: survival_time@2 }
+  - { id: push_walking_survival_rate, metric: survival_rate@2, scope: { config: push_walking } }
 reference_policies: [menloresearch/asimov1-loco]   # used by `npm run hf baseline`
 ```
 
@@ -146,7 +158,7 @@ Keys left out of `defaults` take these values:
 
 `npm run benchmark init` (and a new benchmark in the viewer) starts from `repeats: 5`, `seed: 0`,
 `randomize: { action_delay: env_range, initial_joint_noise_rad: 0.02 }`, `timeout_s: 600`, `tests: [{ all: true }]`,
-the tasks `survival_rate` and `survival_time`, `version: 1` and `requires: { robot: { name: asimov-1 },
+the tasks `survival_rate@2` and `survival_time@2`, `version: 2` and `requires: { robot: { name: asimov-1 },
 policy_interface: velocity-command }`. A test entry can override `repeats`; a later entry wins over an earlier one.
 
 ### Metrics and repeats
@@ -155,10 +167,17 @@ Metrics live in `src/benchmark/summary.js` and are named with a version, `<name>
 
 | metric | one run (test × repeat) | |
 |---|---|---|
-| `survival_rate@1` | 1 if it never fell (and reached the end zone, if the test has one), else 0 | probability of finishing a test upright |
-| `survival_time@1` | fraction of the test completed before the first fall (1 = never fell) | separates "fell at 1 s" from "fell at 9 s" |
+| `survival_rate@2` | 1 if it is up in the last frame (and reached the end zone, if the test has one), else 0 | probability of ending a test upright |
+| `survival_time@2` | 1 if it is up at the end, else the fraction of the test before it last went down (0 if it never stood) | separates "fell at 1 s" from "fell at 9 s" |
+| `survival_rate@1` | 1 if it never fell (and reached the end zone, if the test has one), else 0 | kept for leaderboards that use it |
+| `survival_time@1` | fraction of the test completed before the first fall (1 = never fell) | kept for leaderboards that use it |
 
-A fall is the base below 0.35 m, the torso tilted past 78.5°, or a tumble (`src/simulation/benchmarkRunner.js`);
+Version 2 judges a run by how it ended, so it works whatever the test's `start` (a robot that starts lying down,
+or limp after drop and settle, is "down" from the first frame, which version 1 counts as a fall at t = 0). A robot
+that falls and gets back up survives under version 2. Each run records `metrics.ending`: `down` (in the last
+frame), `last_fall_time` (when it last went down after being up) and `stood` (whether it was ever up).
+
+A fall is the base below 0.35 m or the torso tilted past 78.5° (`src/simulation/benchmarkRunner.js`);
 it is part of `BENCHMARK_PROTOCOL`. A run that errored counts as a fall at t = 0.
 
 Repeats differ only by their seeded randomisation (the action delay drawn from the policy's `env.yaml` range,

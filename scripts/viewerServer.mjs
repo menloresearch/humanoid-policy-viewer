@@ -21,6 +21,7 @@ import { collectProvenance, policyFileHashes } from './benchmarkProvenance.mjs';
 import { applyBenchmarkEdit, benchmarkFormFields, checkBenchmarkText } from './benchmarkEdit.mjs';
 import { RESULT_SCHEMA, isComplete, summarize } from '../src/benchmark/run.js';
 import { OPT_IN_METRICS, rowToSequence, sequenceToRow, validateGoal, validateTestRow } from '../src/benchmark/testRow.js';
+import { validateSettle, validateStartState } from '../src/simulation/startState.js';
 import { buildBenchmarkReportHtml } from '../src/simulation/benchmarkReport.js';
 import { validateTerrain } from '../src/simulation/terrainGen.js';
 
@@ -211,7 +212,7 @@ export function viewerServer({
         clean.events = events;
       }
     }
-    // Per-test floor grip, terrain course, end zone and the gait-symmetry opt-in; saving must keep them.
+    // Per-test floor grip, terrain course, end zone, start state and the gait-symmetry opt-in; saving must keep them.
     const footFriction = Number(parsed.footFriction);
     if (parsed.footFriction !== undefined && parsed.footFriction !== null) {
       if (!Number.isFinite(footFriction) || footFriction <= 0) throw new Error('"footFriction" must be a number > 0');
@@ -226,6 +227,16 @@ export function viewerServer({
       const problems = validateGoal(parsed.goal);
       if (problems.length) throw new Error(`"goal": ${problems.join('; ')}`);
       clean.goal = { x: parsed.goal.x, y: parsed.goal.y, radius_m: round3(parsed.goal.radius_m) };
+    }
+    if (parsed.start !== undefined && parsed.start !== null) {
+      const problems = validateStartState(parsed.start);
+      if (problems.length) throw new Error(`"start": ${problems.join('; ')}`);
+      clean.start = structuredClone(parsed.start);
+    }
+    if (parsed.dropSettleS !== undefined && parsed.dropSettleS !== null) {
+      const problems = validateSettle(parsed.dropSettleS);
+      if (problems.length) throw new Error(`"dropSettleS" ${problems.join('; ')}`);
+      clean.dropSettleS = round3(parsed.dropSettleS);
     }
     if (parsed.gaitSymmetry === true) clean.gaitSymmetry = true;
     if (parsed.metricsOptIn !== undefined) {
