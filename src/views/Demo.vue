@@ -445,7 +445,7 @@
             <div><b>Pull force:</b> {{ telemetry.pullForce }}N (peak: {{ telemetry.peakPullForce }}N)</div>
             <div><b>Max action:</b> {{ telemetry.maxAction }}</div>
             <div><b>Gyro mag:</b> {{ telemetry.gyroMag }} rad/s</div>
-            <div><b>Grav:</b> {{ telemetry.gravX }} {{ telemetry.gravY }} {{ telemetry.gravZ }} <span :style="{color: telemetry.fallen ? '#ff4444' : '#44ff44', fontWeight: 'bold'}">{{ telemetry.fallen ? 'FALLEN (DAMP)' : 'OK' }}</span></div>
+            <div><b>Grav:</b> {{ telemetry.gravX }} {{ telemetry.gravY }} {{ telemetry.gravZ }} <span :style="{color: telemetry.fallen ? '#ff4444' : '#44ff44', fontWeight: 'bold'}">{{ telemetry.fallen ? 'FALLEN' : 'OK' }}</span></div>
             <div><b>Peak gyro:</b> {{ telemetry.peakGyro }} rad/s</div>
             <div><b>Joint vel RMS:</b> {{ telemetry.jointVelRms }} rad/s</div>
             <div><b>Action jitter:</b> {{ telemetry.actionJitter }}</div>
@@ -2445,7 +2445,7 @@ export default {
         this.telemetry.gravX = f(gravXval);
         this.telemetry.gravY = f(gravYval);
         this.telemetry.gravZ = f(gravZval);
-        this.telemetry.fallen = this.demo._tumbling || false;
+        this.telemetry.fallen = this.demo.fallen || false;
         if (gyroMag > this._peakGyroValue) {
           this._peakGyroValue = gyroMag;
           this.telemetry.peakGyro = f(gyroMag);

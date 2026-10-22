@@ -5,6 +5,7 @@ import { createSimulationWrapper, getPosition, getQuaternion, toMujocoPos, reloa
 import { commandSequencer } from './commandSequencer.js';
 import { asimovCommandState } from './observationHelpers.js';
 import { IdealPathTracker, yawFromQuat } from './idealPath.js';
+import { hasFailed } from './benchmarkRunner.js';
 
 const defaultPolicy = "./examples/checkpoints/asimov/reference_policy_config.json";
 // The canonical Asimov model from the asimov-1 submodule; see
@@ -45,6 +46,7 @@ export class MuJoCoDemo {
     this.actionDelayLag = 0;
     this.actionDelayBuffer = [];
     this.maxRawAction = 0;
+    this.fallen = false;
     this.rawActions = null;
     this.model = null;
     this.data = null;
@@ -645,7 +647,7 @@ export class MuJoCoDemo {
         actionDelayLag: 0,
         actionDelayBuffer: [],
         benchmarkRandomization: null,
-        _tumbling: false,
+        fallen: false,
         _activePushes: [],
         idealPath: new IdealPathTracker(),
         lastSimState: { bodies: new Map() },
@@ -852,134 +854,103 @@ export class MuJoCoDemo {
       );
     }
 
-    // Tumble/fall detection BEFORE policy inference
-    const gyroMag = Math.abs(sim.qvel[3] || 0)
-                  + Math.abs(sim.qvel[4] || 0)
-                  + Math.abs(sim.qvel[5] || 0);
+    // The policy keeps control whatever the robot's pose: a fall is recorded
+    // (robot.fallen, set after the physics substeps) but never stops the
+    // policy, so policies that act while falling or lying down (safe-fall,
+    // get-up) run as trained.
+    const state = this.readPolicyState(robot);
+    try {
+      robot.actionTarget = await robot.policyRunner.step(state);
+    } catch (e) {
+      console.error('Inference error in main loop:', e);
+      this.alive = false;
+      return false;
+    }
 
-    // Compute projected gravity z in body frame from quaternion
-    // quat = [w, x, y, z] at qpos[3:7]
-    const qw = sim.qpos[3], qx = sim.qpos[4];
-    const qy = sim.qpos[5], qz = sim.qpos[6];
-    // gravity_z_body = R^T * [0,0,-1] dot [0,0,1] = -(1 - 2(qx²+qy²))
-    const gravZ = -(1.0 - 2.0 * (qx * qx + qy * qy));
+    // Track raw action magnitudes for the telemetry panel
+    if (robot.actionTarget) {
+      robot.rawActions = robot.actionTarget;
+      let maxAbs = 0;
+      for (let i = 0; i < robot.actionTarget.length; i++) {
+        const abs = Math.abs(robot.actionTarget[i]);
+        if (abs > maxAbs) maxAbs = abs;
+      }
+      robot.maxRawAction = maxAbs;
+    }
 
-    // Fall detection: gravity_z > -0.866 means >30° tilt → DAMP mode
-    if (gravZ > -0.166) robot._tumbling = true;
+    // Jitter computation at policy rate (50Hz) — 3rd finite difference (jerk)
+    // From arXiv:2603.16180: |x_t - 3x_{t-1} + 3x_{t-2} - x_{t-3}| / dt³
+    {
+      const policyDt = this.timestep * this.decimation;
+      const dt3 = policyDt * policyDt * policyDt;
 
-    if (robot._tumbling) {
-      // DAMP mode: skip policy, hold current positions with KP=10 KD=3
-      if (!robot.actionTarget) {
-        robot.actionTarget = new Float32Array(this.numActions);
-      }
-      for (let i = 0; i < this.numActions; i++) {
-        const qpos_adr = this.qpos_adr_policy[i];
-        robot.actionTarget[i] = sim.qpos[qpos_adr];
-      }
-      if (robot.filteredActionTarget) {
-        robot.filteredActionTarget.set(robot.actionTarget);
-      } else {
-        robot.filteredActionTarget = new Float32Array(robot.actionTarget);
-      }
-    } else {
-      // Normal mode: run policy
-      const state = this.readPolicyState(robot);
-      try {
-        robot.actionTarget = await robot.policyRunner.step(state);
-      } catch (e) {
-        console.error('Inference error in main loop:', e);
-        this.alive = false;
-        return false;
+      // Initialize jitter buffers
+      if (!robot._jitterActionHist) {
+        robot._jitterActionHist = [];
+        robot._jitterVelHist = [];
+        robot._jitterTorqueHist = [];
+        robot._jitterAccum = { action: 0, vel: 0, torque: 0, count: 0 };
       }
 
-      // Track raw action magnitudes — DAMP if any action saturates
-      if (robot.actionTarget) {
-        robot.rawActions = robot.actionTarget;
-        let maxAbs = 0;
-        for (let i = 0; i < robot.actionTarget.length; i++) {
-          const abs = Math.abs(robot.actionTarget[i]);
-          if (abs > maxAbs) maxAbs = abs;
-        }
-        robot.maxRawAction = maxAbs;
-        if (maxAbs > 100.0) robot._tumbling = true;
-      }
+      // Capture current values
+      const nAct = this.numActions || 0;
+      const curAction = robot.actionTarget ? Array.from(robot.actionTarget) : null;
+      const nv = this.model?.nv || 0;
+      const curVel = nv > 6 ? Array.from(sim.qvel).slice(6, 6 + nAct) : null;
+      const curTorque = sim.ctrl ? Array.from(sim.ctrl).slice(0, nAct) : null;
 
-      // Jitter computation at policy rate (50Hz) — 3rd finite difference (jerk)
-      // From arXiv:2603.16180: |x_t - 3x_{t-1} + 3x_{t-2} - x_{t-3}| / dt³
-      {
-        const policyDt = this.timestep * this.decimation;
-        const dt3 = policyDt * policyDt * policyDt;
+      robot._jitterActionHist.push(curAction);
+      robot._jitterVelHist.push(curVel);
+      robot._jitterTorqueHist.push(curTorque);
 
-        // Initialize jitter buffers
-        if (!robot._jitterActionHist) {
-          robot._jitterActionHist = [];
-          robot._jitterVelHist = [];
-          robot._jitterTorqueHist = [];
-          robot._jitterAccum = { action: 0, vel: 0, torque: 0, count: 0 };
-        }
+      // Keep only last 4
+      if (robot._jitterActionHist.length > 4) robot._jitterActionHist.shift();
+      if (robot._jitterVelHist.length > 4) robot._jitterVelHist.shift();
+      if (robot._jitterTorqueHist.length > 4) robot._jitterTorqueHist.shift();
 
-        // Capture current values
-        const nAct = this.numActions || 0;
-        const curAction = robot.actionTarget ? Array.from(robot.actionTarget) : null;
-        const nv = this.model?.nv || 0;
-        const curVel = nv > 6 ? Array.from(sim.qvel).slice(6, 6 + nAct) : null;
-        const curTorque = sim.ctrl ? Array.from(sim.ctrl).slice(0, nAct) : null;
-
-        robot._jitterActionHist.push(curAction);
-        robot._jitterVelHist.push(curVel);
-        robot._jitterTorqueHist.push(curTorque);
-
-        // Keep only last 4
-        if (robot._jitterActionHist.length > 4) robot._jitterActionHist.shift();
-        if (robot._jitterVelHist.length > 4) robot._jitterVelHist.shift();
-        if (robot._jitterTorqueHist.length > 4) robot._jitterTorqueHist.shift();
-
-        // Compute jerk if 4 frames available
-        if (robot._jitterActionHist.length === 4 && robot._jitterActionHist[0]) {
-          const jerk = (hist) => {
-            if (!hist[0] || !hist[1] || !hist[2] || !hist[3]) return 0;
-            let sum = 0;
-            for (let i = 0; i < hist[0].length; i++) {
-              sum += Math.abs(hist[3][i] - 3*hist[2][i] + 3*hist[1][i] - hist[0][i]) / dt3;
-            }
-            return sum / hist[0].length;
-          };
-          robot._jitterAccum.action += jerk(robot._jitterActionHist);
-          robot._jitterAccum.vel += jerk(robot._jitterVelHist);
-          robot._jitterAccum.torque += jerk(robot._jitterTorqueHist);
-          robot._jitterAccum.count++;
-        }
-
-        // Expose averaged jitter (reset every 50 steps = 1 second)
-        if (robot._jitterAccum.count >= 50) {
-          const c = robot._jitterAccum.count;
-          robot.jitterMetrics = {
-            action: robot._jitterAccum.action / c,
-            vel: robot._jitterAccum.vel / c,
-            torque: robot._jitterAccum.torque / c,
-          };
-          robot._jitterAccum = { action: 0, vel: 0, torque: 0, count: 0 };
-        }
-      }
-
-      // Apply one-pole LPF on action targets if configured
-      if (robot.actionTarget) {
-        if (!robot.filteredActionTarget) {
-          robot.filteredActionTarget = new Float32Array(robot.actionTarget);
-        } else {
-          const alpha = this.actionLpfAlpha;
-          for (let i = 0; i < this.numActions; i++) {
-            robot.filteredActionTarget[i] = alpha * robot.actionTarget[i] + (1 - alpha) * robot.filteredActionTarget[i];
+      // Compute jerk if 4 frames available
+      if (robot._jitterActionHist.length === 4 && robot._jitterActionHist[0]) {
+        const jerk = (hist) => {
+          if (!hist[0] || !hist[1] || !hist[2] || !hist[3]) return 0;
+          let sum = 0;
+          for (let i = 0; i < hist[0].length; i++) {
+            sum += Math.abs(hist[3][i] - 3*hist[2][i] + 3*hist[1][i] - hist[0][i]) / dt3;
           }
+          return sum / hist[0].length;
+        };
+        robot._jitterAccum.action += jerk(robot._jitterActionHist);
+        robot._jitterAccum.vel += jerk(robot._jitterVelHist);
+        robot._jitterAccum.torque += jerk(robot._jitterTorqueHist);
+        robot._jitterAccum.count++;
+      }
+
+      // Expose averaged jitter (reset every 50 steps = 1 second)
+      if (robot._jitterAccum.count >= 50) {
+        const c = robot._jitterAccum.count;
+        robot.jitterMetrics = {
+          action: robot._jitterAccum.action / c,
+          vel: robot._jitterAccum.vel / c,
+          torque: robot._jitterAccum.torque / c,
+        };
+        robot._jitterAccum = { action: 0, vel: 0, torque: 0, count: 0 };
+      }
+    }
+
+    // Apply one-pole LPF on action targets if configured
+    if (robot.actionTarget) {
+      if (!robot.filteredActionTarget) {
+        robot.filteredActionTarget = new Float32Array(robot.actionTarget);
+      } else {
+        const alpha = this.actionLpfAlpha;
+        for (let i = 0; i < this.numActions; i++) {
+          robot.filteredActionTarget[i] = alpha * robot.actionTarget[i] + (1 - alpha) * robot.filteredActionTarget[i];
         }
       }
     }
 
     for (let substep = 0; substep < this.decimation; substep++) {
       const sourceTarget = robot.filteredActionTarget ?? robot.actionTarget;
-      const delayedActionTarget = robot._tumbling
-        ? sourceTarget
-        : this.getDelayedActionTarget(sourceTarget, robot);
+      const delayedActionTarget = this.getDelayedActionTarget(sourceTarget, robot);
 
       if (this.control_type === 'joint_position') {
         for (let i = 0; i < this.numActions; i++) {
@@ -988,17 +959,17 @@ export class MuJoCoDemo {
           const ctrl_adr = this.ctrl_adr_policy[i];
 
           const targetJpos = delayedActionTarget ? delayedActionTarget[i] : 0.0;
-          const kp = robot._tumbling ? 10.0 : (this.kpPolicy ? this.kpPolicy[i] : 0.0);
+          const kp = this.kpPolicy ? this.kpPolicy[i] : 0.0;
           const vel = sim.qvel[qvel_adr];
 
           // When feedforward damping is configured, split kd into kd_hw and kd_ff
           const hasFf = this.kdFfPolicy !== null && this.kdFfPolicy !== undefined;
-          const kd = robot._tumbling ? 3.0 : (this.kdPolicy ? this.kdPolicy[i] : 0.0);
-          const kd_hw = robot._tumbling ? 3.0 : (hasFf ? Math.min(kd, 5.0) : kd);
+          const kd = this.kdPolicy ? this.kdPolicy[i] : 0.0;
+          const kd_hw = hasFf ? Math.min(kd, 5.0) : kd;
           let torque = kp * (targetJpos - sim.qpos[qpos_adr]) + kd_hw * (0 - vel);
 
-          // Feedforward damping (only when kd_ff array is provided, skip in DAMP mode)
-          if (hasFf && !robot._tumbling) {
+          // Feedforward damping (only when kd_ff array is provided)
+          if (hasFf) {
             const kd_ff = this.kdFfPolicy[i] ?? 0.0;
             if (kd_ff > 0) {
               const tau_ff = Math.max(-30, Math.min(30, -kd_ff * vel));
@@ -1074,6 +1045,9 @@ export class MuJoCoDemo {
       sim.step();
     }
 
+    // Whether the robot is down right now, by the benchmark's fall criterion.
+    // Not latched: a robot that gets back up reads as standing again.
+    robot.fallen = hasFailed(this, robot);
     return true;
   }
 
@@ -1200,7 +1174,7 @@ export class MuJoCoDemo {
     }
     this.params.paused = true;
     robot.simulation.resetData();
-    robot._tumbling = false;
+    robot.fallen = false;
 
     // Apply keyframe: set root height and joint positions
     // Freejoint qpos: [x, y, z, qw, qx, qy, qz] at indices 0-6
@@ -1267,7 +1241,7 @@ export class MuJoCoDemo {
         }
       }
       // A fallen robot fades further, so the ones still walking stand out.
-      const opacity = robot._tumbling ? FALLEN_ROBOT_OPACITY : EXTRA_ROBOT_OPACITY;
+      const opacity = robot.fallen ? FALLEN_ROBOT_OPACITY : EXTRA_ROBOT_OPACITY;
       if (robot._shownOpacity !== opacity) {
         for (const material of robot.materials) material.opacity = opacity;
         robot._shownOpacity = opacity;
