@@ -1,12 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parsePort, parseWords, rejectSwallowedNpmFlags, swallowedNpmFlags } from './cliArgs.mjs';
 import { classifyTarget, splitTargets } from './benchmarkTargets.mjs';
 import { devArgs } from './dev.mjs';
-import { MAX_ROBOTS, buildJobs, groupCells, takeNextJob } from '../src/benchmark/run.js';
+import { MAX_ROBOTS, RESULT_SCHEMA, buildJobs, cellResult, groupCells, planCells, takeNextJob } from '../src/benchmark/run.js';
+import { loadBenchmarkDir } from './benchmarkDir.mjs';
 import { parseShard, parseTests, resultTarget, shardJobs, viewHint } from './benchmarkRun.mjs';
 import { datasetFilesToFetch } from './hfDataset.mjs';
 
@@ -89,6 +92,7 @@ test('npm run dev takes Hub and local policies and a benchmark in any order', ()
   assert.deepEqual(devArgs([], {}), { policies: [], benchmark: null, port: undefined });
 });
 
+const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const cell = (id, duration, repeat = 0) => ({ cellId: `${id}#${repeat}`, testId: id, repeat, duration, seed: repeat, timeoutS: 60 });
 
 test('jobs run the most work first, shards partition them, pages keep their policy', () => {
@@ -160,4 +164,42 @@ test('only benchmark files are fetched from a dataset', () => {
     datasetFilesToFetch(['benchmark.yaml', 'eval.yaml', 'README.md', 'CHANGELOG.md', 'suites/smoke.yaml', 'data/push/test.jsonl', 'data/push/big.parquet', 'calibration/v1.json', 'tools/gen.py', 'tools/x/deep.py']),
     ['benchmark.yaml', 'eval.yaml', 'README.md', 'CHANGELOG.md', 'data/push/test.jsonl', 'calibration/v1.json', 'tools/gen.py'],
   );
+});
+
+test('npm run benchmark writes results under HPV_BENCHMARK_RESULTS_DIR and init copies HPV_BENCHMARK_TEMPLATE', () => {
+  const root = mkdtempSync(join(tmpdir(), 'hpv-env-'));
+  const smoke = join(appDir, 'test/fixtures/smoke-benchmark');
+  const loaded = loadBenchmarkDir(smoke);
+  const { cells, tests } = planCells(loaded.benchmark, loaded.rows);
+  const run = {
+    schema: RESULT_SCHEMA, generatedAt: '2026-10-22T00:00:00.000Z', wallSeconds: 1,
+    provenance: { hpv: { commit: 'c'.repeat(40), dirty: false, protocol: 2 }, asimov1: { commit: null }, runtime: {} },
+    benchmark: { source: 'local', path: smoke, raw: loaded.rawBenchmark, problems: [] },
+    overrides: { tests: null, repeats: null, force: false }, jobs: 1, robots: 1,
+    policies: [{ key: 'm0', id: 'local:p', label: 'p', source: 'local', sha: null, files: null }],
+    tests, expectedCells: cells.length,
+  };
+  const shards = [1, 2].map((index) => {
+    const dir = join(root, `shard${index}`);
+    mkdirSync(dir);
+    const mine = cells.filter((_, i) => i % 2 === index - 1).map((cell) => cellResult('m0', cell, { frames: 10, metrics: { fell: { fell: false } } }, 5));
+    writeFileSync(join(dir, 'result.json'), JSON.stringify({ ...run, shard: { index, count: 2 }, cells: mine }));
+    return dir;
+  });
+  const env = { ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('npm_config_') && !key.startsWith('HPV_'))), HPV_BENCHMARK_RESULTS_DIR: join(root, 'results') };
+  const merge = spawnSync(process.execPath, [join(appDir, 'scripts/run-benchmark.mjs'), 'merge', ...shards], { cwd: root, encoding: 'utf8', env });
+  assert.equal(merge.status, 0, merge.stderr);
+  const [merged] = readdirSync(join(root, 'results'));
+  assert.match(merged, /^\d{8}T\d{6}_merged$/);
+  assert.ok(existsSync(join(root, 'results', merged, 'result.json')));
+  assert.ok(!existsSync(join(appDir, 'benchmark_results', merged)));
+
+  const template = join(root, 'template');
+  cpSync(smoke, template, { recursive: true });
+  rmSync(join(template, 'golden.json'));
+  const init = spawnSync(process.execPath, [join(appDir, 'scripts/run-benchmark.mjs'), 'init', join(root, 'mine')], { cwd: root, encoding: 'utf8', env: { ...env, HPV_BENCHMARK_TEMPLATE: template } });
+  assert.equal(init.status, 0, init.stderr);
+  assert.deepEqual(loadBenchmarkDir(join(root, 'mine')).rows.map((row) => row.id), loaded.rows.map((row) => row.id));
+  assert.match(readFileSync(join(root, 'mine', 'benchmark.yaml'), 'utf8'), /^name: mine$/m);
+  rmSync(root, { recursive: true, force: true });
 });

@@ -6,6 +6,7 @@ import { dirname, join, resolve } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { RESULT_SCHEMA, planCells, cellResult } from '../src/benchmark/run.js';
+import { parse as parseYaml } from 'yaml';
 import { parseBenchmark } from '../src/benchmark/settings.js';
 import { viewerServer } from './viewerServer.mjs';
 import { BENCHMARK_PROTOCOL } from '../src/benchmark/protocol.js';
@@ -183,6 +184,26 @@ test('a Run is saved as <timestamp>/result.json with server provenance, then lis
     assert.equal((await viewer.request('DELETE', `/api/results?file=${saved.json.file}`)).status, 200);
     assert.equal(existsSync(join(viewer.resultsDir, dirname(saved.json.file))), false);
     assert.deepEqual((await viewer.request('GET', '/api/results')).json.files, []);
+  } finally {
+    await viewer.close();
+  }
+});
+
+test('"New benchmark" copies the benchmark template, and /api/save-log writes to the log folder', async () => {
+  const template = benchmarkCopy();
+  writeFileSync(join(template, 'benchmark.yaml'), `${readFileSync(join(template, 'benchmark.yaml'), 'utf8')}# from our template\n`);
+  const logDir = join(dirname(template), 'logs');
+  const viewer = await serve({ benchmarkTemplate: template, logDir });
+  try {
+    assert.equal((await viewer.request('POST', '/api/benchmarks', { name: 'fresh' })).status, 201);
+    const created = readFileSync(join(viewer.benchmarksDir, 'fresh', 'benchmark.yaml'), 'utf8');
+    assert.match(created, /^name: fresh$/m);
+    assert.match(created, /# from our template/);
+    assert.equal(parseBenchmark(parseYaml(created)).name, 'fresh');
+    const saved = await viewer.request('POST', '/api/save-log', { filename: 'run 1.log', content: 'step 1' });
+    assert.equal(saved.status, 200);
+    assert.equal(saved.json.path, join(logDir, 'run_1.log'));
+    assert.equal(readFileSync(join(logDir, 'run_1.log'), 'utf8'), 'step 1');
   } finally {
     await viewer.close();
   }

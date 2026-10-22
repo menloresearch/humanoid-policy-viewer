@@ -20,6 +20,8 @@
 .env.*.local
 
 # Log files
+# Policy logs the viewer saves through /api/save-log (HPV_LOG_DIR moves them).
+/logs/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

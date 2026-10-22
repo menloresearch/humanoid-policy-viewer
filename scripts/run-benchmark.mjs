@@ -32,6 +32,7 @@ import { findLocalPolicy } from './localPolicy.mjs';
 import { assertTestsRunnable, pathEnds } from './benchmarkCheck.mjs';
 import { defaultBenchmarkDir, loadBenchmarkDir } from './benchmarkDir.mjs';
 import { initBenchmark } from './benchmarkInit.mjs';
+import { getBenchmarkResultsDir, getBenchmarkTemplate } from './policyLibraryConfig.mjs';
 
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -51,7 +52,8 @@ const USAGE = `Usage:
   view                 open a result on the viewer's results page, in your browser
                        (the same page as http://localhost:<port>/?result=<folder>/result.json
                        on a running \`npm run dev\`); Ctrl+C stops it
-  init                 new benchmark: a copy of benchmarks/default (three example tests)
+  init                 new benchmark: a copy of benchmarks/default (three example tests),
+                       or of the folder HPV_BENCHMARK_TEMPLATE names
   path-end             where each test's commands end the path (x, y in m, 2 decimals) and
                        whether its end zone contains / is crossed by the path; JSON lines,
                        for picking a goal by hand or from a script
@@ -74,7 +76,8 @@ Options (no "--" needed):
   robots=<n>           most repeats of a test a page runs at once, as robots in
                        one scene (1-${MAX_ROBOTS}, default ${MAX_ROBOTS}); results do not depend on it
   shard=<i>/<n>        run slice i of n; combine with \`npm run benchmark merge\`
-  out=<dir>            where to write results (default: benchmark_results/<timestamp>)
+  out=<dir>            where to write results (default: benchmark_results/<timestamp>,
+                       under HPV_BENCHMARK_RESULTS_DIR when set)
 
 Flags:
   force                run even if this viewer does not match the benchmark (local-only)
@@ -187,7 +190,7 @@ async function runBenchmarkCommand(args) {
   if (robots > MAX_ROBOTS) throw new Error(`robots= must be at most ${MAX_ROBOTS}`);
   const shard = options.shard ? parseShard(options.shard) : null;
   const only = parseTests(options.tests);
-  const outDir = resolve(options.out ?? join(appDir, 'benchmark_results', timestamp()));
+  const outDir = resolve(options.out ?? join(getBenchmarkResultsDir(appDir), timestamp()));
   const log = (line) => console.log(line);
 
   const loaded = await resolveBenchmark(benchmarkTarget ?? undefined, log);
@@ -294,7 +297,7 @@ async function mergeCommand(args) {
     return JSON.parse(readFileSync(path, 'utf8'));
   });
   const merged = mergeResults(runs);
-  const outDir = resolve(options.out ?? join(appDir, 'benchmark_results', `${timestamp()}_merged`));
+  const outDir = resolve(options.out ?? join(getBenchmarkResultsDir(appDir), `${timestamp()}_merged`));
   writeOutputs(outDir, merged);
   console.log(`Merged ${runs.length} shards into ${join(outDir, 'result.json')}`);
   printSummary(merged, outDir);
@@ -326,7 +329,7 @@ async function viewCommand({ positionals, options, flags }) {
 
 function initCommand({ positionals }) {
   if (!positionals[1]) throw new Error('init needs <dir>');
-  initBenchmark(resolve(positionals[1]));
+  initBenchmark(resolve(positionals[1]), { template: getBenchmarkTemplate(appDir) });
   return true;
 }
 

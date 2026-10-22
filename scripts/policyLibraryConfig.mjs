@@ -1,15 +1,20 @@
-// Where the viewer finds policy folders and saved benchmark results. By default
-// it looks in the policies/ folder next to package.json; a repo that embeds the
-// viewer can point it elsewhere through environment variables. Paths should be
-// absolute (relative ones resolve against the process's working directory).
+// Where the viewer finds policy folders and keeps what it writes. By default
+// everything is inside this checkout; a repo that embeds the viewer can point it
+// elsewhere through environment variables (all of them are listed in
+// docs/architecture.md, "Environment variables"). Paths should be absolute
+// (relative ones resolve against the process's working directory).
 //
 //   HPV_POLICY_LIBRARY_DIR  directory that contains the policy root folders
 //                           (default: this app's directory)
 //   HPV_POLICY_ROOTS        comma-separated folder names under that directory
 //                           (each becomes /policy-library/<root>/...);
 //                           default: policies. Set it empty to disable the library
-//   HPV_BENCHMARK_RESULTS_DIR  where saved benchmark results are listed/read/written
-//                              (default: <app>/benchmark_results)
+//   HPV_BENCHMARK_RESULTS_DIR  where benchmark results are listed, read and written, by the
+//                              viewer and by `npm run benchmark` (default: <app>/benchmark_results)
+//   HPV_BENCHMARK_TEMPLATE  the benchmark folder "New benchmark" and `npm run benchmark init`
+//                           copy (default: <app>/benchmarks/default)
+//   HPV_LOG_DIR             where the viewer's policy logs (/api/save-log) are written
+//                           (default: <app>/logs, gitignored)
 
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -49,4 +54,12 @@ export function getPolicyLibrary(env = process.env) {
 export function getBenchmarkResultsDir(appDir, env = process.env) {
   const dir = readEnv(env, 'HPV_BENCHMARK_RESULTS_DIR');
   return dir ? resolve(dir) : resolve(appDir, 'benchmark_results');
+}
+
+export function getBenchmarkTemplate(appDir, env = process.env) {
+  return env.HPV_BENCHMARK_TEMPLATE ? resolve(env.HPV_BENCHMARK_TEMPLATE) : resolve(appDir, 'benchmarks', 'default');
+}
+
+export function getLogDir(appDir, env = process.env) {
+  return env.HPV_LOG_DIR ? resolve(env.HPV_LOG_DIR) : resolve(appDir, 'logs');
 }

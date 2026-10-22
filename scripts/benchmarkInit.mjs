@@ -1,6 +1,6 @@
-// Creates a new benchmark folder (scripts/benchmarkDir.mjs) as a copy of the
-// tracked ./benchmarks/default: `npm run benchmark init` and the viewer's "New
-// benchmark" button. Kept apart from run-benchmark.mjs because the dev
+// Creates a new benchmark folder (scripts/benchmarkDir.mjs) as a copy of a
+// template, by default the tracked ./benchmarks/default (HPV_BENCHMARK_TEMPLATE
+// names another): `npm run benchmark init` and the viewer's "New benchmark" button. Kept apart from run-benchmark.mjs because the dev
 // server's vite.config.mjs imports it, and Vite bundles that config.
 
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -13,14 +13,15 @@ const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const BLANK_DESCRIPTION = 'Describe what this benchmark measures.';
 
 /**
- * Creates a new benchmark folder from ./benchmarks/default: its benchmark.yaml
- * (as text, to keep the comments) under a new name and title, its README and
- * its example tests, or no tests at all with `exampleTest: false` (the
- * viewer's "New benchmark", where tests are added next).
+ * Creates a new benchmark folder from `template` (default ./benchmarks/default):
+ * its benchmark.yaml (as text, to keep the comments) under a new name and title,
+ * its README (if it has one) and its example tests, or no tests at all with
+ * `exampleTest: false` (the viewer's "New benchmark", where tests are added next).
  */
-export function initBenchmark(dir, { log = console.log, title = null, exampleTest = true } = {}) {
+export function initBenchmark(dir, { log = console.log, title = null, exampleTest = true, template = defaultBenchmarkDir(appDir) } = {}) {
   if (existsSync(dir) && readdirSync(dir).length) throw new Error(`${dir} is not empty`);
-  const source = defaultBenchmarkDir(appDir);
+  const source = resolve(template);
+  if (!existsSync(join(source, BENCHMARK_FILE))) throw new Error(`The benchmark template ${source} has no ${BENCHMARK_FILE}`);
   const from = readYamlFile(join(source, BENCHMARK_FILE));
   const name = basename(dir).toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || 'my-benchmark';
   const description = exampleTest ? from.description : BLANK_DESCRIPTION;
@@ -34,11 +35,13 @@ export function initBenchmark(dir, { log = console.log, title = null, exampleTes
     .replace(/^description: .*$/m, () => `description: ${description}`)
     .replace(/^(\s*tested_commit:) .*$/m, (_, key) => `${key} ${commit ?? 'null'}`);
   writeFileSync(join(dir, BENCHMARK_FILE), yaml);
-  const readme = readFileSync(join(source, 'README.md'), 'utf8')
-    .replace(/^# .*$/m, () => `# ${title ?? name}`)
-    .replace(from.description, () => description);
+  const readme = existsSync(join(source, 'README.md'))
+    ? readFileSync(join(source, 'README.md'), 'utf8')
+      .replace(/^# .*$/m, () => `# ${title ?? name}`)
+      .replace(from.description || /(?!)/, () => description)
+    : `# ${title ?? name}\n\n${description}\n`;
   writeFileSync(join(dir, 'README.md'), readme);
-  if (exampleTest) cpSync(join(source, DATA_DIR), join(dir, DATA_DIR), { recursive: true });
+  if (exampleTest && existsSync(join(source, DATA_DIR))) cpSync(join(source, DATA_DIR), join(dir, DATA_DIR), { recursive: true });
 
   const { rows } = loadBenchmarkDir(dir);
   log(`Created benchmark ${name} in ${dir}${exampleTest ? ` with ${rows.length} example tests` : ''}.`);

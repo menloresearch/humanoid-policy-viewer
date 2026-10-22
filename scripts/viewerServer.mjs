@@ -5,11 +5,13 @@
 // Nothing here reads process.env.
 //
 //   benchmarksDir     where benchmark folders are listed and "New benchmark" creates them
+//   benchmarkTemplate the benchmark folder "New benchmark" copies (default ./benchmarks/default)
 //   openBenchmark     the benchmark the app opens first (what a request without ?benchmark= uses)
 //   resultsDir        where results are listed, read and saved (<timestamp>/result.json, as `npm run benchmark` writes)
 //   policyLibraryDir  the folder holding the policy roots, served under /policy-library/
 //   policyRoots       folder names under policyLibraryDir to list (empty: no library)
 //   policyLabels      { root: { label, primary } } for roots that are one policy linked from disk
+//   logDir            where /api/save-log writes the policy logs the app dumps (default ./logs)
 //   editable          false drops every route that writes (the headless benchmark runner)
 //
 // A benchmark downloaded from Hugging Face (a folder holding .hf-dataset.json,
@@ -40,6 +42,8 @@ export function viewerServer({
   policyLibraryDir,
   policyRoots: policyRootNames = [],
   policyLabels = {},
+  benchmarkTemplate = undefined,
+  logDir = resolve(appDir, 'logs'),
   editable = true,
 }) {
   const policyRoots = listPolicyRoots(policyLibraryDir, policyRootNames);
@@ -343,7 +347,7 @@ export function viewerServer({
           return;
         }
         const title = typeof body.title === 'string' && body.title.trim() ? body.title.trim() : null;
-        initBenchmark(dir, { title, exampleTest: false, log: () => {} });
+        initBenchmark(dir, { title, exampleTest: false, template: benchmarkTemplate, log: () => {} });
         sendJson(res, 201, { ok: true, benchmark: listBenchmarks().find((benchmark) => benchmark.dir === dir) });
         return;
       }
@@ -700,7 +704,7 @@ export function viewerServer({
           try {
             const { filename, content } = JSON.parse(body);
             const safe = String(filename || ('dump_' + Date.now() + '.log')).replace(/[^a-zA-Z0-9_.-]/g, '_');
-            const outPath = resolve(appDir, 'logs', safe);
+            const outPath = resolve(logDir, safe);
             mkdirSync(dirname(outPath), { recursive: true });
             writeFileSync(outPath, String(content ?? ''), 'utf8');
             sendJson(res, 200, { ok: true, path: outPath });
