@@ -24,3 +24,13 @@ test('Hugging Face downloads are labelled by repo id, other policies by path', (
     'policies/mine/policy.onnx': 'policies/mine/policy.onnx',
   });
 });
+
+test('a policy linked from disk is labelled as given, its other .onnx files by name', (t) => {
+  const base = mkdtempSync(join(tmpdir(), 'hpv-discovery-'));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  mkdirSync(join(base, 'run1__exported'));
+  for (const file of ['policy.onnx', 'old.onnx']) writeFileSync(join(base, 'run1__exported', file), '');
+  const labels = { run1__exported: { label: 'run1/exported', primary: 'policy.onnx' } };
+  assert.deepEqual(discoverPolicies(base, ['run1__exported'], { labels }).map((p) => p.label), ['run1/exported (old.onnx)', 'run1/exported']);
+  assert.deepEqual(discoverPolicies(base, ['run1__exported']).map((p) => p.label), ['run1__exported/old.onnx', 'run1__exported/policy.onnx']);
+});

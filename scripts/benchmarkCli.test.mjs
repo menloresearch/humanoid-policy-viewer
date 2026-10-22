@@ -2,9 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { parsePort, parseWords, rejectSwallowedNpmFlags, swallowedNpmFlags } from './cliArgs.mjs';
-import { classifyTarget } from './benchmarkTargets.mjs';
+import { classifyTarget, splitTargets } from './benchmarkTargets.mjs';
+import { devArgs } from './dev.mjs';
 import { MAX_ROBOTS, buildJobs, groupCells, takeNextJob } from '../src/benchmark/run.js';
 import { parseShard, parseTests, resultTarget, shardJobs, viewHint } from './benchmarkRun.mjs';
 import { datasetFilesToFetch } from './hfDataset.mjs';
@@ -55,6 +56,37 @@ test('targets: policies, benchmarks, revisions and local paths', () => {
   assert.equal(classifyTarget('model', { cwd: dir }).kind, 'policy');
   assert.throws(() => classifyTarget('./missing', { cwd: dir }), /does not exist/);
   assert.throws(() => classifyTarget('https://huggingface.co/spaces/a/b'), /Space/);
+});
+
+test('policies and a benchmark come in any order; policy= and benchmark= say which a word is', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'hpv-split-'));
+  mkdirSync(join(dir, 'bench'));
+  writeFileSync(join(dir, 'bench', 'benchmark.yaml'), 'name: x\n');
+  mkdirSync(join(dir, 'model'));
+  const local = { cwd: dir };
+  const bench = { kind: 'benchmark', source: 'local', path: join(dir, 'bench') };
+  for (const words of [['org/a', 'bench', 'model'], ['bench', 'model', 'org/a'], ['model', 'org/a', 'bench']]) {
+    const { policies, benchmark } = splitTargets(words, {}, local);
+    assert.deepEqual(benchmark, bench, words.join(' '));
+    assert.deepEqual(policies.map((p) => p.source).sort(), ['hub', 'local']);
+  }
+  assert.deepEqual(splitTargets(['datasets/org/b@v1', 'org/a'], {}, local).benchmark, { kind: 'benchmark', source: 'hub', id: 'org/b', revision: 'v1' });
+  assert.equal(splitTargets(['org/a'], {}, local).benchmark, null);
+  // benchmark= reads org/name as a dataset; policy= reads a folder as a policy even when it holds a benchmark.yaml.
+  const explicit = splitTargets([], { benchmark: 'org/b', policy: ['bench', 'org/a'] }, local);
+  assert.deepEqual(explicit.benchmark, { kind: 'benchmark', source: 'hub', id: 'org/b', revision: null });
+  assert.deepEqual(explicit.policies.map((p) => [p.kind, p.source]), [['policy', 'local'], ['policy', 'hub']]);
+  assert.throws(() => splitTargets(['bench', 'datasets/org/b'], {}, local), /Give one benchmark/);
+  assert.throws(() => splitTargets([], { policy: ['datasets/org/b'] }, local), /is a benchmark dataset, not a policy/);
+});
+
+test('npm run dev takes Hub and local policies and a benchmark in any order', () => {
+  const local = 'public/examples/checkpoints/asimov/model_aug_18_1';
+  const args = devArgs(['test/fixtures/smoke-benchmark', 'Menlo/a@v1', local, 'port=4000'], {});
+  assert.deepEqual(args.policies.map((p) => [p.source, p.id ?? p.path]), [['hub', 'Menlo/a'], ['local', resolve(local)]]);
+  assert.deepEqual([args.benchmark.source, args.benchmark.path, args.port], ['local', resolve('test/fixtures/smoke-benchmark'), 4000]);
+  assert.deepEqual(devArgs(['policy=Menlo/a', 'benchmark=datasets/org/b'], {}).policies.map((p) => p.id), ['Menlo/a']);
+  assert.deepEqual(devArgs([], {}), { policies: [], benchmark: null, port: undefined });
 });
 
 const cell = (id, duration, repeat = 0) => ({ cellId: `${id}#${repeat}`, testId: id, repeat, duration, seed: repeat, timeoutS: 60 });

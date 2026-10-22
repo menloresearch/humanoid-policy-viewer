@@ -19,6 +19,12 @@ function hfLabel(dir, fileName) {
   return fileName === meta.primary ? meta.repo : `${meta.repo} (${fileName})`;
 }
 
+// A policy linked from disk: its label for its primary .onnx, "label (file)" for the others.
+function namedLabel(named, rel) {
+  if (!named?.label) return null;
+  return rel === named.primary ? named.label : `${named.label} (${rel})`;
+}
+
 export function listPolicyRoots(baseDir, roots) {
   if (!baseDir) return [];
   return roots
@@ -27,7 +33,12 @@ export function listPolicyRoots(baseDir, roots) {
     .map((entry) => ({ ...entry, realDirectory: realpathSync(entry.directory) }));
 }
 
-export function discoverPolicies(baseDir, roots) {
+/**
+ * Every .onnx under the roots, labelled by its Hugging Face repo id when it was
+ * downloaded, else by labels[root] ({ label, primary }: a policy linked from disk,
+ * see linkPolicyLibrary) when given, else by its library path.
+ */
+export function discoverPolicies(baseDir, roots, { labels = {} } = {}) {
   const policyRoots = listPolicyRoots(baseDir, roots);
   const out = [];
   for (const pr of policyRoots) {
@@ -43,7 +54,7 @@ export function discoverPolicies(baseDir, roots) {
             root: pr.root,
             path: `${pr.root}/${rel}`,
             url: `/policy-library/${pr.root}/${rel}`,
-            label: hfLabel(dir, entry.name) ?? `${pr.root}/${rel}`,
+            label: hfLabel(dir, entry.name) ?? namedLabel(labels[pr.root], rel) ?? `${pr.root}/${rel}`,
             name: entry.name,
           });
         }

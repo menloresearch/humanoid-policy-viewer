@@ -3,11 +3,14 @@
 // the server as options (see viewerServer.mjs), not through process.env.
 // It imports Vite, so call scripts/setup.mjs first on a fresh checkout.
 //
-//   policies       Hugging Face policies to download first ("org/name[@rev]"); listed either way
-//   benchmark      the benchmark the app opens first: a folder (editable), or datasets/<org>/<name>[@rev],
-//                  downloaded into the cache and opened read-only (default ./benchmarks/default)
-//   policyLibrary  { dir, roots } to serve; by default the HPV_POLICY_* variables if set, else
-//                  a folder of links to ./policies and every downloaded Hugging Face policy
+//   policies       policies to list besides the library (`npm run dev`), as words or classified
+//                  targets (benchmarkTargets.mjs): Hub ones are downloaded first, local ones (a
+//                  policy folder, an .onnx or a folder of policies) linked into a temporary library
+//   benchmark      the benchmark the app opens first, a word or a classified target: a folder
+//                  (editable), or datasets/<org>/<name>[@rev], downloaded into the cache and
+//                  opened read-only (default ./benchmarks/default)
+//   policyLibrary  { dir, roots, labels? } to serve; by default the HPV_POLICY_* variables if set,
+//                  else a folder of links to ./policies and every downloaded Hugging Face policy
 //   resultsDir     where results are listed and read (default ./benchmark_results, or HPV_BENCHMARK_RESULTS_DIR)
 //   host, port, open, logLevel   passed to Vite
 //   editable       false serves the app read-only (no route that writes)
@@ -21,9 +24,9 @@ import { serverOptionsFromEnv, viteConfig } from '../vite.config.mjs';
 import { BENCHMARK_FILE, defaultBenchmarkDir } from './benchmarkDir.mjs';
 import { classifyTarget } from './benchmarkTargets.mjs';
 import { ensureDataset } from './hfDataset.mjs';
-import { HF_POLICY_ROOT, defaultCacheDir, ensurePolicy, normalizeRepoId } from './hfPolicy.mjs';
-import { checkPolicyDir, readReferenceJointNames } from './policyChecks.mjs';
+import { HF_POLICY_ROOT, defaultCacheDir } from './hfPolicy.mjs';
 import { DEFAULT_POLICY_ROOT, readEnv } from './policyLibraryConfig.mjs';
+import { cleanupOnExit, libraryFor, resolvePolicies } from './viewPolicies.mjs';
 
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -42,17 +45,20 @@ export async function startViewer({
 } = {}) {
   const cacheDir = defaultCacheDir(env);
   const openBenchmark = await resolveBenchmark(benchmark, { cacheDir, env, log });
-  for (const word of policies) await fetchPolicy(word, { cacheDir, env, log });
 
   const options = serverOptionsFromEnv(env);
   if (resultsDir) options.resultsDir = resolve(resultsDir);
-  if (policyLibrary) {
-    options.policyLibraryDir = resolve(policyLibrary.dir);
-    options.policyRoots = policyLibrary.roots;
-  } else if (readEnv(env, 'HPV_POLICY_LIBRARY_DIR', log) === undefined && readEnv(env, 'HPV_POLICY_ROOTS', log) === undefined) {
-    options.policyLibraryDir = linkedLibrary(cacheDir);
-    options.policyRoots = [DEFAULT_POLICY_ROOT, HF_POLICY_ROOT];
+  let library = policyLibrary;
+  if (!library) {
+    const fromEnv = readEnv(env, 'HPV_POLICY_LIBRARY_DIR', log) !== undefined || readEnv(env, 'HPV_POLICY_ROOTS', log) !== undefined;
+    library = fromEnv
+      ? { dir: options.policyLibraryDir, roots: options.policyRoots }
+      : { dir: linkedLibrary(cacheDir), roots: [DEFAULT_POLICY_ROOT, HF_POLICY_ROOT] };
   }
+  if (policies.length) library = await withPolicies(library, policies, { cacheDir, env, log });
+  options.policyLibraryDir = resolve(library.dir);
+  options.policyRoots = library.roots;
+  options.policyLabels = library.labels ?? {};
   const config = viteConfig({ ...options, openBenchmark, editable });
   const server = await createServer({
     ...config,
@@ -70,35 +76,48 @@ export async function startViewer({
  * The benchmark folder to open first. A Hugging Face dataset is downloaded into
  * the cache (or reused from it) and served from there, read-only.
  */
-async function resolveBenchmark(word, { cacheDir, env, log }) {
-  if (!word) return defaultBenchmarkDir(appDir);
-  const target = isHubDataset(word) ? classifyTarget(word) : null;
-  if (target?.kind === 'benchmark' && target.source === 'hub') {
+async function resolveBenchmark(benchmark, { cacheDir, env, log }) {
+  if (!benchmark) return defaultBenchmarkDir(appDir);
+  const target = typeof benchmark === 'string' ? benchmarkTarget(benchmark) : benchmark;
+  if (target.source === 'hub') {
     const dataset = await ensureDataset(target.id, { revision: target.revision ?? 'main', cacheDir, env, log });
     log(`Opening datasets/${dataset.id}@${dataset.sha.slice(0, 7)} read-only (downloaded from Hugging Face)`);
     return dataset.dir;
   }
-  const dir = resolve(word);
+  const dir = resolve(target.path);
   if (!existsSync(join(dir, BENCHMARK_FILE))) {
     throw new Error(`${dir} has no benchmark.yaml. Create a benchmark with \`npm run benchmark init ${dir}\`, or open one from Hugging Face with benchmark=datasets/<org>/<name>.`);
   }
   return dir;
 }
 
-// "datasets/org/name[@rev]" or a huggingface.co/datasets/... URL, not a path that happens to exist on disk.
-function isHubDataset(text) {
-  if (existsSync(resolve(text))) return false;
-  return /^datasets\//.test(text) || /huggingface\.co\/datasets\/|hf\.co\/datasets\//.test(text);
+// A word given as the benchmark: a folder on disk, else a Hub dataset (org/name works too).
+function benchmarkTarget(word) {
+  if (existsSync(resolve(word))) return { kind: 'benchmark', source: 'local', path: resolve(word) };
+  return { ...classifyTarget(word), kind: 'benchmark' };
 }
 
-/** Downloads one Hugging Face policy into the cache. */
-async function fetchPolicy(word, { cacheDir, env, log }) {
-  const [repo, revision] = word.split('@');
-  const policy = await ensurePolicy(normalizeRepoId(repo), { revision: revision || 'main', cacheDir, env, log });
-  log(`${policy.cached ? 'Cached' : 'Downloaded'} policy ${policy.repo}@${policy.sha.slice(0, 7)}`);
-  // Listed either way; the viewer refuses a policy it would run wrongly when it is picked.
-  const { errors, warnings } = checkPolicyDir(policy.policyDir, readReferenceJointNames(appDir));
-  for (const problem of [...errors, ...warnings]) console.warn(`  ${errors.includes(problem) ? 'Error' : 'Warning'}: ${problem}`);
+/**
+ * `library` plus the `policies` given to `npm run dev`: Hub ones downloaded into
+ * the cache (listed under its hf/ root), local ones linked into a temporary
+ * library beside it. Every policy is listed, problems or not; the viewer refuses
+ * one it would run wrongly when it is picked.
+ */
+async function withPolicies(library, policies, { cacheDir, env, log }) {
+  const targets = policies.map((policy) => (typeof policy === 'string' ? classifyTarget(policy) : policy));
+  const found = await resolvePolicies(targets, { appDir, cacheDir, env, log });
+  // A folder below a folder of policies with no single .onnx to run cannot be listed.
+  const listed = found.filter((policy) => policy.primary);
+  const composed = libraryFor(listed, { base: library });
+  if (composed.dir !== library.dir) cleanupOnExit(composed.cleanup);
+  for (const policy of found) {
+    if (!policy.primary) log(`Not listed: ${policy.name}`);
+    else if (policy.source === 'hub') log(`${policy.cached ? 'Cached' : 'Downloaded'} policy ${policy.repo}@${policy.sha.slice(0, 7)}`);
+    else log(`Listed policy ${policy.name} as ${policy.label}`);
+    for (const problem of policy.errors) console.warn(`  Error: ${problem}`);
+    for (const problem of policy.warnings) console.warn(`  Warning: ${problem}`);
+  }
+  return composed;
 }
 
 /**

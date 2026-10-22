@@ -23,7 +23,7 @@ import { buildBenchmarkReportHtml } from '../src/simulation/benchmarkReport.js';
 import { runJobs } from './benchmarkBrowser.mjs';
 import { collectProvenance, policyFileHashes } from './benchmarkProvenance.mjs';
 import { formatOutcomes, formatTasks, parseShard, parseTests, resultTarget, shardJobs, viewHint } from './benchmarkRun.mjs';
-import { classifyTarget, describeTarget } from './benchmarkTargets.mjs';
+import { describeTarget, splitTargets } from './benchmarkTargets.mjs';
 import { checkPolicyDir, readReferenceJointNames } from './policyChecks.mjs';
 import { parsePort, parseWords, rejectSwallowedNpmFlags } from './cliArgs.mjs';
 import { ensureDataset } from './hfDataset.mjs';
@@ -177,11 +177,7 @@ function printSummary(run, outDir) {
 
 async function runBenchmarkCommand(args) {
   const { positionals, options, flags } = args;
-  const targets = [...positionals, ...(options.policy ?? [])].map((word) => classifyTarget(word));
-  if (options.benchmark) targets.push({ ...classifyTarget(options.benchmark), kind: 'benchmark' });
-  const benchmarks = targets.filter((t) => t.kind === 'benchmark');
-  const policyTargets = targets.filter((t) => t.kind === 'policy');
-  if (benchmarks.length > 1) throw new Error(`Give one benchmark, got ${benchmarks.map(describeTarget).join(' and ')}`);
+  const { policies: policyTargets, benchmark: benchmarkTarget } = splitTargets(positionals, options);
   if (!policyTargets.length) throw new Error(`No policy to benchmark.\n\n${USAGE}`);
 
   const watch = flags.has('watch');
@@ -194,10 +190,10 @@ async function runBenchmarkCommand(args) {
   const outDir = resolve(options.out ?? join(appDir, 'benchmark_results', timestamp()));
   const log = (line) => console.log(line);
 
-  const loaded = await resolveBenchmark(benchmarks[0], log);
+  const loaded = await resolveBenchmark(benchmarkTarget ?? undefined, log);
   const problems = compatibilityProblems(loaded.benchmark);
   if (problems.length && !flags.has('force')) {
-    throw new Error(`This viewer cannot run ${describeTarget(benchmarks[0] ?? { kind: 'benchmark', ...loaded.info })}:\n${problems.map((p) => `  - ${p}`).join('\n')}\n(add "force" to run it anyway; the results will be local-only)`);
+    throw new Error(`This viewer cannot run ${describeTarget(benchmarkTarget ?? { kind: 'benchmark', ...loaded.info })}:\n${problems.map((p) => `  - ${p}`).join('\n')}\n(add "force" to run it anyway; the results will be local-only)`);
   }
   // Every test must load before any browser starts, so a broken test fails in a second, not mid-run.
   assertTestsRunnable(loaded);

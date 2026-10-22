@@ -9,6 +9,7 @@
 //   resultsDir        where results are listed, read and saved (<timestamp>/result.json, as `npm run benchmark` writes)
 //   policyLibraryDir  the folder holding the policy roots, served under /policy-library/
 //   policyRoots       folder names under policyLibraryDir to list (empty: no library)
+//   policyLabels      { root: { label, primary } } for roots that are one policy linked from disk
 //   editable          false drops every route that writes (the headless benchmark runner)
 //
 // A benchmark downloaded from Hugging Face (a folder holding .hf-dataset.json,
@@ -38,6 +39,7 @@ export function viewerServer({
   resultsDir,
   policyLibraryDir,
   policyRoots: policyRootNames = [],
+  policyLabels = {},
   editable = true,
 }) {
   const policyRoots = listPolicyRoots(policyLibraryDir, policyRootNames);
@@ -518,7 +520,7 @@ export function viewerServer({
 
   // ---- Policy catalog (/api/policies): ONNX policies for benchmarking ----
   function listPolicies() {
-    return discoverPolicies(policyLibraryDir, policyRootNames);
+    return discoverPolicies(policyLibraryDir, policyRootNames, { labels: policyLabels });
   }
 
   // ---- Benchmark results (/api/results) ----

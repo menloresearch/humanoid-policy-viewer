@@ -1,4 +1,5 @@
-// Works out what a word on the `npm run benchmark` command line refers to:
+// Works out what a word on the `npm run hf`, `npm run dev` and `npm run benchmark`
+// command lines refers to:
 //
 //   menloresearch/asimov1-loco[@rev]              Hub policy (model repo)
 //   https://huggingface.co/org/name[/tree/rev]    Hub policy (model repo)
@@ -9,6 +10,8 @@
 //
 // A bare org/name is always a policy: the same id can name both a model repo and a
 // dataset, so a benchmark must be written with datasets/ (or given as benchmark=).
+// Policies and the benchmark can come in any order (splitTargets); policy=<x> and
+// benchmark=<y> say which one a word is when that is not clear from the word.
 
 import { existsSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -55,4 +58,23 @@ export function classifyTarget(word, { cwd = process.cwd() } = {}) {
 export function describeTarget(target) {
   if (target.source === 'local') return target.path;
   return `${target.kind === 'benchmark' ? 'datasets/' : ''}${target.id}${target.revision ? `@${target.revision}` : ''}`;
+}
+
+/**
+ * The policies and the benchmark of a command line, in any order: plain words
+ * are classified (classifyTarget); `policy` (a list) and `benchmark` are the
+ * policy= and benchmark= options, which say what the word is. At most one benchmark.
+ * @returns {{ policies: object[], benchmark: object | null }}
+ */
+export function splitTargets(words, { policy = [], benchmark } = {}, { cwd = process.cwd() } = {}) {
+  const targets = words.map((word) => classifyTarget(word, { cwd }));
+  for (const word of policy) {
+    const target = classifyTarget(word, { cwd });
+    if (target.kind === 'benchmark' && target.source === 'hub') throw new Error(`policy=${word} is a benchmark dataset, not a policy`);
+    targets.push({ ...target, kind: 'policy' });
+  }
+  if (benchmark !== undefined) targets.push({ ...classifyTarget(benchmark, { cwd }), kind: 'benchmark' });
+  const benchmarks = targets.filter((target) => target.kind === 'benchmark');
+  if (benchmarks.length > 1) throw new Error(`Give one benchmark, got ${benchmarks.map(describeTarget).join(' and ')}`);
+  return { policies: targets.filter((target) => target.kind === 'policy'), benchmark: benchmarks[0] ?? null };
 }
