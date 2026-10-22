@@ -102,8 +102,25 @@
         </div>
           </v-window-item>
           <v-window-item value="environment" eager>
-        <!-- Environment: the course, the floor grip and the end zone -->
+        <!-- Environment: how the robot starts, the course, the floor grip and the end zone -->
         <div class="env-section mb-3">
+          <div class="d-flex flex-wrap align-center ga-3 mb-2">
+            <v-select
+              v-model="startPreset" :items="startPresetItems" item-title="title" item-value="value"
+              label="Start pose" density="compact" hide-details style="max-width: 200px"
+              title="Where the robot starts. Standing is the policy's own start (env.yaml init_state); a test file can also give its own start in that shape"
+            ></v-select>
+            <v-checkbox
+              v-model="hasSettle" label="Drop and settle" density="compact" hide-details
+              title="Leave the robot limp until it comes to rest before the test starts; the test's clock starts after it"
+            ></v-checkbox>
+            <v-text-field
+              v-if="hasSettle"
+              v-model.number="settleSeconds" label="settle (s)" type="number" min="0.1" :max="MAX_SETTLE_S" step="0.5"
+              density="compact" hide-details style="max-width: 110px"
+            ></v-text-field>
+          </div>
+          <div v-for="e in settleErrors" :key="e" class="text-error text-caption mb-2">Drop and settle: {{ e }}</div>
           <div class="d-flex flex-wrap align-center ga-3 mb-2">
             <v-select
               v-model="terrainType" :items="terrainTypeItems" item-title="title" item-value="value"
@@ -231,6 +248,7 @@ import { ALL_CONFIG, GOAL_MIN_RADIUS_M, OPT_IN_METRICS, PUSH_END_MARGIN_S, valid
 import { TERRAIN_TYPES, defaultTerrain } from '@/simulation/terrainGen.js';
 import { commandedEnd, roundGoal } from '@/benchmark/terrainCheck.js';
 import { loadTestScene } from '@/simulation/terrainScene.js';
+import { DEFAULT_SETTLE_S, MAX_SETTLE_S, START_PRESETS, startPresetOf, validateSettle } from '@/simulation/startState.js';
 import { demoRef } from '@/state/demoRef.js';
 
 // Floor grip presets; the scene's own foot friction is 0.6.
@@ -270,6 +288,7 @@ export default {
       STATIC,
       MAX_DURATION,
       FRICTION_PRESETS,
+      MAX_SETTLE_S,
       terrainErrors: [],
       customFrictionMode: false,
       axes: [
@@ -348,7 +367,44 @@ export default {
       return '';
     },
     canSave() {
-      return this.durationError === '' && this.idError === '' && this.file.length > 0 && !this.terrainErrors.length && !this.goalErrors.length;
+      return this.durationError === '' && this.idError === '' && this.file.length > 0 && !this.environmentHasError;
+    },
+    startPresetItems() {
+      const items = START_PRESETS.map(({ value, title }) => ({ value, title }));
+      // A start written by hand in the test file shows as itself; it can only be replaced by a preset here.
+      if (this.startPreset === 'custom') items.push({ value: 'custom', title: 'Custom (from the test file)', props: { disabled: true } });
+      return items;
+    },
+    startPreset: {
+      get() {
+        return startPresetOf(this.working?.start);
+      },
+      set(value) {
+        const preset = START_PRESETS.find((p) => p.value === value);
+        if (!preset) return;
+        if (preset.start) this.working.start = structuredClone(preset.start);
+        else delete this.working.start;
+      },
+    },
+    hasSettle: {
+      get() {
+        return this.working?.dropSettleS !== undefined && this.working?.dropSettleS !== null;
+      },
+      set(on) {
+        if (on) this.working.dropSettleS = DEFAULT_SETTLE_S;
+        else delete this.working.dropSettleS;
+      },
+    },
+    settleSeconds: {
+      get() {
+        return this.working?.dropSettleS ?? DEFAULT_SETTLE_S;
+      },
+      set(value) {
+        this.working.dropSettleS = Number(value);
+      },
+    },
+    settleErrors() {
+      return this.hasSettle ? validateSettle(this.working.dropSettleS) : [];
     },
     goalErrors() {
       return this.working?.goal ? validateGoal(this.working.goal) : [];
@@ -429,7 +485,7 @@ export default {
       return this.durationError !== '' || this.idError !== '';
     },
     environmentHasError() {
-      return this.terrainErrors.length > 0 || this.goalErrors.length > 0;
+      return this.terrainErrors.length > 0 || this.goalErrors.length > 0 || this.settleErrors.length > 0;
     },
   },
   methods: {
@@ -722,6 +778,9 @@ export default {
       if (this.metricsOptIn.length) clean.metricsOptIn = [...this.metricsOptIn];
       if (this.metricsOptIn.includes('gait_symmetry')) clean.gaitSymmetry = true;
       if (this.working.goal) clean.goal = { ...this.working.goal };
+      // How the robot starts (Environment panel).
+      if (this.working.start) clean.start = JSON.parse(JSON.stringify(this.working.start));
+      if (this.hasSettle) clean.dropSettleS = Number(this.working.dropSettleS);
       return clean;
     },
     async save() {

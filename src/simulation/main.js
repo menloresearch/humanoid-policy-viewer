@@ -6,6 +6,7 @@ import { commandSequencer } from './commandSequencer.js';
 import { asimovCommandState } from './observationHelpers.js';
 import { IdealPathTracker, yawFromQuat } from './idealPath.js';
 import { hasFailed } from './benchmarkRunner.js';
+import { resolveStartState, SETTLE_JOINT_DAMPING, worldToBody } from './startState.js';
 
 const defaultPolicy = "./examples/checkpoints/asimov/reference_policy_config.json";
 // The canonical Asimov model from the asimov-1 submodule; see
@@ -47,6 +48,11 @@ export class MuJoCoDemo {
     this.actionDelayBuffer = [];
     this.maxRawAction = 0;
     this.fallen = false;
+    // How the viewer's Reset starts the robot: a start override in env.yaml
+    // init_state shape (null = the policy's own) and the drop-and-settle
+    // seconds (null = off). A benchmark test passes its own.
+    this.viewerStart = { start: null, settleS: null };
+    this.initStatePolicy = null;
     this.rawActions = null;
     this.model = null;
     this.data = null;
@@ -1168,32 +1174,66 @@ export class MuJoCoDemo {
     };
   }
 
-  resetSimulation(robot = this) {
+  /**
+   * Drop and settle: steps `robot` for `seconds` with no motor torque and
+   * light joint damping, so it comes to rest where gravity puts it, then
+   * zeroes its velocities. Nothing else moves the sim meanwhile (no policy,
+   * pushes or command clock).
+   */
+  _settle(robot, seconds) {
+    const sim = robot.simulation;
+    const steps = Math.round(seconds / this.timestep);
+    for (let step = 0; step < steps; step++) {
+      sim.ctrl.fill(0);
+      sim.qfrc_applied.fill(0);
+      for (let i = 0; i < this.numActions; i++) {
+        const adr = this.qvel_adr_policy[i];
+        sim.qfrc_applied[adr] = -SETTLE_JOINT_DAMPING * sim.qvel[adr];
+      }
+      sim.step();
+    }
+    sim.qfrc_applied.fill(0);
+    sim.qvel.fill(0);
+    sim.forward();
+  }
+
+  /**
+   * Puts `robot` back at the start: the policy's init_state with `start`
+   * (env.yaml init_state shape, see startState.js) applied, then, with
+   * `settleS`, left limp for that many seconds before the policy takes over.
+   * Without options it uses the viewer's own start settings (viewerStart).
+   */
+  resetSimulation(robot = this, { start = this.viewerStart.start, settleS = this.viewerStart.settleS } = {}) {
     if (!robot.simulation) {
       return;
     }
     this.params.paused = true;
-    robot.simulation.resetData();
+    const sim = robot.simulation;
+    sim.resetData();
     robot.fallen = false;
 
-    // Apply keyframe: set root height and joint positions
-    // Freejoint qpos: [x, y, z, qw, qx, qy, qz] at indices 0-6
-    robot.simulation.qpos[2] = 0.614;  // standing height (shallow crouch)
-    robot.simulation.qpos[3] = 1.0;    // quat w (upright)
-    robot.simulation.qpos[4] = 0.0;
-    robot.simulation.qpos[5] = 0.0;
-    robot.simulation.qpos[6] = 0.0;
-    if (this.defaultJposPolicy && this.qpos_adr_policy) {
+    // Freejoint qpos: [x, y, z, qw, qx, qy, qz]; qvel: world linear velocity,
+    // then angular velocity in the body frame.
+    const initial = resolveStartState(this.initStatePolicy, start, this.policyJointNames ?? []);
+    for (let k = 0; k < 3; k++) sim.qpos[k] = initial.pos[k];
+    for (let k = 0; k < 4; k++) sim.qpos[3 + k] = initial.rot[k];
+    const angVelBody = worldToBody(initial.rot, initial.angVel);
+    for (let k = 0; k < 3; k++) {
+      sim.qvel[k] = initial.linVel[k];
+      sim.qvel[3 + k] = angVelBody[k];
+    }
+    if (this.qpos_adr_policy) {
       const noise = robot.benchmarkRandomization?.initialJointNoiseRad || 0;
       const random = robot.benchmarkRandomization?.random;
       for (let i = 0; i < this.numActions; i++) {
-        const qpos_adr = this.qpos_adr_policy[i];
         const offset = noise > 0 && random ? (random() * 2 - 1) * noise : 0;
-        robot.simulation.qpos[qpos_adr] = this.defaultJposPolicy[i] + offset;
+        sim.qpos[this.qpos_adr_policy[i]] = initial.jointPos[i] + offset;
+        sim.qvel[this.qvel_adr_policy[i]] = initial.jointVel[i];
       }
     }
 
-    robot.simulation.forward();
+    sim.forward();
+    if (settleS > 0) this._settle(robot, settleS);
     robot.actionTarget = null;
     robot.filteredActionTarget = null;
     robot.rawActions = null;

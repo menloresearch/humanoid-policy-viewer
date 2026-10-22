@@ -23,6 +23,13 @@
 //   goal            { x, y, radius_m } | null: an end zone the robot's base must
 //                   enter for the run to count as survived
 //   metrics_opt_in  string[], e.g. ["gait_symmetry"]
+//   start           { pos, rot, lin_vel, ang_vel, joint_pos, joint_vel } | null:
+//                   where the robot starts, in env.yaml's init_state shape; the
+//                   keys it gives replace the policy's own init_state
+//                   (src/simulation/startState.js). null = the policy's own.
+//                   Stored as JSON text on the Hub (rowToHub / rowFromHub).
+//   drop_settle_s   number | null: seconds the robot is left limp to settle
+//                   before the test's clock starts; null = off
 //
 // rowToSequence() turns a row into the sequence object commandSequencer and
 // computeMetrics() play and score; sequenceToRow() folds an edited sequence
@@ -30,6 +37,7 @@
 
 import { TEST_KINDS, TEST_SCHEMA_VERSION } from './protocol.js';
 import { TERRAIN_TYPES, validateTerrain } from '../simulation/terrainGen.js';
+import { validateSettle, validateStartState } from '../simulation/startState.js';
 
 // The dataset config that holds every test (data/*/test.jsonl); not a category.
 export const ALL_CONFIG = 'all';
@@ -93,7 +101,35 @@ export const ROW_FEATURES = [
   ['limits', { struct: [['vx', floats], ['vy', floats], ['wz', floats]] }],
   ['foot_friction', float], ['terrain', { struct: terrainFeatures }],
   ['goal', { struct: [['x', float], ['y', float], ['radius_m', float]] }], ['metrics_opt_in', { sequence: 'string' }],
+  // env.yaml's init_state keys joints by name pattern, which no fixed struct can declare.
+  ['start', string], ['drop_settle_s', float],
 ];
+
+// Columns added after the first published benchmarks; a row without one reads as null.
+const LATER_KEYS = ['start', 'drop_settle_s'];
+
+/**
+ * A row as read from a test.jsonl, local or from the Hub: `start` parsed from
+ * its JSON text, and the later columns an older row lacks set to null.
+ */
+export function rowFromHub(row) {
+  if (!row || typeof row !== 'object' || Array.isArray(row)) return row;
+  const out = { ...row };
+  for (const key of LATER_KEYS) if (!(key in out)) out[key] = null;
+  if (typeof out.start === 'string') {
+    try {
+      out.start = JSON.parse(out.start);
+    } catch {
+      // Left as text; validateTestRow reports it.
+    }
+  }
+  return out;
+}
+
+/** A row as published: `start` as JSON text, the type the dataset card declares. */
+export function rowToHub(row) {
+  return row.start && typeof row.start === 'object' ? { ...row, start: JSON.stringify(row.start) } : row;
+}
 
 /** ROW_FEATURES as the YAML structure `datasets` reads from a card. */
 export function rowFeaturesYaml(features = ROW_FEATURES) {
@@ -163,6 +199,9 @@ export function validateTestRow(row) {
   if (!Array.isArray(row.metrics_opt_in) || row.metrics_opt_in.some((m) => !OPT_IN_METRICS.includes(m))) {
     fail(`metrics_opt_in must list only: ${OPT_IN_METRICS.join(', ')}`);
   }
+  // A row from before these columns may lack them (rowFromHub fills them in).
+  if (row.start !== null && row.start !== undefined) for (const problem of validateStartState(row.start)) fail(`start: ${problem}`);
+  for (const problem of validateSettle(row.drop_settle_s)) fail(`drop_settle_s ${problem}`);
   return errors;
 }
 
@@ -177,6 +216,8 @@ export function rowToSequence(row) {
   if (row.foot_friction !== null && row.foot_friction !== undefined) sequence.footFriction = row.foot_friction;
   if (row.terrain) sequence.terrain = { ...row.terrain };
   if (row.goal) sequence.goal = { ...row.goal };
+  if (row.start) sequence.start = structuredClone(row.start);
+  if (row.drop_settle_s) sequence.dropSettleS = row.drop_settle_s;
   if (row.events.length) {
     sequence.events = row.events.map((event) => {
       const out = { t: event.t, type: 'push', dir: event.dir, force: event.force, duration: event.duration };
@@ -227,5 +268,7 @@ export function sequenceToRow(id, sequence, previous = null) {
     goal: sequence.goal ? { ...sequence.goal } : null,
     // In OPT_IN_METRICS order; older sequences only carry the gaitSymmetry flag.
     metrics_opt_in: OPT_IN_METRICS.filter((m) => (sequence.metricsOptIn ?? (sequence.gaitSymmetry === true ? ['gait_symmetry'] : [])).includes(m)),
+    start: sequence.start ? structuredClone(sequence.start) : null,
+    drop_settle_s: sequence.dropSettleS ?? null,
   };
 }

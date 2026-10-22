@@ -32,7 +32,8 @@ A test describes a scenario and nothing else; it does not know how often it runs
  "duration": 12, "commands": [{"t": 0, "vx": 0.6, "vy": 0, "wz": 0}],
  "events": [{"t": 2, "type": "push", "dir": [-1, 0, 0], "force": 450, "duration": 0.15, "targetBody": "pelvis_link",
              "torqueAxis": null, "torqueMag": null, "label": "pelvis back (450N)"}],
- "limits": null, "foot_friction": null, "terrain": null, "goal": null, "metrics_opt_in": []}
+ "limits": null, "foot_friction": null, "terrain": null, "goal": null, "metrics_opt_in": [],
+ "start": null, "drop_settle_s": null}
 ```
 
 `id` is `<config>/<name>` and is how results refer to the test. A benchmark without categories puts every test
@@ -53,7 +54,18 @@ the commanded path (the ✕), as does **Snap to path end**. From a script or an 
 `npm run benchmark path-end <dir> [<test id>...]` prints one JSON line per test with `path_end` (where the velocity
 commands, integrated exactly, leave the robot), its `goal`, and whether the path enters it; the checks before a run
 warn when the commanded path never enters a test's end zone. `metrics_opt_in: ["gait_symmetry"]` turns on
-the gait symmetry metric (straight, steady walking only). The full schema is in `src/benchmark/testRow.js`.
+the gait symmetry metric (straight, steady walking only).
+
+`start` is where the robot starts, written like the robot's `init_state` in env.yaml: `pos` [x, y, z], `rot`
+[w, x, y, z], `lin_vel` and `ang_vel` (world frame), and `joint_pos` / `joint_vel` mapping joint names or regex
+patterns to values. The keys it gives replace the policy's own `init_state`, and its joint entries replace only the
+joints they match; `null` starts from the policy's own (standing). For example, lying on its back with bent knees:
+`{"pos": [0, 0, 0.16], "rot": [0.7071068, 0, -0.7071068, 0], "joint_pos": {".*_knee_joint": 0.6}}`. On the Hub the
+column is JSON text (a dataset cannot declare a map keyed by joint patterns); `hf publish` writes it that way and
+everything that reads a benchmark accepts both. `drop_settle_s` (seconds, at most 10, or `null` for off) leaves the
+robot limp (no motor torque, light joint damping) until it comes to rest before the test's clock starts. The
+editor's Environment tab offers the presets Standing and Lying on back, and the drop-and-settle checkbox; anything
+finer is written in the row by hand. The full schema is in `src/benchmark/testRow.js`.
 
 ### Terrain
 

@@ -244,7 +244,8 @@ export async function runBenchmarkGroup({
           initialJointNoiseRad: randomization.randomize?.initial_joint_noise_rad ?? 0,
         }
         : null, robot);
-      demo.resetSimulation(robot);
+      // The test's own start, never the viewer's Reset settings.
+      demo.resetSimulation(robot, { start: sequence?.start ?? null, settleS: sequence?.dropSettleS ?? null });
     });
     demo.drainBodyResolutionWarnings?.(); // discard anything left over from a prior test
     const { warning: loadWarning } = commandSequencer.loadSequence(sequence, sequence?.name);

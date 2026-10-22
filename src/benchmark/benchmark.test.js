@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { cellSeed, mulberry32 } from './rng.js';
-import { ROW_FEATURES, rowToSequence, sequenceToRow, validateTestRow } from './testRow.js';
+import { ROW_FEATURES, rowFromHub, rowToHub, rowToSequence, sequenceToRow, validateTestRow } from './testRow.js';
 import { buildEvalYaml, compatibilityProblems, expandCells, parseBenchmark, selectTests } from './settings.js';
 import { computeTasks, summarizeTests } from './summary.js';
 import { BENCHMARK_PROTOCOL } from './protocol.js';
@@ -17,7 +17,7 @@ function row(id, extra = {}) {
   return {
     id, config, schema_version: 1, kind: 'velocity-sequence', name: id, description: '', tags: [],
     duration: 4, commands: [{ t: 0, vx: 0.5, vy: 0, wz: 0 }], events: [], limits: null,
-    foot_friction: null, terrain: null, goal: null, metrics_opt_in: [], ...extra,
+    foot_friction: null, terrain: null, goal: null, metrics_opt_in: [], start: null, drop_settle_s: null, ...extra,
   };
 }
 
@@ -312,4 +312,36 @@ test('a test opts into several metrics; the list survives the editor round trip'
   // Older sequences carry only the gaitSymmetry flag.
   assert.deepEqual(sequenceToRow('loco/a', { ...sequence, metricsOptIn: undefined }, original).metrics_opt_in, ['gait_symmetry']);
   assert.ok(validateTestRow(row('loco/a', { metrics_opt_in: ['balance'] })).some((e) => e.includes('metrics_opt_in')));
+});
+
+test('a test start state and settle time survive the editor round trip and the Hub', () => {
+  const start = { pos: [0, 0, 0.16], rot: [0.7071068, 0, -0.7071068, 0], joint_pos: { '.*_knee_joint': 0.6 } };
+  const original = row('getup/a', { start, drop_settle_s: 2.5 });
+  assert.deepEqual(validateTestRow(original), []);
+  const sequence = rowToSequence(original);
+  assert.deepEqual(sequence.start, start);
+  assert.equal(sequence.dropSettleS, 2.5);
+  assert.deepEqual(sequenceToRow('getup/a', sequence, original), original);
+
+  // On the Hub start is JSON text; reading it back gives the same row.
+  const published = rowToHub(original);
+  assert.equal(typeof published.start, 'string');
+  assert.deepEqual(rowFromHub(JSON.parse(JSON.stringify(published))), original);
+
+  assert.ok(validateTestRow(row('getup/a', { start: { height: 1 } })).some((e) => e.includes('start: unknown key')));
+  assert.ok(validateTestRow(row('getup/a', { drop_settle_s: 0 })).some((e) => e.includes('drop_settle_s')));
+  assert.ok(validateTestRow(rowFromHub(row('getup/a', { start: '{not json' }))).some((e) => e.includes('start:')));
+});
+
+test('a row from before start and drop_settle_s reads as starting from the policy init_state, without settling', () => {
+  const old = row('loco/a');
+  delete old.start;
+  delete old.drop_settle_s;
+  const read = rowFromHub(old);
+  assert.equal(read.start, null);
+  assert.equal(read.drop_settle_s, null);
+  assert.deepEqual(validateTestRow(read), []);
+  const sequence = rowToSequence(read);
+  assert.equal(sequence.start, undefined);
+  assert.equal(sequence.dropSettleS, undefined);
 });

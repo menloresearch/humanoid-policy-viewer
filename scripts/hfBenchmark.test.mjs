@@ -10,7 +10,7 @@ import { dirname, join, resolve } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
-import { publish, withTestedCommit } from './hfBenchmark.mjs';
+import { hubRowsText, publish, withTestedCommit } from './hfBenchmark.mjs';
 import { RESULT_SCHEMA, summarize } from '../src/benchmark/run.js';
 import { submit } from './hfSubmit.mjs';
 
@@ -454,4 +454,14 @@ test('a license that is neither a file nor an id is refused', async () => {
     publish(withYaml((yaml) => yaml.replace(/^license: .*$/m, 'license: 3\ntags: nope')), { repo: 'me/bad2', create: true }, fake.io),
     /license must be[^]*tags must be a list of strings/,
   );
+});
+
+test('publishing writes a row\'s start as JSON text and leaves other rows as written', () => {
+  const start = { pos: [0, 0, 0.16], joint_pos: { '.*_knee_joint': 0.6 } };
+  const plain = '{"id":"loco/a",  "start":null}';
+  const text = `${plain}\n${JSON.stringify({ id: 'getup/a', start })}\n`;
+  const [first, second, last] = hubRowsText(text).split('\n');
+  assert.equal(first, plain);
+  assert.deepEqual(JSON.parse(second), { id: 'getup/a', start: JSON.stringify(start) });
+  assert.equal(last, '');
 });

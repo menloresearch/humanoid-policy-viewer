@@ -16,7 +16,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSy
 import { join } from 'node:path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { buildEvalYaml, parseBenchmark } from '../src/benchmark/settings.js';
-import { ALL_CONFIG, rowFeaturesYaml, validateTestRow } from '../src/benchmark/testRow.js';
+import { ALL_CONFIG, rowFeaturesYaml, rowFromHub, validateTestRow } from '../src/benchmark/testRow.js';
 
 export const BENCHMARK_FILE = 'benchmark.yaml';
 export const DATA_DIR = 'data';
@@ -50,7 +50,7 @@ export function readRows(dir) {
       const where = `${DATA_DIR}/${config}/${ROWS_FILE}:${i + 1}`;
       let row;
       try {
-        row = JSON.parse(line);
+        row = rowFromHub(JSON.parse(line));
       } catch (error) {
         problems.push(`${where}: not valid JSON (${error.message})`);
         return;

@@ -890,9 +890,27 @@
           hide-details
           @update:modelValue="onRenderScaleChange"
         ></v-slider>
+        <v-divider class="my-2"/>
+        <!-- How Reset starts the robot; a benchmark test sets its own -->
+        <v-select
+          v-model="startPreset" :items="START_PRESETS" item-title="title" item-value="value"
+          label="Start pose" density="compact" hide-details class="mb-1"
+          title="Where Reset puts the robot. Standing is the policy's own start (env.yaml init_state)"
+        ></v-select>
+        <div class="d-flex align-center ga-2">
+          <v-checkbox
+            v-model="settleOn" label="Drop and settle" density="compact" hide-details
+            title="On Reset, leave the robot limp until it comes to rest before the policy takes over"
+          ></v-checkbox>
+          <v-text-field
+            v-if="settleOn"
+            v-model.number="settleSeconds" label="settle (s)" type="number" min="0.1" :max="MAX_SETTLE_S" step="0.5"
+            density="compact" hide-details="auto" :error-messages="settleError" style="max-width: 110px"
+          ></v-text-field>
+        </div>
       </v-card-text>
       <v-card-actions>
-        <v-btn color="primary" block @click="reset">Reset</v-btn>
+        <v-btn color="primary" block :disabled="!!settleError" @click="reset">Reset</v-btn>
       </v-card-actions>
     </v-card>
   </div>
@@ -931,6 +949,7 @@ import {
 } from '@/benchmark/run.js';
 import { compatibilityProblems, parseBenchmark } from '@/benchmark/settings.js';
 import { rowToSequence } from '@/benchmark/testRow.js';
+import { DEFAULT_SETTLE_S, MAX_SETTLE_S, START_PRESETS, validateSettle } from '@/simulation/startState.js';
 import { appState, openEditor, newBlankSequence, openResults, setBenchmarkResults } from '@/state/appState.js';
 import { demoRef } from '@/state/demoRef.js';
 import { loadBenchmarkDataset, loadTest, saveTest } from '@/state/testStore.js';
@@ -1056,6 +1075,12 @@ export default {
     playbackError: '',
     playbackWarning: '',
     currentTestFile: null, // on-disk file the loaded test came from
+    // How Reset starts the robot (startState.js).
+    START_PRESETS,
+    MAX_SETTLE_S,
+    startPreset: 'standing',
+    settleOn: false,
+    settleSeconds: DEFAULT_SETTLE_S,
     minimapError: '0.00',
     telemetry: {
       vx: '0.00', vy: '0.00', vz: '0.00',
@@ -1084,6 +1109,9 @@ export default {
     _peakPullForceValue: 0
   }),
   computed: {
+    settleError() {
+      return this.settleOn ? (validateSettle(Number(this.settleSeconds))[0] ?? '') : '';
+    },
     appState() {
       return appState;
     },
@@ -1634,6 +1662,10 @@ export default {
       if (!this.demo) {
         return;
       }
+      this.demo.viewerStart = {
+        start: START_PRESETS.find((p) => p.value === this.startPreset)?.start ?? null,
+        settleS: this.settleOn ? Number(this.settleSeconds) : null,
+      };
       this.demo.resetSimulation();
       this._peakGyroValue = 0;
       this.telemetry.peakGyro = '0.00';
