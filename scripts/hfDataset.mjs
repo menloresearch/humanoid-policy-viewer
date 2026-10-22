@@ -1,17 +1,19 @@
 // Fetches a benchmark dataset (benchmark.yaml, data/*/test.jsonl and the other
-// published files, see benchmarkDir.mjs) from Hugging Face into <cache>/hf-datasets/<org>__<name>/<sha>/. A commit
-// never changes, so a revision already in the cache is used as is, and a run
-// always records the exact dataset commit it used.
+// published files, see benchmarkDir.mjs) from Hugging Face into
+// <cache>/hf-datasets/<org>__<name>/<sha>/. Read only: nothing here writes to
+// the Hub, and the viewer refuses edits to a downloaded folder. A commit never
+// changes, so a revision already in the cache is used as is, and a run always
+// records the exact dataset commit it used.
 
 import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
-import { BENCHMARK_FILES } from './benchmarkDir.mjs';
+import { BENCHMARK_FILES, DATASET_META_FILE } from './benchmarkDir.mjs';
 import { hubToken } from './hfAuth.mjs';
 import { defaultCacheDir, downloadFile, notFoundHint } from './hfPolicy.mjs';
 
-export const DATASET_META_FILE = '.hf-dataset.json';
+export { DATASET_META_FILE };
 
-// Everything `hf publish` uploads, so a pulled copy publishes back unchanged; never large data files.
+// The benchmark's own files and its eval.yaml; never large data files.
 export function datasetFilesToFetch(files) {
   return files.filter((file) => file === 'eval.yaml' || BENCHMARK_FILES.some((re) => re.test(file)));
 }

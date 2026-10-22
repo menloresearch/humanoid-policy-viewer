@@ -22,6 +22,9 @@ import { ALL_CONFIG, rowFeaturesYaml, rowFromHub, rowToHub, validateTestRow } fr
 export const BENCHMARK_FILE = 'benchmark.yaml';
 export const DATA_DIR = 'data';
 export const ROWS_FILE = 'test.jsonl';
+// Written by hfDataset.mjs into every benchmark it downloads from the Hub:
+// { id, revision, sha, files }. A folder holding it is a read-only download.
+export const DATASET_META_FILE = '.hf-dataset.json';
 
 // The files of a benchmark folder that are published as they are (each
 // data/*/test.jsonl in its Hub form, see hubRowsText). eval.yaml and the dataset
@@ -39,6 +42,19 @@ export const defaultBenchmarkDir = (appDir) => join(appDir, 'benchmarks', 'defau
 
 export function readYamlFile(path) {
   return parseYaml(readFileSync(path, 'utf8'));
+}
+
+/**
+ * The Hub dataset a benchmark folder was downloaded from ({ id, revision, sha }),
+ * or null for a local folder. Downloads are read-only: the viewer refuses edits to them.
+ */
+export function hubDatasetOf(dir) {
+  try {
+    const meta = JSON.parse(readFileSync(join(dir, DATASET_META_FILE), 'utf8'));
+    return { id: meta.id ?? null, revision: meta.revision ?? null, sha: meta.sha ?? null };
+  } catch {
+    return null;
+  }
 }
 
 /** Every row under data/, in config then file order, plus any problems found. */

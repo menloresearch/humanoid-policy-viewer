@@ -85,6 +85,11 @@
             {{ isOpen(benchmark) ? 'mdi-folder-open' : 'mdi-folder' }}
           </v-icon>
           <span class="name benchmark-name">{{ benchmark.title || benchmark.key }}</span>
+          <span
+            v-if="benchmark.readOnly"
+            class="badge"
+            :title="`Downloaded from Hugging Face (datasets/${benchmark.hub.id}); read-only here`"
+          >read-only</span>
           <v-progress-circular v-if="running && isCurrent(benchmark)" indeterminate size="12" width="2" color="primary" />
           <span class="badge count" title="tests">{{ isCurrent(benchmark) && loaded ? items.length : benchmark.testCount }}</span>
           <v-btn
@@ -145,7 +150,7 @@
             @delete="onDelete"
           />
           <div
-            v-if="!STATIC"
+            v-if="!STATIC && !benchmark.readOnly"
             class="row add-row d-flex align-center ga-1"
             :style="{ paddingLeft: '18px' }"
             @click="$emit('new')"

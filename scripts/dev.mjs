@@ -6,9 +6,8 @@
 // The trajectory editor and the in-app benchmark read and write the tests of a
 // benchmark folder (see scripts/benchmarkDir.mjs and docs/benchmarks.md):
 // benchmark=<dir>, or by default the tracked example benchmark ./benchmarks/default.
-// A Hugging Face dataset is pulled on first use into ./benchmarks/<org>__<name>
-// (gitignored), an ordinary working copy (edit it, `npm run hf diff` /
-// `publish` it); later runs reuse it as is. That folder is where the app opens
+// A Hugging Face dataset (benchmark=datasets/<org>/<name>[@rev]) is downloaded
+// into the cache and opened read-only. That benchmark is where the app opens
 // first; its "New benchmark" button adds more under ./benchmarks/ and the app
 // switches between them.
 //

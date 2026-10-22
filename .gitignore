@@ -50,10 +50,10 @@ dist
 /public/policy-library/
 /public/static-data/
 
-# Local benchmarks: pulled Hub datasets and "New benchmark" folders. Benchmarks
-# are published as Hugging Face datasets, not kept in this repo (see
-# docs/benchmarks.md); only default/, the example `npm run dev` opens
-# and new benchmarks are copied from, is tracked.
+# Local benchmarks: the folders "New benchmark" and `npm run benchmark init` make.
+# Benchmarks are published as Hugging Face datasets (with cyclotron), not kept in
+# this repo (see docs/benchmarks.md); only default/, the example `npm run dev`
+# opens and new benchmarks are copied from, is tracked.
 /benchmarks/*
 !/benchmarks/default/
 
