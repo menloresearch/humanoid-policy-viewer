@@ -433,6 +433,19 @@ export function computeMetrics(samples, { dt = 0.02, jointNames = [], sequence =
     time: firstFallen ? round(firstFallen.time) : null,
   };
 
+  // How the run ended, whatever the start (a test may start the robot lying
+  // down): down in the last frame, when it last went down after being up, and
+  // whether it was ever up at all.
+  let lastFall = null;
+  rows.forEach((sample, i) => {
+    if (i > 0 && sample.fallen === true && rows[i - 1].fallen !== true) lastFall = sample;
+  });
+  const ending = {
+    down: rows.length ? rows[rows.length - 1].fallen === true : true,
+    last_fall_time: lastFall ? round(lastFall.time) : null,
+    stood: rows.some((sample) => sample.fallen !== true),
+  };
+
   // End zone: did the base get there (whether or not it fell afterwards)?
   const goal = sequence?.goal ? goalOutcome(topDown.actual, sequence.goal) : null;
 
@@ -447,6 +460,7 @@ export function computeMetrics(samples, { dt = 0.02, jointNames = [], sequence =
     actionSmoothness,
     perturbations,
     fell,
+    ending,
     goal,
   };
 }

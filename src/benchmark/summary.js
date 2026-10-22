@@ -21,13 +21,18 @@
 //     a 95% interval clipped to the metric's range. Each test's spread is
 //     smoothed (see variance()), so the interval is never falsely zero-width.
 //
+// Version 1 of the survival metrics judges a run by its first fall; version 2
+// by how it ended, so it also works for tests that start the robot down
+// (lying, or limp after drop and settle): it survived if it is up in the last
+// frame, and otherwise its time is when it last went down (0 if it never stood).
+//
 // A cell that errored counts as a failure (fell at t = 0), never as missing
 // data, so a crashing policy cannot score well by crashing. On a test with a
 // goal (an end zone), a run whose base never entered the zone did not finish
-// the test: it counts as falling at the end, so it fails survival_rate but keeps
-// survival_time 1 (it stayed upright the whole time). Per-test summaries keep
-// the two apart: fellAt says when a repeat fell, missedGoal which repeats stayed
-// upright but never got to the end zone.
+// the test: it fails survival_rate but keeps survival_time 1 (it stayed upright).
+// Per-test summaries keep the two apart, judged as version 2 does: fellAt says
+// when a repeat that ended down last went down, missedGoal which repeats ended
+// up but never got to the end zone.
 
 import { goalOutcome } from '../simulation/metrics.js';
 
@@ -62,14 +67,27 @@ function fallTime(cell) {
   return cell.metrics.fell?.fell ? (cell.metrics.fell.time ?? 0) : null;
 }
 
+/**
+ * Seconds into the test when a run that ended down last went down: 0 if it never
+ * stood (or errored), null if it ended up. A result saved before runs recorded
+ * how they ended is judged by its first fall.
+ */
+function endFallTime(cell) {
+  if (failed(cell)) return 0;
+  const ending = cell.metrics.ending;
+  if (!ending) return fallTime(cell);
+  if (!ending.down) return null;
+  return ending.stood ? (ending.last_fall_time ?? 0) : 0;
+}
+
 /** Whether the robot's base entered the test's end zone (true when the test has none). */
 export function reachedGoal(cell, row) {
   if (!row.goal) return true;
   return goalOutcome(cell.metrics?.topDown?.actual, row.goal).reached;
 }
 
-/** Stayed upright for the whole test but never entered its end zone. */
-const missedGoal = (cell, row) => fallTime(cell) === null && !reachedGoal(cell, row);
+/** Ended up but never entered its end zone. */
+const missedGoal = (cell, row) => endFallTime(cell) === null && !reachedGoal(cell, row);
 
 // Every metric a benchmark task may name, by "<name>@<version>".
 //   perCell(cell, row) -> number   the value of one (test, repeat)
@@ -87,6 +105,22 @@ export const METRICS = {
     description: 'Fraction of each test completed before the first fall (1 = never fell)',
     perCell: (cell, row) => {
       const t = fallTime(cell);
+      if (t === null) return 1;
+      return row.duration > 0 ? Math.min(1, Math.max(0, t / row.duration)) : 0;
+    },
+  },
+  'survival_rate@2': {
+    higherIsBetter: true,
+    range: [0, 1],
+    description: 'Probability of being up at the end of a test, and having reached its end zone if it has one (1 = always)',
+    perCell: (cell, row) => (endFallTime(cell) === null && reachedGoal(cell, row) ? 1 : 0),
+  },
+  'survival_time@2': {
+    higherIsBetter: true,
+    range: [0, 1],
+    description: 'Fraction of each test before the robot last went down (1 = up at the end, 0 = never stood)',
+    perCell: (cell, row) => {
+      const t = endFallTime(cell);
       if (t === null) return 1;
       return row.duration > 0 ? Math.min(1, Math.max(0, t / row.duration)) : 0;
     },
@@ -117,7 +151,7 @@ export function summarizeTests(cells, selected) {
       tags: row.tags,
       repeats: mine.length,
       errors: mine.filter(failed).length,
-      fellAt: mine.map(fallTime),
+      fellAt: mine.map(endFallTime),
       missedGoal: mine.map((cell) => missedGoal(cell, row)),
       metrics,
     };

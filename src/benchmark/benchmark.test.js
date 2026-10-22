@@ -8,7 +8,7 @@ import { ROW_FEATURES, rowFromHub, rowToHub, rowToSequence, sequenceToRow, valid
 import { buildEvalYaml, compatibilityProblems, expandCells, parseBenchmark, selectTests } from './settings.js';
 import { computeTasks, summarizeTests } from './summary.js';
 import { BENCHMARK_PROTOCOL } from './protocol.js';
-import { goalOutcome } from '../simulation/metrics.js';
+import { computeMetrics, goalOutcome } from '../simulation/metrics.js';
 
 const FIXTURE = new URL('../../test/fixtures/smoke-benchmark/', import.meta.url).pathname;
 
@@ -205,7 +205,7 @@ test('a test survived on every repeat still has an uncertainty', () => {
 });
 
 test('metrics must name a version; aggregate and pass_rule are no longer settings', () => {
-  assert.throws(() => benchmark({ tasks: [{ id: 'x', metric: 'survival_rate' }] }), /must name a version, e\.g\. "survival_rate@1"/);
+  assert.throws(() => benchmark({ tasks: [{ id: 'x', metric: 'survival_rate' }] }), /must name a version, e\.g\. "survival_rate@2"/);
   assert.throws(() => benchmark({ tasks: [{ id: 'x', metric: 'upright_rate@1' }] }), /unknown; known: survival_rate@1/);
   assert.throws(() => benchmark({ defaults: { pass_rule: 'fraction' } }), /defaults\.pass_rule is not a setting.*part of each metric/);
   assert.throws(() => benchmark({ tests: [{ config: 'loco', aggregate: 'mean' }] }), /tests\[0\]\.aggregate is not a setting/);
@@ -344,4 +344,35 @@ test('a row from before start and drop_settle_s reads as starting from the polic
   const sequence = rowToSequence(read);
   assert.equal(sequence.start, undefined);
   assert.equal(sequence.dropSettleS, undefined);
+});
+
+test('a run records how it ended: down at the end, when it last went down, and whether it ever stood', () => {
+  // One sample per 0.5 s; `pattern` is up (u) or down (d) at each.
+  const ending = (pattern) => computeMetrics([...pattern].map((c, i) => ({ time: i * 0.5, fallen: c === 'd' })), { dt: 0.5 }).ending;
+  assert.deepEqual(ending('uuuu'), { down: false, last_fall_time: null, stood: true });
+  assert.deepEqual(ending('uudd'), { down: true, last_fall_time: 1, stood: true });
+  assert.deepEqual(ending('udduuu'), { down: false, last_fall_time: 0.5, stood: true }); // fell, got back up
+  assert.deepEqual(ending('ddduu'), { down: false, last_fall_time: null, stood: true }); // started lying, got up
+  assert.deepEqual(ending('ddudd'), { down: true, last_fall_time: 1.5, stood: true });
+  assert.deepEqual(ending('dddd'), { down: true, last_fall_time: null, stood: false }); // never stood
+});
+
+test('survival version 2 judges a run by how it ended, so a test may start the robot down', () => {
+  const rows = [row('getup/a')]; // 4 s
+  const s = benchmark({ defaults: { repeats: 6, randomize: { action_delay: 'env_range' } }, tests: [{ config: 'getup' }] });
+  const ended = (down, lastFall, stood = true, firstFall = null) => ({ ...ran(firstFall), ending: { down, last_fall_time: lastFall, stood } });
+  const cells = [
+    { testId: 'getup/a', repeat: 0, metrics: ended(false, null) }, // up throughout
+    { testId: 'getup/a', repeat: 1, metrics: ended(false, null, true, 0) }, // started lying, got up
+    { testId: 'getup/a', repeat: 2, metrics: ended(true, 3, true, 1) }, // fell at 1 s, got up, fell for good at 3 s
+    { testId: 'getup/a', repeat: 3, metrics: ended(true, null, false, 0) }, // never stood
+    { testId: 'getup/a', repeat: 4, error: 'boom', metrics: null },
+    { testId: 'getup/a', repeat: 5, metrics: ran(2) }, // saved before runs recorded their ending: its first fall
+  ];
+  const [test] = summarizeTests(cells, selectTests(s, rows));
+  assert.deepEqual(test.metrics['survival_rate@2'].values, [1, 1, 0, 0, 0, 0]);
+  assert.deepEqual(test.metrics['survival_time@2'].values, [1, 1, 0.75, 0, 0, 0.5]);
+  assert.deepEqual(test.fellAt, [null, null, 3, 0, 0, 2]);
+  // Version 1 is unchanged: judged by the first fall.
+  assert.deepEqual(test.metrics['survival_rate@1'].values, [1, 0, 0, 0, 0, 0]);
 });

@@ -1,5 +1,5 @@
 {
-  "protocol": 1,
+  "protocol": 2,
   "cells": {
     "locomotion/forward_short#0": {
       "frames": 200,
@@ -9,14 +9,14 @@
         "time": null
       },
       "tracking": {
-        "vx": 0.19018,
-        "vy": 0.12344,
-        "wz": 0.12879
+        "vx": 0.18208,
+        "vy": 0.12369,
+        "wz": 0.12646
       },
       "drift": {
-        "final_m": 0.27349,
-        "max_m": 0.39753,
-        "rmse_m": 0.28925
+        "final_m": 0.29462,
+        "max_m": 0.40447,
+        "rmse_m": 0.28998
       },
       "pushes": []
     },
@@ -28,14 +28,14 @@
         "time": null
       },
       "tracking": {
-        "vx": 0.18932,
-        "vy": 0.12576,
-        "wz": 0.11551
+        "vx": 0.18233,
+        "vy": 0.12913,
+        "wz": 0.12074
       },
       "drift": {
-        "final_m": 0.30449,
-        "max_m": 0.41993,
-        "rmse_m": 0.30354
+        "final_m": 0.29908,
+        "max_m": 0.40846,
+        "rmse_m": 0.28545
       },
       "pushes": []
     },
@@ -47,19 +47,19 @@
         "time": 3.76
       },
       "tracking": {
-        "vx": 0.88911,
-        "vy": 0.14492,
-        "wz": 0.75338
+        "vx": 0.89992,
+        "vy": 0.30403,
+        "wz": 1.93771
       },
       "drift": {
-        "final_m": 2.54137,
-        "max_m": 2.54192,
-        "rmse_m": 1.62829
+        "final_m": 2.37035,
+        "max_m": 2.50436,
+        "rmse_m": 1.59813
       },
       "pushes": [
         {
           "recovered": true,
-          "peakInstability": 0.0581
+          "peakInstability": 0.0612
         },
         {
           "recovered": false,
@@ -72,22 +72,22 @@
       "actionDelayLag": 3,
       "fell": {
         "fell": true,
-        "time": 3.76
+        "time": 3.56
       },
       "tracking": {
-        "vx": 0.81079,
-        "vy": 0.14894,
-        "wz": 0.64828
+        "vx": 0.81473,
+        "vy": 0.24753,
+        "wz": 1.50543
       },
       "drift": {
-        "final_m": 2.21482,
-        "max_m": 2.21497,
-        "rmse_m": 1.4414
+        "final_m": 2.27168,
+        "max_m": 2.27416,
+        "rmse_m": 1.44886
       },
       "pushes": [
         {
           "recovered": true,
-          "peakInstability": 0.0589
+          "peakInstability": 0.0603
         },
         {
           "recovered": false,
@@ -99,7 +99,7 @@
   "tasks": [
     {
       "taskId": "survival_rate_v1",
-      "metric": "survival_rate@1",
+      "metric": "survival_rate@2",
       "higherIsBetter": true,
       "value": 0.5,
       "stderr": 0.2165,
@@ -112,12 +112,12 @@
     },
     {
       "taskId": "survival_time_v1",
-      "metric": "survival_time@1",
+      "metric": "survival_time@2",
       "higherIsBetter": true,
-      "value": 0.8134,
-      "stderr": 0.1989,
+      "value": 0.8109,
+      "stderr": 0.1988,
       "ci95": [
-        0.4235,
+        0.4212,
         1
       ],
       "tests": 2,
@@ -125,7 +125,7 @@
     },
     {
       "taskId": "push_survival_rate_v1",
-      "metric": "survival_rate@1",
+      "metric": "survival_rate@2",
       "higherIsBetter": true,
       "value": 0,
       "stderr": 0.3062,

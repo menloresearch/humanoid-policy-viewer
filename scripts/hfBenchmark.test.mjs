@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
 import { hubRowsText, publish, withTestedCommit } from './hfBenchmark.mjs';
 import { RESULT_SCHEMA, summarize } from '../src/benchmark/run.js';
+import { BENCHMARK_PROTOCOL } from '../src/benchmark/protocol.js';
 import { submit } from './hfSubmit.mjs';
 
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -47,7 +48,7 @@ function workingCopy(edit = (files) => files) {
   return dir;
 }
 
-const bumpVersion = (files) => ({ ...files, 'benchmark.yaml': files['benchmark.yaml'].replace(/^version: 1 /m, 'version: 2 ') });
+const bumpVersion = (files) => ({ ...files, 'benchmark.yaml': files['benchmark.yaml'].replace(/^version: (\d+) /m, (_, v) => `version: ${Number(v) + 1} `) });
 const lengthenFirstTest = (files) => {
   const [first, ...rest] = files['data/locomotion/test.jsonl'].trim().split('\n');
   const row = JSON.parse(first);
@@ -144,7 +145,7 @@ test('publish without a pull record compares with the Hub main given repo=', asy
   assert.match(fake.output(), /Nothing that affects scores changed/);
   assert.equal(result.mode, 'direct');
   assert.equal(fake.dataset('me/bench').main, result.commit);
-  assert.match(fake.output(), /Not tagged: the version is still 1/);
+  assert.match(fake.output(), /Not tagged: the version is still 2/);
   assert.deepEqual(fake.dataset('me/bench').tags, {});
   await assert.rejects(() => publish(workingCopy(), {}, fake.io), /publish needs repo=<org\/name>/);
 });
@@ -152,7 +153,7 @@ test('publish without a pull record compares with the Hub main given repo=', asy
 test('a change that can move a score needs a version bump', async () => {
   const fake = fakeHub();
   const main = fake.seed('dataset', 'me/bench', readTree(LICENSED));
-  await assert.rejects(() => publish(workingCopy(lengthenFirstTest), { repo: 'me/bench' }, fake.io), /bump benchmark\.yaml version to 2/);
+  await assert.rejects(() => publish(workingCopy(lengthenFirstTest), { repo: 'me/bench' }, fake.io), /bump benchmark\.yaml version to 3/);
   assert.equal(fake.dataset('me/bench').main, main);
 });
 
@@ -161,8 +162,8 @@ test('a direct commit is tagged v<version>', async () => {
   fake.seed('dataset', 'me/bench', readTree(LICENSED));
   const result = await publish(workingCopy((files) => bumpVersion(lengthenFirstTest(files))), { repo: 'me/bench' }, fake.io);
   assert.equal(result.mode, 'direct');
-  assert.deepEqual(fake.dataset('me/bench').tags, { v2: result.commit });
-  assert.match(fake.output(), /Tagged datasets\/me\/bench@\w{7} as v2/);
+  assert.deepEqual(fake.dataset('me/bench').tags, { v3: result.commit });
+  assert.match(fake.output(), /Tagged datasets\/me\/bench@\w{7} as v3/);
 });
 
 test('a pull request is not tagged and says how to release it', async () => {
@@ -190,12 +191,12 @@ test('dry-run publish of a new dataset lists the files and eval.yaml and writes 
   const out = fake.output();
   assert.match(out, /would write \d+ files to datasets\/me\/new as a new dataset \(not found on the Hub; add "create"/);
   for (const path of ['benchmark.yaml', 'data/locomotion/test.jsonl', 'data/push_standing/test.jsonl', 'eval.yaml', 'README.md']) assert.match(out, new RegExp(`^  ${path}$`, 'm'));
-  assert.match(out, /--- eval\.yaml \(generated\) ---\n[^]*survival_rate_v1/);
+  assert.match(out, /--- eval\.yaml \(generated\) ---\n[^]*survival_rate_v2/);
   assert.equal(fake.repos.size, 0);
 
   // create makes the repo, the first publish lands on it and is tagged.
   const result = await publish(LICENSED, { repo: 'me/new', create: true }, fake.io);
-  assert.deepEqual(fake.dataset('me/new').tags, { v1: result.commit });
+  assert.deepEqual(fake.dataset('me/new').tags, { v2: result.commit });
 });
 
 test('publish says how to log in before touching the Hub when there is no token', async () => {
@@ -268,7 +269,7 @@ function resultRun(overrides = {}) {
     schema: RESULT_SCHEMA,
     generatedAt: '2026-10-12T00:00:00.000Z',
     wallSeconds: 1,
-    provenance: { hpv: { repo: 'x', commit: 'c'.repeat(40), dirty: false, protocol: 1 }, asimov1: { commit: 'a'.repeat(40) }, runtime: {} },
+    provenance: { hpv: { repo: 'x', commit: 'c'.repeat(40), dirty: false, protocol: BENCHMARK_PROTOCOL }, asimov1: { commit: 'a'.repeat(40) }, runtime: {} },
     benchmark: { source: 'hub', id: 'me/bench', revision: 'v1', sha: 'd'.repeat(40), raw, problems: [] },
     overrides: { tests: null, repeats: null, force: false },
     shard: null,
@@ -300,7 +301,7 @@ test('submit writes only .eval_results to the policy repo', async () => {
   assert.equal(result.mode, 'direct');
   const files = fake.model('me/model').commits.get(result.commit);
   const entries = parseYaml(files['.eval_results/me__bench.yaml']);
-  assert.deepEqual(entries.map((e) => e.dataset.task_id).sort(), ['old_v0', 'survival_rate_v1', 'survival_time_v1']);
+  assert.deepEqual(entries.map((e) => e.dataset.task_id).sort(), ['old_v0', 'survival_rate_v2', 'survival_time_v2']);
   assert.ok(entries.every((e) => !('source' in e)));
   assert.deepEqual(Object.keys(files).sort(), ['.eval_results/me__bench.yaml', 'policy.onnx']);
   assert.equal(files['policy.onnx'], 'onnx');

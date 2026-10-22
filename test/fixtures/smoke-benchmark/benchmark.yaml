@@ -6,7 +6,7 @@ description: Two short tests, two seeded repeats each.
 version: 1
 harness:
   repo: https://github.com/menloresearch/humanoid-policy-viewer
-  protocol: 1
+  protocol: 2
 requires:
   robot: { name: asimov-1 }
   policy_interface: velocity-command
@@ -21,6 +21,6 @@ tests:
   - { config: locomotion }
   - { config: push_standing }
 tasks:
-  - { id: survival_rate, metric: survival_rate@1 }
-  - { id: survival_time, metric: survival_time@1 }
-  - { id: push_survival_rate, metric: survival_rate@1, scope: { config: push_standing } }
+  - { id: survival_rate, metric: survival_rate@2 }
+  - { id: survival_time, metric: survival_time@2 }
+  - { id: push_survival_rate, metric: survival_rate@2, scope: { config: push_standing } }

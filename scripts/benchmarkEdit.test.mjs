@@ -17,7 +17,7 @@ function starter() {
 test('the form shows the starter settings, and parser defaults for keys left out', () => {
   const { text } = starter();
   const fields = benchmarkFormFields(parseYaml(text));
-  assert.equal(fields.version, 1);
+  assert.equal(fields.version, 2);
   assert.equal(fields.repeats, 5);
   assert.equal(fields.action_delay, 'env_range');
   assert.equal(fields.initial_joint_noise_rad, 0.02);
@@ -62,7 +62,7 @@ test('an edit npm run benchmark would refuse is not applied; dataset mismatches 
   assert.throws(() => applyBenchmarkEdit(text, { text: 'name: [unclosed' }, rows), /not valid YAML/);
   assert.throws(
     () => applyBenchmarkEdit(text, { fields: { ...fields, tasks: [{ id: 'x', metric: 'survival_rate' }] } }, rows),
-    (error) => error.problems.some((p) => /name a version, e.g. "survival_rate@1"/.test(p)),
+    (error) => error.problems.some((p) => /name a version, e.g. "survival_rate@2"/.test(p)),
   );
   const missing = applyBenchmarkEdit(text, { fields: { ...fields, tests: [{ config: 'stairs' }] } }, rows);
   assert.deepEqual(missing.warnings, ['tests[0] (config stairs) matches no test in the benchmark']);
