@@ -77,9 +77,10 @@ test('start validation names each problem', () => {
 });
 
 test('presets are recognised; anything else is custom', () => {
-  assert.equal(startPresetOf(null), 'standing');
-  assert.equal(startPresetOf(undefined), 'standing');
-  assert.equal(startPresetOf(structuredClone(START_PRESETS[1].start)), 'lying_on_back');
+  assert.equal(startPresetOf(null), 'policy_default');
+  assert.equal(startPresetOf(undefined), 'policy_default');
+  assert.equal(startPresetOf(structuredClone(START_PRESETS[1].start)), 'standing');
+  assert.equal(startPresetOf(structuredClone(START_PRESETS[2].start)), 'lying_on_back');
   assert.equal(startPresetOf({ pos: [0, 0, 1] }), 'custom');
 });
 

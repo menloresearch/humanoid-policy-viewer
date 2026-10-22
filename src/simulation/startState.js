@@ -23,14 +23,23 @@ export const SETTLE_JOINT_DAMPING = 0.5;
 export const DEFAULT_SETTLE_S = 1;
 export const MAX_SETTLE_S = 10;
 
+// Standing upright in the policy's default joint pose, at the base height
+// Menlo's asimov-1 walking policy starts at (its env.yaml init_state).
+const STANDING = { pos: [0, 0, 0.639], rot: [1, 0, 0, 0] };
+
 // Lying on its back: pitched 90 degrees backwards about y, so the chest faces up,
 // in the policy's default joint pose. In asimov_1.xml its lowest collision
 // geom touches the floor at a base height of ~0.144 m, so it starts ~1.6 cm up.
 const LYING_ON_BACK = { pos: [0, 0, 0.16], rot: [0.7071068, 0, -0.7071068, 0] };
 
-/** The start poses offered in the viewer and the test editor. `start: null` is the policy's own init_state. */
+/**
+ * The start poses offered in the viewer and the test editor. Policy default
+ * (`start: null`) is the policy's own init_state; the others are fixed poses,
+ * the same for every policy.
+ */
 export const START_PRESETS = [
-  { value: 'standing', title: 'Standing', start: null },
+  { value: 'policy_default', title: 'Policy default', start: null },
+  { value: 'standing', title: 'Standing', start: STANDING },
   { value: 'lying_on_back', title: 'Lying on back', start: LYING_ON_BACK },
 ];
 

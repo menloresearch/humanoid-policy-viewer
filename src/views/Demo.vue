@@ -900,7 +900,7 @@
         <v-select
           v-model="startPreset" :items="START_PRESETS" item-title="title" item-value="value"
           label="Start pose" density="compact" hide-details class="mb-1"
-          title="Where Reset puts the robot. Standing is the policy's own start (env.yaml init_state)"
+          title="Where Reset puts the robot. Policy default is the policy's own start (env.yaml init_state); loading a policy always starts it there"
         ></v-select>
         <div class="d-flex align-center ga-2">
           <v-checkbox
@@ -1087,7 +1087,7 @@ export default {
     // How Reset starts the robot (startState.js).
     START_PRESETS,
     MAX_SETTLE_S,
-    startPreset: 'standing',
+    startPreset: 'policy_default',
     settleOn: false,
     settleSeconds: DEFAULT_SETTLE_S,
     damped: false, // the Damp button's state (demo.damp)
@@ -1397,6 +1397,7 @@ export default {
         demoRef.current = this.demo;
         this.demo.setFollowEnabled?.(this.cameraFollowEnabled);
         await this.demo.init();
+        this.startAtPolicyDefault();
         window.__humanoidViewerDemo = this.demo;
         demoRef.current = this.demo;
         this.syncCommandLimits();
@@ -1657,6 +1658,7 @@ export default {
         await this.demo.reloadPolicy(selected.policyPath, {
           onnxPath: selected.onnxPath || undefined
         });
+        this.startAtPolicyDefault();
         this.syncCommandLimits();
         this.policyLabel = selected.policyPath?.split('/').pop() ?? this.policyLabel;
         this.reapplyCustomMotions();
@@ -2444,6 +2446,12 @@ export default {
         this.demo.simulation.qvel[0] += Math.cos(angle) * force;
         this.demo.simulation.qvel[1] += Math.sin(angle) * force;
       }
+    },
+    // A newly loaded policy starts at its own start pose (env.yaml init_state),
+    // whatever Reset's Start pose and drop-and-settle settings are.
+    startAtPolicyDefault() {
+      this.demo.resetSimulation(this.demo, { start: null, settleS: null });
+      this.damped = false;
     },
     toggleDamp() {
       if (!this.demo) return;

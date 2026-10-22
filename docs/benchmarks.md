@@ -59,12 +59,12 @@ the gait symmetry metric (straight, steady walking only).
 `start` is where the robot starts, written like the robot's `init_state` in env.yaml: `pos` [x, y, z], `rot`
 [w, x, y, z], `lin_vel` and `ang_vel` (world frame), and `joint_pos` / `joint_vel` mapping joint names or regex
 patterns to values. The keys it gives replace the policy's own `init_state`, and its joint entries replace only the
-joints they match; `null` starts from the policy's own (standing). For example, lying on its back with bent knees:
+joints they match; `null` starts from the policy's own. For example, lying on its back with bent knees:
 `{"pos": [0, 0, 0.16], "rot": [0.7071068, 0, -0.7071068, 0], "joint_pos": {".*_knee_joint": 0.6}}`. On the Hub the
 column is JSON text (a dataset cannot declare a map keyed by joint patterns); `hf publish` writes it that way and
 everything that reads a benchmark accepts both. `drop_settle_s` (seconds, at most 10, or `null` for off) leaves the
 robot limp (no motor torque, light joint damping) until it comes to rest before the test's clock starts. The
-editor's Environment tab offers the presets Standing and Lying on back, and the drop-and-settle checkbox; anything
+editor's Environment tab offers Policy default (the policy's own `init_state`) and two fixed poses, Standing and Lying on back, and the drop-and-settle checkbox; anything
 finer is written in the row by hand. The full schema is in `src/benchmark/testRow.js`.
 
 ### Terrain

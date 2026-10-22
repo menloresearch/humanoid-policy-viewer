@@ -108,7 +108,7 @@
             <v-select
               v-model="startPreset" :items="startPresetItems" item-title="title" item-value="value"
               label="Start pose" density="compact" hide-details style="max-width: 200px"
-              title="Where the robot starts. Standing is the policy's own start (env.yaml init_state); a test file can also give its own start in that shape"
+              title="Where the robot starts. Policy default is the policy's own start (env.yaml init_state); a test file can also give its own start in that shape"
             ></v-select>
             <v-checkbox
               v-model="hasSettle" label="Drop and settle" density="compact" hide-details
