@@ -2,6 +2,7 @@
 // npm run benchmark <policy...> [benchmark] [options]
 // npm run benchmark merge <dir...>
 // npm run benchmark init <dir> | path-end <dir> [<test id>...]
+// npm run -s benchmark inspect <dir> [<commit>] | policy-info <path>
 //
 // Benchmarks policies against a benchmark (a Hugging Face benchmark
 // dataset or a local folder; see scripts/benchmarkDir.mjs) in headless
@@ -43,6 +44,8 @@ const USAGE = `Usage:
   npm run benchmark view <result dir | result.json> [port=<n>] [no-open]
   npm run benchmark init <dir>
   npm run benchmark path-end <dir> [<test id>...]
+  npm run -s benchmark inspect <dir> [<commit>]
+  npm run -s benchmark policy-info <folder | file.onnx>
 
   merge                combine the out dirs of a sharded run (shard=)
   view                 open a result on the viewer's results page, in your browser
@@ -52,6 +55,10 @@ const USAGE = `Usage:
   path-end             where each test's commands end the path (x, y in m, 2 decimals) and
                        whether its end zone contains / is crossed by the path; JSON lines,
                        for picking a goal by hand or from a script
+  inspect              what this viewer reads from a benchmark folder, as JSON for publishing
+                       tools (schema hpv-inspection/1; offline). <commit> is recorded as
+                       harness.tested_commit in the benchmark.yaml to publish
+  policy-info          the .onnx a policy folder runs, its file hashes and problems, as JSON
 
 A policy is a Hugging Face model repo (org/name, org/name@rev or its URL) or a local
 folder / .onnx file. A benchmark is a Hub dataset (datasets/org/name[@rev] or
@@ -334,7 +341,17 @@ function pathEndCommand({ positionals }) {
   return true;
 }
 
-const COMMANDS = { merge: mergeCommand, view: viewCommand, init: initCommand, 'path-end': pathEndCommand };
+/** `inspect` and `policy-info`: scripts/inspect.mjs, one JSON object on stdout. */
+async function inspectCommand({ positionals }) {
+  const { inspect } = await import('./inspect.mjs');
+  const kind = positionals[0] === 'inspect' ? 'benchmark' : 'policy';
+  console.log(JSON.stringify(inspect([kind, ...positionals.slice(1)])));
+  return true;
+}
+
+const COMMANDS = {
+  merge: mergeCommand, view: viewCommand, init: initCommand, 'path-end': pathEndCommand, inspect: inspectCommand, 'policy-info': inspectCommand,
+};
 
 async function main() {
   rejectSwallowedNpmFlags(process.env, { keys: KEYS, flags: FLAGS });

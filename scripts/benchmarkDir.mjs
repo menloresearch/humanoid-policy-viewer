@@ -6,9 +6,10 @@
 //   README.md                  optional notes; becomes the dataset card
 //
 // Running and editing a benchmark needs only these. HPV never writes to the
-// Hub: a benchmark is published with cyclotron, which builds eval.yaml and the
-// card's front matter with cardFrontMatter, taskDescriptors (settings.js) and
-// the helpers at the end of this file.
+// Hub: a benchmark is published with cyclotron, from what scripts/inspect.mjs
+// reports (the card front matter, eval.yaml's tasks and the exact files to
+// upload, made with cardFrontMatter, taskDescriptors and the helpers at the end
+// of this file).
 //
 // The same layout is used for a local folder, a downloaded revision and the
 // test fixture in test/fixtures/smoke-benchmark/.
