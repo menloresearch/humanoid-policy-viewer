@@ -7,7 +7,7 @@ version: 2                      # bump whenever a change can move a score
 harness:
   repo: https://github.com/menloresearch/humanoid-policy-viewer
   protocol: 2
-  tested_commit: 8bcbf47d6e7b206e1a9527029eab0fb2326630eb
+  tested_commit: 4e62f702ba45f357e1bc1dfc8c94e39de2cf8fa2   # the viewer commit this benchmark was checked with
 requires:
   robot: { name: asimov-1 }
   policy_interface: velocity-command
@@ -21,4 +21,4 @@ tests:                          # { all: true }, { config: <category> } or { id:
 tasks:                          # leaderboard numbers; _v<version> is appended to each id
   - { id: survival_rate, metric: survival_rate@2 }    # scope: { config, id, tag } narrows a task
   - { id: survival_time, metric: survival_time@2 }
-reference_policies: []          # policies `npm run hf baseline` compares
+reference_policies: []          # policies to compare a change against; not scored

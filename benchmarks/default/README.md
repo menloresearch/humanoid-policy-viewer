@@ -11,19 +11,28 @@ become leaderboard tasks.
 
 ```
 git clone https://github.com/menloresearch/humanoid-policy-viewer && cd humanoid-policy-viewer && npm install
-npm run benchmark <your-org>/<your-policy> datasets/<this dataset>@v1
-npm run hf submit benchmark_results/<timestamp>
+npm run benchmark <your-org>/<your-policy> datasets/<this dataset>@v2
+npm run benchmark view benchmark_results/<timestamp>
 ```
 
-The run stays on your machine. `npm run hf submit` adds its results to the model repo's `.eval_results/`
-(directly if you own it, otherwise as a pull request), and they show up on this benchmark's leaderboards. Results are tied to the viewer commit and protocol that produced them;
-task ids end in the benchmark version (`_v1`), so numbers from different benchmark versions never share a
-leaderboard.
+The run stays on your machine: `result.json` and `report.html` in `benchmark_results/<timestamp>`. A policy can
+also be a folder on disk, e.g. `npm run benchmark ./my-policy datasets/<this dataset>@v2`. Results are tied to the
+viewer commit and protocol that produced them; task ids end in the benchmark version (`_v2`), so numbers from
+different benchmark versions never share a leaderboard.
+
+Results are submitted to this benchmark's leaderboards with
+[cyclotron](https://github.com/menloresearch/cyclotron), which runs the benchmark the same way and adds the
+results to the model repo's `.eval_results/`. The viewer only reads from Hugging Face.
 
 ## Change it
 
+Open a local copy in the viewer, edit its tests and settings, and run it:
+
 ```
-npm run hf pull datasets/<this dataset> ./bench && npm run dev benchmark=./bench    # edit
-npm run hf baseline ./bench
-npm run hf publish ./bench pr
+npm run dev benchmark=./my-copy          # a folder with this benchmark.yaml and data/
+npm run benchmark <policy> ./my-copy
 ```
+
+A copy opened straight from the Hub (`npm run dev benchmark=datasets/<this dataset>`) is read-only. Bump `version`
+in `benchmark.yaml` whenever a change can move a score. New versions are published with
+[cyclotron](https://github.com/menloresearch/cyclotron).
