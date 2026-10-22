@@ -2,24 +2,22 @@
 
 A **benchmark** runs a policy through a set of test scenarios (velocity commands, timed pushes, slippery
 floors) and scores it. A benchmark is a folder ([Benchmarks](benchmarks.md)), published as a Hugging Face dataset.
-Running one is always local; `npm run hf submit` then puts the results into the model repo's `.eval_results/`, where
-they appear on the model page and on the benchmark's leaderboards
-([Hugging Face eval results](https://huggingface.co/docs/hub/eval-results)).
+Running one is always local, and the viewer never uploads anything: it only reads policies and benchmarks from the
+Hub. Results reach the model page and the benchmark's leaderboards
+([Hugging Face eval results](https://huggingface.co/docs/hub/eval-results)) through
+[cyclotron](https://github.com/menloresearch/cyclotron), which runs this same benchmark and submits the results.
 
 ```bash
 npm run benchmark menloresearch/asimov1-loco datasets/<org>/<name>@v1   # Hub policy, Hub benchmark
-npm run hf submit benchmark_results/<timestamp>                        # -> the policy's model repo
 npm run benchmark ./policies/model_Aug_18_1                            # local policy, ./benchmarks/default
 npm run benchmark menloresearch/asimov1-loco test/fixtures/smoke-benchmark jobs=1   # 20-second smoke run
 ```
 
-`npm run benchmark` never uploads anything; `npm run hf submit` does, as a separate step (see below).
-
 No `--` is needed: everything is a word. `npm run benchmark` alone prints the full usage.
 
 The first run on a fresh clone sets itself up, as `npm run dev` and `npm run hf` do: it installs the dependencies,
-fetches the Asimov robot model and installs the Chromium that Playwright drives (`merge`, `init` and `path-end` need
-only the dependencies, and `view` no browser). The usage text and `help` install nothing.
+fetches the Asimov robot model and installs the Chromium that Playwright drives (`merge`, `init`, `path-end`,
+`inspect` and `policy-info` need only the dependencies, and `view` no browser). The usage text and `help` install nothing.
 
 | Word | Meaning |
 |---|---|
@@ -27,16 +25,16 @@ only the dependencies, and `view` no browser). The usage text and `help` install
 | a folder with an `.onnx` + `env.yaml`, or an `.onnx` | local policy |
 | `datasets/org/name[@rev]`, a Hub dataset URL | benchmark on the Hub |
 | a folder with a `benchmark.yaml` | local benchmark |
-| `benchmark=`, `policy=` | the same, as options (`policy=` may repeat) |
-| `tests=<id,id>`, `repeats=<n>` | run part of the benchmark (results stay local) |
+| `benchmark=`, `policy=` | the same, as options (`policy=` may repeat), when a word alone could be read as the other |
+| `tests=<id,id>`, `repeats=<n>` | run part of the benchmark (the results cannot be submitted) |
 | `jobs=<n>` | browser pages in parallel (default: half the cores) |
 | `robots=<n>` | most repeats of one test a page runs at once, as robots in one scene (1-5, default 5); results do not depend on it |
 | `shard=<i>/<n>`, then `npm run benchmark merge <dirs...>` | split a run across machines (merging is local) |
-| `out=<dir>` | output folder (default `benchmark_results/<timestamp>/`) |
+| `out=<dir>` | output folder (default `benchmark_results/<timestamp>/`, under `HPV_BENCHMARK_RESULTS_DIR` when it is set) |
 | `force`, `watch`, `verbose` | see the usage text |
 
-A bare `org/name` is always a policy; write `datasets/` for a benchmark. Without a benchmark, the run uses
-`./benchmarks/default`, a local folder, so its results can be looked at but not submitted.
+Policies and the benchmark can come in any order. A bare `org/name` is always a policy; write `datasets/` (or
+`benchmark=`) for a benchmark. Without a benchmark, the run uses `./benchmarks/default`, a local folder.
 
 ## What a run produces
 
@@ -45,8 +43,7 @@ protocol, asimov-1 commit, mujoco-js / onnxruntime-web / Chromium versions), the
 ran, the policy (Hub commit, sha256 of the ONNX and env.yaml), and for every **cell** (one test, one repeat) the
 seed, the action delay drawn, the commands actually sent if a policy's command range clamped them, and the full
 metrics. `<out>/report.html` is the readable report. The run ends by printing how to look at the result
-(`npm run benchmark view <out>`, and the path of `report.html` to open directly) and the `npm run hf submit <out>`
-command, or why the result cannot be submitted.
+(`npm run benchmark view <out>`, and the path of `report.html` to open directly).
 
 To look at a result again later, run `npm run benchmark view <out>` (the folder or its `result.json`; add `no-open` to
 skip the browser, `port=<n>` to pick the port). It serves the viewer read-only and opens its results page on that
@@ -71,25 +68,12 @@ the fall costs `survival_time`.
 
 ## Submitting results
 
-```bash
-npm run hf submit <out> dry-run   # the files, the target repo and commit, or why not
-npm run hf submit <out> [pr]
-```
-
-Only results that can be reproduced are submitted: a Hub policy pinned to its commit, a Hub benchmark pinned to its
-commit, a viewer checkout with no uncommitted changes whose `BENCHMARK_PROTOCOL` matches the benchmark, the whole
-benchmark as specified (no `tests=`, `repeats=`, `force`, unmerged shard) and no failed cell. `submit` decides from
-what `result.json` recorded when the run happened, so a result cannot be made submittable afterwards; it lists the
-reasons for each policy it refuses.
-
-For each policy, `submit` writes, in one commit to its model repo, `.eval_results/<org>__<name>.yaml` (one entry per
-task; re-runs replace their own task ids and keep the rest). Only these leaderboard numbers are uploaded; the full
-run (`result.json`, `report.html`) stays in the local result dir. If you own the model repo's namespace (your
-user or one of your orgs) it is committed to `main`; otherwise, or with `pr`, or if a direct commit is refused, it
-is opened as a pull request, which the Hub shows as a community result until merged. It needs a write token:
-`export HF_TOKEN=hf_...`, or `hf auth login` (the Hugging Face CLI, `pip install -U huggingface_hub`).
-
-Each entry's `notes` records `hpv@<commit> protocol=<n> benchmark=<name> v<version> asimov-1@<commit> policy@<commit>`.
+The viewer does not submit results. [cyclotron](https://github.com/menloresearch/cyclotron) runs a benchmark with
+this viewer as its harness and submits the results to each policy's model repo (`.eval_results/`), for the Hub
+leaderboards. A result is only worth submitting when it can be reproduced: a Hub policy and a Hub benchmark pinned
+to their commits, a viewer checkout with no uncommitted changes whose `BENCHMARK_PROTOCOL` matches the benchmark,
+the whole benchmark as specified (no `tests=`, `repeats=`, `force`, unmerged shard) and no failed cell. Every
+`result.json` records what is needed to tell.
 
 ## Versions: why numbers stay comparable
 
@@ -137,12 +121,11 @@ Starting a run stops a sequence that is playing.
 
 When it finishes, the server saves `benchmark_results/<timestamp>/{result.json,report.html}`, with the same provenance
 the CLI records, and the results page opens. Its cells are the CLI's, seed for seed. The benchmark is recorded as a
-local folder, so `npm run hf submit` refuses these results; run `npm run benchmark` on a pinned Hub benchmark for
-results to submit.
+local folder, so these results are for looking at, not for submitting.
 
 ## Results
 
-`benchmark_results/` (or `HPV_BENCHMARK_RESULTS_DIR`, see [Policy library](policy-library.md)) holds one folder per
+`benchmark_results/` (or `HPV_BENCHMARK_RESULTS_DIR`, see [Architecture](architecture.md#environment-variables)) holds one folder per
 result, from `npm run benchmark` and the app alike, each with its `result.json` and `report.html`. The app lists them at
 `/api/results`; its results page and `report.html` show the same thing: per policy, each test's outcome on every repeat
 (passed, fell at T s, or missed the end zone by D m), the metric means and the tasks with their 95% intervals.

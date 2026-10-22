@@ -63,7 +63,7 @@ const VIEW = { keys: ['benchmark', 'policy', 'port'], flags: ['no-open', 'help']
 // Names the old `npm run hf` took as --flags, spelled the new way.
 const HINTS = { revision: 'write the revision as org/name@rev (e.g. Menlo/asimov1-locomotion-0818@main)' };
 
-/** The one-line answer to a retired verb such as `npm run hf publish`. */
+/** The one-line answer to a retired verb (publish, submit, ...). */
 export function retiredVerbMessage(verb) {
   return `npm run hf ${verb} is gone: HPV only reads from Hugging Face; publishing benchmarks and submitting results are done with cyclotron (${CYCLOTRON}).`;
 }

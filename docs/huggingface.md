@@ -23,19 +23,18 @@ Options are plain words, with no `--`:
 | Option / variable | Meaning |
 |---|---|
 | `<policy>@<ref>` | Branch, tag or commit of a Hub repo (default `main`) |
-| `benchmark=<dir \| datasets/org/name[@rev]>` | The benchmark the viewer opens (default `./benchmarks/default`) |
+| `<benchmark>` or `benchmark=<...>` | The benchmark the viewer opens (default `./benchmarks/default`): a folder with a `benchmark.yaml`, or a Hub dataset `datasets/org/name[@rev]`, downloaded and opened read-only. As a plain word it can come before or after the policies |
+| `policy=<...>` | A policy, when a word alone could be read as something else (repeatable) |
 | `port=<n>` | Dev server port (default 3000, or the next free one) |
 | `no-open` | Do not open a browser window; open the printed link instead, which selects the policy (the bare server URL runs the bundled example) |
-| `HF_TOKEN` | Access token, for private repos and for writing (make one at https://huggingface.co/settings/tokens). Without it, the token `hf auth login` saved is used (`HF_TOKEN_PATH`, else `$HF_HOME/token`, else `~/.cache/huggingface/token`) |
+| `HF_TOKEN` | Access token, for private repos (make one at https://huggingface.co/settings/tokens; read access is enough). Without it, the token `hf auth login` saved is used (`HF_TOKEN_PATH`, else `$HF_HOME/token`, else `~/.cache/huggingface/token`) |
 | `HF_ENDPOINT` | Alternative Hub endpoint (default `https://huggingface.co`) |
 | `HPV_CACHE_DIR` | Download cache (default `~/.cache/humanoid-policy-viewer`) |
 
-`npm run hf` is the command for everything that talks to the Hub. Besides
-viewing a policy, its verbs work on benchmark datasets (`pull`, `diff`,
-`baseline`, `publish`, `release`; see [Benchmarks](benchmarks.md#workflow)) and
-submit benchmark results to a policy's model repo (`submit`; see
-[Benchmarking](benchmarking.md#submitting-results)). It is the only command
-that uploads. `npm run hf` alone prints the usage.
+The viewer only reads from the Hub: it downloads policies and benchmarks and
+never uploads. Publishing a benchmark dataset and submitting results to a
+policy's model repo are done with [cyclotron](https://github.com/menloresearch/cyclotron).
+`npm run hf` alone prints the usage.
 
 ## Run a policy from a folder
 
@@ -53,6 +52,25 @@ it and reloading the page picks up the new files. The link is removed when the
 server stops. The folder needs the same files as a Hub repo (below) and gets the
 same [checks](#checks), except the model card one. A folder must hold
 `policy.onnx` or exactly one `.onnx`; otherwise pass the file.
+
+## Several policies
+
+`npm run hf` takes any number of policies, Hub or local, and lists them all in
+the viewer's policy dropdown, with the first one selected:
+
+```bash
+npm run hf Menlo/asimov1-locomotion-0818 ./my-policy
+npm run hf ./logs/rsl_rl/asimov          # every policy folder below it
+```
+
+A folder with no `.onnx` of its own stands for every folder below it that holds
+an `.onnx` with an `env.yaml` (or `params/env.yaml`), such as the `exported/`
+folder of each training run. A policy found that way that cannot be run is left
+out with a warning; one named on the command line stops the command. A Hub
+policy is listed under its repo id; a local one under the shortest end of its
+path that tells it apart from the others, e.g. `run1/exported` and
+`run2/exported`. `npm run dev` takes the same words and lists them beside
+`./policies`.
 
 ## What the repo needs to contain
 
