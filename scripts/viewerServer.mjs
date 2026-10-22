@@ -23,8 +23,8 @@ import { basename, dirname, extname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { discoverPolicies, listPolicyRoots } from './policyDiscovery.mjs';
 import { initBenchmark } from './benchmarkInit.mjs';
-import { BENCHMARK_FILE, DATASET_META_FILE, hubDatasetOf, readRows, readYamlFile, writeRows } from './benchmarkDir.mjs';
-import { collectProvenance, policyFileHashes } from './benchmarkProvenance.mjs';
+import { BENCHMARK_FILE, hubDatasetOf, readRows, readYamlFile, writeRows } from './benchmarkDir.mjs';
+import { CYCLOTRON_REPO, collectProvenance, policyFileHashes } from './benchmarkProvenance.mjs';
 import { applyBenchmarkEdit, benchmarkFormFields, checkBenchmarkText } from './benchmarkEdit.mjs';
 import { RESULT_SCHEMA, isComplete, summarize } from '../src/benchmark/run.js';
 import { OPT_IN_METRICS, rowToSequence, sequenceToRow, validateGoal, validateTestRow } from '../src/benchmark/testRow.js';
@@ -90,7 +90,7 @@ export function viewerServer({
     if (!hub) return false;
     sendJson(res, 403, {
       error: `This benchmark is datasets/${hub.id}@${String(hub.sha).slice(0, 7)}, downloaded from Hugging Face, and is read-only here. `
-        + `To change it, copy ${dir} to a folder of your own (without its ${DATASET_META_FILE}) and open that with npm run dev benchmark=<folder>.`,
+        + `To edit and publish it, use cyclotron (${CYCLOTRON_REPO}): ./cyclotron.sh --view <policy> --benchmark datasets/${hub.id}`,
     });
     return true;
   }

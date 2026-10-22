@@ -122,6 +122,7 @@ test('a benchmark downloaded from the Hub is served read-only; a local folder st
       const { status, json } = await viewer.request(method, path, body);
       assert.equal(status, 403, `${method} ${path}`);
       assert.match(json.error, /datasets\/org\/bench@aaaaaaa, downloaded from Hugging Face, and is read-only here/);
+      assert.match(json.error, /use cyclotron \(https:\/\/github\.com\/menloresearch\/cyclotron\): \.\/cyclotron\.sh --view <policy> --benchmark datasets\/org\/bench/);
     }
     assert.deepEqual(files(hubDir), before);
   } finally {

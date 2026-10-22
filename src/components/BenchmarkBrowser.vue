@@ -88,7 +88,7 @@
           <span
             v-if="benchmark.readOnly"
             class="badge"
-            :title="`Downloaded from Hugging Face (datasets/${benchmark.hub.id}); read-only here`"
+            :title="`Downloaded from Hugging Face (datasets/${benchmark.hub.id}); read-only here. Edit and publish it with cyclotron.`"
           >read-only</span>
           <v-progress-circular v-if="running && isCurrent(benchmark)" indeterminate size="12" width="2" color="primary" />
           <span class="badge count" title="tests">{{ isCurrent(benchmark) && loaded ? items.length : benchmark.testCount }}</span>

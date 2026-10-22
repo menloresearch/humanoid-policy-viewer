@@ -12,6 +12,7 @@
 
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { CYCLOTRON_REPO } from './benchmarkProvenance.mjs';
 import { splitTargets } from './benchmarkTargets.mjs';
 import { parsePort, parseWords, rejectSwallowedNpmFlags } from './cliArgs.mjs';
 import { HF_POLICY_ROOT, defaultCacheDir } from './hfPolicy.mjs';
@@ -19,8 +20,6 @@ import { setup } from './setup.mjs';
 import { cleanupOnExit, libraryFor, printPolicyWarnings, resolvePolicies } from './viewPolicies.mjs';
 
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-
-export const CYCLOTRON = 'https://github.com/menloresearch/cyclotron';
 
 const USAGE = `Usage:
   npm run hf <policy...> [<benchmark>] [port=<n>] [no-open]
@@ -47,7 +46,7 @@ Policies and the benchmark can come in any order.
 Write options as key=value and flags as plain words, without "--".
 
 HPV only reads from Hugging Face. Publishing benchmarks and submitting results
-are done with cyclotron (${CYCLOTRON}).
+are done with cyclotron (${CYCLOTRON_REPO}).
 
 Environment:
   HF_TOKEN             access token, needed for private repos; without it, the token
@@ -65,7 +64,7 @@ const HINTS = { revision: 'write the revision as org/name@rev (e.g. Menlo/asimov
 
 /** The one-line answer to a retired verb (publish, submit, ...). */
 export function retiredVerbMessage(verb) {
-  return `npm run hf ${verb} is gone: HPV only reads from Hugging Face; publishing benchmarks and submitting results are done with cyclotron (${CYCLOTRON}).`;
+  return `npm run hf ${verb} is gone: HPV only reads from Hugging Face; publishing benchmarks and submitting results are done with cyclotron (${CYCLOTRON_REPO}).`;
 }
 
 /** The words of `npm run hf <policy...> ...`: { policies, benchmark, port, open, help } (policies and benchmark classified). */

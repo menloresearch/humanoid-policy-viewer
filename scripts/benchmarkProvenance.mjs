@@ -11,6 +11,8 @@ import { BENCHMARK_PROTOCOL } from '../src/benchmark/protocol.js';
 import { policyFileCandidates } from '../src/simulation/envPolicyConfig.js';
 
 export const HPV_REPO = 'https://github.com/menloresearch/humanoid-policy-viewer';
+// HPV only reads from the Hub; benchmarks are edited for publication, published and scored with cyclotron.
+export const CYCLOTRON_REPO = 'https://github.com/menloresearch/cyclotron';
 const ASIMOV_1 = 'public/examples/scenes/asimov-1';
 
 function git(cwd, args) {
