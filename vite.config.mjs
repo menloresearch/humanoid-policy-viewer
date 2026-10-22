@@ -10,7 +10,7 @@ import { fileURLToPath, URL } from 'node:url'
 import { existsSync, readdirSync, statSync, unlinkSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { viewerServer } from './scripts/viewerServer.mjs'
-import { getBenchmarkResultsDir, getPolicyLibrary } from './scripts/policyLibraryConfig.mjs'
+import { getBenchmarkResultsDir, getBenchmarkTemplate, getLogDir, getPolicyLibrary } from './scripts/policyLibraryConfig.mjs'
 import { defaultBenchmarkDir } from './scripts/benchmarkDir.mjs'
 
 const appDir = fileURLToPath(new URL('.', import.meta.url))
@@ -46,6 +46,8 @@ export function serverOptionsFromEnv(env = process.env) {
     benchmarksDir: resolve(env.HPV_BENCHMARKS_DIR || resolve(appDir, 'benchmarks')),
     openBenchmark: defaultBenchmarkDir(appDir),
     resultsDir: getBenchmarkResultsDir(appDir, env),
+    benchmarkTemplate: getBenchmarkTemplate(appDir, env),
+    logDir: getLogDir(appDir, env),
     policyLibraryDir: baseDir,
     policyRoots: roots,
   }
@@ -105,7 +107,7 @@ export function viteConfig(serverOptions) {
         // Saving trajectory/benchmark JSON must not trigger a full page reload.
         // Anchored to the app folder: a bare **/benchmark/** would also stop
         // edits to src/benchmark/ from hot-reloading.
-        ignored: ['benchmarks', 'benchmark_results']
+        ignored: ['benchmarks', 'benchmark_results', 'logs']
           .map((folder) => fileURLToPath(new URL(`./${folder}/**`, import.meta.url))),
       },
     },

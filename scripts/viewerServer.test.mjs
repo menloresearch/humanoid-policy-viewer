@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { RESULT_SCHEMA, planCells, cellResult } from '../src/benchmark/run.js';
+import { parse as parseYaml } from 'yaml';
 import { parseBenchmark } from '../src/benchmark/settings.js';
 import { viewerServer } from './viewerServer.mjs';
 import { BENCHMARK_PROTOCOL } from '../src/benchmark/protocol.js';
@@ -90,6 +91,57 @@ test('editable: false refuses every write and still serves reads', async () => {
 
 const smokeDir = join(appDir, 'test', 'fixtures', 'smoke-benchmark');
 
+/** A copy of the smoke benchmark; `hub` makes it look like a download from Hugging Face (hfDataset.mjs). */
+function benchmarkCopy({ hub = false } = {}) {
+  const dir = join(mkdtempSync(join(tmpdir(), 'hpv-benchmark-copy-')), 'bench');
+  tempDirs.push(dirname(dir));
+  cpSync(smokeDir, dir, { recursive: true });
+  if (hub) writeFileSync(join(dir, '.hf-dataset.json'), JSON.stringify({ id: 'org/bench', revision: 'main', sha: 'a'.repeat(40), files: [] }));
+  return dir;
+}
+
+const files = (dir) => ['benchmark.yaml', 'data/locomotion/test.jsonl', 'data/push_standing/test.jsonl'].map((file) => readFileSync(join(dir, file), 'utf8'));
+
+test('a benchmark downloaded from the Hub is served read-only; a local folder stays editable', async () => {
+  const hubDir = benchmarkCopy({ hub: true });
+  const before = files(hubDir);
+  const viewer = await serve({ openBenchmark: hubDir });
+  try {
+    const listed = (await viewer.request('GET', '/api/benchmarks')).json.benchmarks[0];
+    assert.deepEqual([listed.dir, listed.readOnly, listed.hub], [hubDir, true, { id: 'org/bench', revision: 'main', sha: 'a'.repeat(40) }]);
+    const { json: { files: tests } } = await viewer.request('GET', '/api/tests');
+    assert.ok(tests.length > 0);
+    const test = (await viewer.request('GET', `/api/tests?file=${tests[0].file}`)).json;
+    const settings = (await viewer.request('GET', '/api/benchmark')).json;
+    for (const [method, path, body] of [
+      ['PUT', `/api/tests?file=${tests[0].file}`, { ...test, duration: test.duration + 1 }],
+      ['PUT', '/api/tests?file=locomotion/new_test.json', test],
+      ['DELETE', `/api/tests?file=${tests[0].file}`],
+      ['PUT', '/api/benchmark', { text: settings.text.replace(/^title: .*$/m, 'title: changed'), base: settings.text }],
+    ]) {
+      const { status, json } = await viewer.request(method, path, body);
+      assert.equal(status, 403, `${method} ${path}`);
+      assert.match(json.error, /datasets\/org\/bench@aaaaaaa, downloaded from Hugging Face, and is read-only here/);
+      assert.match(json.error, /use cyclotron \(https:\/\/github\.com\/menloresearch\/cyclotron\): \.\/cyclotron\.sh --view <policy> --benchmark datasets\/org\/bench/);
+    }
+    assert.deepEqual(files(hubDir), before);
+  } finally {
+    await viewer.close();
+  }
+
+  const localDir = benchmarkCopy();
+  const local = await serve({ openBenchmark: localDir });
+  try {
+    assert.equal((await local.request('GET', '/api/benchmarks')).json.benchmarks[0].readOnly, false);
+    const { json: { files: tests } } = await local.request('GET', '/api/tests');
+    const test = (await local.request('GET', `/api/tests?file=${tests[0].file}`)).json;
+    assert.equal((await local.request('PUT', `/api/tests?file=${tests[0].file}`, { ...test, duration: test.duration + 1 })).status, 200);
+    assert.equal((await local.request('DELETE', `/api/tests?file=${tests[0].file}`)).status, 200);
+  } finally {
+    await local.close();
+  }
+});
+
 test('a Run is saved as <timestamp>/result.json with server provenance, then listed, read and deleted', async () => {
   const viewer = await serve({ openBenchmark: smokeDir });
   try {
@@ -133,6 +185,26 @@ test('a Run is saved as <timestamp>/result.json with server provenance, then lis
     assert.equal((await viewer.request('DELETE', `/api/results?file=${saved.json.file}`)).status, 200);
     assert.equal(existsSync(join(viewer.resultsDir, dirname(saved.json.file))), false);
     assert.deepEqual((await viewer.request('GET', '/api/results')).json.files, []);
+  } finally {
+    await viewer.close();
+  }
+});
+
+test('"New benchmark" copies the benchmark template, and /api/save-log writes to the log folder', async () => {
+  const template = benchmarkCopy();
+  writeFileSync(join(template, 'benchmark.yaml'), `${readFileSync(join(template, 'benchmark.yaml'), 'utf8')}# from our template\n`);
+  const logDir = join(dirname(template), 'logs');
+  const viewer = await serve({ benchmarkTemplate: template, logDir });
+  try {
+    assert.equal((await viewer.request('POST', '/api/benchmarks', { name: 'fresh' })).status, 201);
+    const created = readFileSync(join(viewer.benchmarksDir, 'fresh', 'benchmark.yaml'), 'utf8');
+    assert.match(created, /^name: fresh$/m);
+    assert.match(created, /# from our template/);
+    assert.equal(parseBenchmark(parseYaml(created)).name, 'fresh');
+    const saved = await viewer.request('POST', '/api/save-log', { filename: 'run 1.log', content: 'step 1' });
+    assert.equal(saved.status, 200);
+    assert.equal(saved.json.path, join(logDir, 'run_1.log'));
+    assert.equal(readFileSync(join(logDir, 'run_1.log'), 'utf8'), 'step 1');
   } finally {
     await viewer.close();
   }

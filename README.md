@@ -13,9 +13,12 @@ policy can be tried without a GPU or a training stack.
   friction, armature, gains, gravity and other physical parameters live.
 - **Score it:** `npm run benchmark <policy>` runs a benchmark (locomotion,
   pushes, friction, long walks) from a local folder or a Hugging Face dataset,
-  on your machine. `npm run hf submit` then adds the results to the policy's model repo
-  (`.eval_results/`) for the Hub leaderboards. Build your own benchmark in the
-  app's Tests & Benchmark panel: tests, repeats, seeds and leaderboard tasks.
+  on your machine. Build your own benchmark in the app's Tests & Benchmark
+  panel: tests, repeats, seeds and leaderboard tasks.
+- **Reads from Hugging Face, never writes:** policies and benchmarks are
+  downloaded; publishing a benchmark and submitting results to the Hub
+  leaderboards are done with [cyclotron](https://github.com/menloresearch/cyclotron),
+  which uses this viewer as its benchmark harness.
 - **Faithful setup:** the robot is the canonical `asimov-1` model, and each
   policy's gains, action scale and torque limits are read from its training
   `env.yaml`, so what you see matches how it was trained.
@@ -41,6 +44,10 @@ and `bash`. See [Run a policy from Hugging Face](docs/huggingface.md).
 `<policy>` can also be a folder or `.onnx` file on disk holding the same files,
 for example `npm run hf ./my-policy`; see
 [Run a policy from a folder](docs/huggingface.md#run-a-policy-from-a-folder).
+Give several policies, or a folder of them (such as a training run's logs), to
+list them all in the viewer's policy dropdown: `npm run hf ./logs Menlo/asimov1-locomotion-0818`.
+A benchmark can be given in any order beside them: `npm run hf <policy> datasets/<org>/<name>`
+opens a Hub benchmark (read-only), `npm run hf <policy> ./my-benchmark` a local one.
 
 ## Run local policies
 
@@ -48,6 +55,7 @@ To run policies you have on disk, or to work on the viewer itself:
 
 ```bash
 npm run dev                  # start the viewer on the bundled example policy
+npm run dev ./logs           # ... also listing every policy folder below ./logs
 ```
 
 Like `npm run hf` and `npm run benchmark` (which also installs Chromium), it
@@ -80,7 +88,7 @@ these sources:
 | Bundled example | `public/examples/checkpoints/asimov/model_aug_18_1/`, in this repo | The default with `npm run dev` |
 | Hugging Face | `~/.cache/humanoid-policy-viewer/hf/<org>__<name>/`, outside the repo | `npm run hf <policy>`, or `npm run dev <policy>`; `npm run dev` lists every one already downloaded |
 | Local folder | `policies/<name>/` in this repo (git-ignored), or wherever `HPV_POLICY_LIBRARY_DIR` and `HPV_POLICY_ROOTS` point | Put the files there, then `npm run dev` |
-| Any folder on disk | Wherever it is; linked, not copied | `npm run hf <folder>` |
+| Any folder on disk | Wherever it is; linked, not copied | `npm run hf <folder>` or `npm run dev <folder>`; a folder of policies lists every policy folder below it |
 
 In every case the gains, action scale and torque limits come from the `env.yaml`
 next to the `.onnx`; see [Policy config](docs/policy-config.md). The robot is the
@@ -93,10 +101,10 @@ same everywhere: the `asimov-1` submodule.
 | [Run a policy from Hugging Face](docs/huggingface.md) | `npm run hf`: options, private repos, where downloads are cached |
 | [Policy config](docs/policy-config.md) | What `reference_policy_config.json` and a policy's `env.yaml` each control, and which wins |
 | [Policy library](docs/policy-library.md) | Serving policies from outside `public/` (`HPV_POLICY_*` variables) |
-| [Benchmarking](docs/benchmarking.md) | `npm run benchmark` and `npm run hf submit`: running a benchmark, submitting results, versions, parallelism |
-| [Benchmarks](docs/benchmarks.md) | The benchmark format (tests, `benchmark.yaml`, metrics), and the `npm run benchmark` / `npm run hf` commands for creating, changing and publishing one |
+| [Benchmarking](docs/benchmarking.md) | `npm run benchmark`: running a benchmark, reading results, versions, parallelism |
+| [Benchmarks](docs/benchmarks.md) | The benchmark format (tests, `benchmark.yaml`, metrics), creating and changing one, and the `inspect` command publishing tools read |
 | [Adding a robot](docs/adding-a-robot.md) | Bringing your own MJCF, policy and motion clips |
-| [Architecture](docs/architecture.md) | How the app, server and commands fit together; words; old → new names |
+| [Architecture](docs/architecture.md) | How the app, server and commands fit together; words; every `HPV_*` environment variable; old → new names |
 | [Scenes](public/examples/scenes/README.md) | The `asimov-1` submodule and how actuators are added at load |
 
 ## Project structure
@@ -108,10 +116,10 @@ same everywhere: the `asimov-1` submodule.
 - `public/examples/scenes/` - MJCF files + meshes staged into MuJoCo's MEMFS; the Asimov robot is the `asimov-1/` git submodule
 - `public/examples/checkpoints/` - policy config JSON, bundled ONNX files, and motion clips
 - `src/views/BenchmarkResults.vue` - the results page (charts, per-repeat outcomes, tasks)
-- `scripts/` - the commands: `dev.mjs`, `hf.mjs` (and its verbs in `hfBenchmark.mjs`, `hfSubmit.mjs`), `run-benchmark.mjs`
+- `scripts/` - the commands: `dev.mjs`, `hf.mjs`, `run-benchmark.mjs`, and `inspect.mjs` (a benchmark folder or a policy as JSON, for publishing tools)
 - `scripts/startViewer.mjs`, `scripts/viewerServer.mjs` - how every command starts the dev server, and the server's routes (`/api/...`, `/policy-library/`)
 - `src/benchmark/` - benchmark protocol, test-row and `benchmark.yaml` formats, scoring; `run.js` plans cells and builds `result.json` for both the CLI and the in-app Run, and `resultView.js` turns a `result.json` into what the results page and `report.html` show
-- `benchmarks/` - local benchmarks: `default/` (tracked; what `npm run dev` opens and what new benchmarks are copied from), and, gitignored, pulled Hub datasets and benchmarks made with the app's **New benchmark**
+- `benchmarks/` - local benchmarks: `default/` (tracked; what `npm run dev` opens and what new benchmarks are copied from), and, gitignored, benchmarks made with the app's **New benchmark**
 - `benchmark_results/` - (gitignored) saved benchmark results
 - `test/fixtures/smoke-benchmark/` - a tiny benchmark for tests and the golden check
 - an optional [policy library](docs/policy-library.md) served by local Vite middleware under `/policy-library/`

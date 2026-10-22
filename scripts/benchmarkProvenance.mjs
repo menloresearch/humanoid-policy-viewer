@@ -1,7 +1,7 @@
 // What produced a benchmark result: viewer commit (and whether the checkout had
 // uncommitted changes), protocol, robot model commit, runtime versions and the
-// hashes of the policy files. Recorded in every result.json; a result whose
-// viewer checkout was dirty cannot be uploaded (see uploadBlockers).
+// hashes of the policy files. Recorded in every result.json; the publisher
+// (cyclotron) refuses to submit a result whose viewer checkout was dirty.
 
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -11,6 +11,8 @@ import { BENCHMARK_PROTOCOL } from '../src/benchmark/protocol.js';
 import { policyFileCandidates } from '../src/simulation/envPolicyConfig.js';
 
 export const HPV_REPO = 'https://github.com/menloresearch/humanoid-policy-viewer';
+// HPV only reads from the Hub; benchmarks are edited for publication, published and scored with cyclotron.
+export const CYCLOTRON_REPO = 'https://github.com/menloresearch/cyclotron';
 const ASIMOV_1 = 'public/examples/scenes/asimov-1';
 
 function git(cwd, args) {
@@ -36,7 +38,7 @@ export function sha256File(path) {
 export function collectProvenance(appDir) {
   const commit = git(appDir, ['rev-parse', 'HEAD']);
   // Untracked files are ignored: they cannot change a tracked module, and a
-  // stray scratch file should not block an upload.
+  // stray scratch file should not block a submission.
   const status = git(appDir, ['status', '--porcelain', '--untracked-files=no']);
   return {
     hpv: {

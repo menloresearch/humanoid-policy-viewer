@@ -1,5 +1,4 @@
-// The command-line half of a benchmark run: shard slicing, whether a result may
-// be submitted to the Hub, and console summaries. The rest (planning, job order,
+// The command-line half of a benchmark run: shard slicing and console summaries. The rest (planning, job order,
 // the result.json format, summaries, merging, the report shape) is
 // src/benchmark/run.js, which the viewer's Run shares.
 
@@ -28,52 +27,6 @@ export function parseTests(text) {
 export function shardJobs(jobs, shard) {
   if (!shard) return jobs;
   return jobs.filter((_, i) => i % shard.count === shard.index - 1);
-}
-
-/**
- * Why the results of `policyKey` may not be submitted (empty = they may), from
- * what result.json recorded at run time. Results are shared only when they can be
- * reproduced: a Hub benchmark pinned to a commit, a Hub policy, a clean viewer
- * commit implementing the benchmark's protocol, the whole benchmark as specified,
- * and no errors.
- */
-export function uploadBlockers(run, policyKey) {
-  const reasons = [];
-  const policy = run.policies.find((p) => p.key === policyKey);
-  if (run.benchmark.source !== 'hub') reasons.push('the benchmark is a local folder, not a Hugging Face benchmark dataset');
-  else if (!run.benchmark.sha) reasons.push('the benchmark is not pinned to a dataset commit');
-  if (policy?.source !== 'hub') reasons.push('the policy is a local folder, not a Hugging Face model repo');
-  else if (!policy.sha) reasons.push(`${policy.label} is not pinned to a model commit`);
-  const protocol = run.benchmark.raw?.harness?.protocol;
-  if (protocol !== run.provenance.hpv.protocol) reasons.push(`the benchmark needs protocol ${protocol}, the viewer that ran it implements ${run.provenance.hpv.protocol}`);
-  if (run.benchmark.problems?.length) reasons.push(`this viewer cannot run the benchmark as published: ${run.benchmark.problems.join('; ')}`);
-  if (!run.provenance.hpv.commit) reasons.push('the viewer commit is unknown (not a git checkout)');
-  else if (run.provenance.hpv.dirty !== false) reasons.push('the viewer checkout has uncommitted changes, so the commit does not identify the code that ran');
-  if (run.overrides.tests) reasons.push('only some tests were run (tests=)');
-  if (run.overrides.repeats) reasons.push('the repeat count was overridden (repeats=)');
-  if (run.overrides.force) reasons.push('the run was forced past a compatibility check (force)');
-  if (run.shard) reasons.push(`this is shard ${run.shard.index}/${run.shard.count}; merge the shards first (npm run benchmark merge ...)`);
-  else if (run.cells.length !== run.expectedCells) reasons.push(`${run.expectedCells - run.cells.length} of ${run.expectedCells} cells are missing`);
-  const errors = run.cells.filter((cell) => cell.policyKey === policyKey && cell.error);
-  if (errors.length) reasons.push(`${errors.length} cell(s) failed to run, e.g. ${errors[0].cellId}: ${errors[0].error}`);
-  return reasons;
-}
-
-/**
- * What to tell the user at the end of a run in `dir`: the `npm run hf submit`
- * command when some policy's results can be submitted, and why not for the rest
- * (a reason every policy shares is listed once).
- */
-export function submitHint(run, dir) {
-  const blockers = new Map(run.policies.map((policy) => [policy, uploadBlockers(run, policy.key)]));
-  const shared = [...blockers.values()].reduce((common, reasons) => common.filter((r) => reasons.includes(r)));
-  const lines = [];
-  if ([...blockers.values()].some((reasons) => !reasons.length)) lines.push(`Submit to the Hub with: npm run hf submit ${dir} [pr] [dry-run]`);
-  const own = [...blockers].flatMap(([policy, reasons]) => reasons.filter((r) => !shared.includes(r)).map((r) => `${policy.label}: ${r}`));
-  if (shared.length || own.length) {
-    lines.push(`${lines.length ? 'Not submittable' : 'Cannot be submitted to the Hub'}:`, ...[...shared, ...own].map((r) => `  - ${r}`));
-  }
-  return lines;
 }
 
 /** Where to look at the result in `dir` (shown relative to the shell, as typed): the viewer's results page, or the report file. */

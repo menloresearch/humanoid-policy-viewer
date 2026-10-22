@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { discoverPolicies } from './policyDiscovery.mjs';
-import { findLocalPolicy, isLocalPolicy, linkLocalPolicy } from './localPolicy.mjs';
+import { expandLocalPolicy, findLocalPolicy, findPolicyFolders, isLocalPolicy, linkPolicyLibrary, policyLabels } from './localPolicy.mjs';
 
 function withDir(fn) {
   const dir = mkdtempSync(join(tmpdir(), 'hpv-local-test-'));
@@ -36,16 +36,60 @@ test('findLocalPolicy explains folders it cannot run', () => withDir((dir) => {
   assert.throws(() => findLocalPolicy(join(dir, 'empty', 'env.yaml')), /not an .onnx file/);
 }));
 
-test('linkLocalPolicy serves the folder as a policy library, and cleanup leaves the folder alone', () => withDir((dir) => {
-  const run = makePolicy(join(dir, 'my run, v2'), ['policy.onnx', 'env.yaml', 'agent.yaml']);
-  const local = linkLocalPolicy(run, { tmpRoot: dir });
-  assert.equal(local.root, 'my_run_v2');
-  assert.equal(local.policyValue, 'lib:my_run_v2/policy.onnx');
-  const policies = discoverPolicies(local.cacheDir, [local.root]);
-  assert.deepEqual(policies.map((p) => p.path), ['my_run_v2/policy.onnx']);
-  assert.equal(`lib:${policies[0].path}`, local.policyValue);
+test('a folder with no .onnx stands for every policy folder below it', () => withDir((dir) => {
+  const logs = join(dir, 'logs');
+  makePolicy(join(logs, 'run1', 'exported'), ['policy.onnx', 'env.yaml']);
+  makePolicy(join(logs, 'run2', 'exported'), ['policy.onnx', 'env.yaml', 'agent.yaml']);
+  makePolicy(join(logs, 'run3', 'exported'), ['a.onnx', 'b.onnx', 'env.yaml']); // several .onnx: no single one to run
+  makePolicy(join(logs, 'run4', 'exported'), ['policy.onnx']); // no env.yaml: not a policy folder
+  makePolicy(join(logs, 'run5', 'exported', 'params'), ['env.yaml']);
+  writeFileSync(join(logs, 'run5', 'exported', 'model.onnx'), '');
+  makePolicy(join(logs, '.hidden', 'exported'), ['policy.onnx', 'env.yaml']);
+  makePolicy(join(logs, 'run1', 'exported', 'nested'), ['policy.onnx', 'env.yaml']); // inside a policy folder: not searched
+  const real = (path) => realpathSync(join(logs, path));
+  assert.deepEqual(findPolicyFolders(logs), ['run1', 'run2', 'run3', 'run5'].map((run) => join(logs, run, 'exported')));
+  assert.deepEqual(expandLocalPolicy(logs), [
+    { policyDir: real('run1/exported'), primary: 'policy.onnx', scanned: true },
+    { policyDir: real('run2/exported'), primary: 'policy.onnx', scanned: true },
+    { policyDir: real('run3/exported'), primary: null, scanned: true, error: `${join(logs, 'run3', 'exported')} contains several .onnx files (a.onnx, b.onnx); pass the one to run` },
+    { policyDir: real('run5/exported'), primary: 'model.onnx', scanned: true },
+  ]);
+  // A policy folder or an .onnx is itself, not a search.
+  assert.deepEqual(expandLocalPolicy(join(logs, 'run1', 'exported')), [{ policyDir: real('run1/exported'), primary: 'policy.onnx', scanned: false }]);
+  assert.throws(() => expandLocalPolicy(makePolicy(join(dir, 'empty'), ['notes.txt'])), /contains no \.onnx file, and no folder below it holds an \.onnx with an env\.yaml/);
+}));
 
-  local.cleanup();
-  assert.equal(existsSync(local.cacheDir), false);
-  assert.equal(readFileSync(join(run, 'env.yaml'), 'utf8'), 'env.yaml');
+test('policies on disk are labelled by their shortest distinguishing path suffix', () => {
+  assert.deepEqual(policyLabels(['/x/run1/exported', '/x/run2/exported', '/y/other']), ['run1/exported', 'run2/exported', 'other']);
+  assert.deepEqual(policyLabels(['/a/b/exported', '/c/b/exported', '/a/d/exported']), ['a/b/exported', 'c/b/exported', 'd/exported']);
+  assert.deepEqual(policyLabels(['/only/one']), ['one']);
+  // A suffix of another folder's path still differs from that folder's longer label.
+  assert.deepEqual(policyLabels(['/b/exported', '/a/b/exported']), ['/b/exported', 'a/b/exported']);
+  // Not the same as a Hub repo id listed beside them.
+  assert.deepEqual(policyLabels(['/data/Menlo/asimov1', '/x/asimov1'], ['Menlo/asimov1']), ['data/Menlo/asimov1', 'x/asimov1']);
+});
+
+test('linkPolicyLibrary lists each policy under its label beside the base roots, and cleanup leaves the folders alone', () => withDir((dir) => {
+  const run1 = makePolicy(join(dir, 'run1', 'exported'), ['policy.onnx', 'other.onnx', 'env.yaml']);
+  const run2 = makePolicy(join(dir, 'my run, v2', 'exported'), ['model.onnx', 'env.yaml', 'agent.yaml']);
+  const base = makePolicy(join(dir, 'cache', 'hf', 'Menlo__x'), ['policy.onnx', 'env.yaml']);
+  const library = linkPolicyLibrary([
+    { policyDir: run1, primary: 'policy.onnx', label: 'run1/exported' },
+    { policyDir: run2, primary: 'model.onnx', label: 'my run, v2/exported' },
+  ], { base: { dir: join(dir, 'cache'), roots: ['hf'] }, tmpRoot: dir });
+  assert.deepEqual(library.roots, ['hf', 'run1__exported', 'my_run_v2__exported']);
+  assert.deepEqual(library.values, ['lib:run1__exported/policy.onnx', 'lib:my_run_v2__exported/model.onnx']);
+  const policies = discoverPolicies(library.dir, library.roots, { labels: library.labels });
+  assert.deepEqual(policies.map((p) => [p.path, p.label]), [
+    ['hf/Menlo__x/policy.onnx', 'hf/Menlo__x/policy.onnx'],
+    ['my_run_v2__exported/model.onnx', 'my run, v2/exported'],
+    ['run1__exported/other.onnx', 'run1/exported (other.onnx)'],
+    ['run1__exported/policy.onnx', 'run1/exported'],
+  ]);
+  for (const value of library.values) assert.ok(policies.some((p) => `lib:${p.path}` === value), value);
+
+  library.cleanup();
+  assert.equal(existsSync(library.dir), false);
+  assert.equal(readFileSync(join(run1, 'env.yaml'), 'utf8'), 'env.yaml');
+  assert.ok(existsSync(join(base, 'policy.onnx')));
 }));

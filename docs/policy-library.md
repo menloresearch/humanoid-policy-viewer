@@ -11,9 +11,12 @@ it sits outside `public/`, so policies there are never committed or copied into
 
 `npm run dev` also lists every Hugging Face policy already downloaded (by `npm run hf` or `npm run dev <policy>`), labelled
 by its repo id and served from the download cache (`~/.cache/humanoid-policy-viewer/hf/`, or `HPV_CACHE_DIR`).
-`npm run dev <org>/<name>[@rev]` downloads a policy first if it is not cached; give several for several. For
-example `npm run dev Menlo/asimov1-locomotion-0818 benchmark=datasets/<org>/<name>` opens a Hub policy and a
-Hub benchmark together. Setting either variable below turns this off: the library is then exactly what they say.
+`npm run dev <org>/<name>[@rev]` downloads a policy first if it is not cached; give several for several. A folder
+or `.onnx` on disk, or a folder of policies (every folder below it with an `.onnx` and an `env.yaml`), is linked
+into a temporary library and listed too, labelled by its shortest distinguishing path (`run1/exported`). For
+example `npm run dev Menlo/asimov1-locomotion-0818 datasets/<org>/<name>` opens a Hub policy and a Hub benchmark
+(read-only) together. Setting either variable below replaces `policies/` and the download cache: the library is
+then exactly what they say, plus any local policies given on the command line.
 
 A repo that embeds the viewer can point it elsewhere with environment variables
 (use absolute paths):
@@ -23,6 +26,9 @@ A repo that embeds the viewer can point it elsewhere with environment variables
 | `HPV_POLICY_LIBRARY_DIR` | Directory that contains the policy root folders (default: this directory) |
 | `HPV_POLICY_ROOTS` | Comma-separated folder names under that directory (default: `policies`). Set it empty to turn the library off |
 | `HPV_BENCHMARK_RESULTS_DIR` | Where saved benchmark results are listed/read/written (default `benchmark_results/` in this directory) |
+
+The other variables (results, logs, the benchmark template, the cache) are listed in
+[Architecture](architecture.md#environment-variables).
 
 For example:
 
@@ -43,6 +49,6 @@ benchmark panel. An `.onnx` placed directly in a root, `<root>/policy.onnx`, is
 its own policy and takes its `env.yaml` from the root folder.
 
 `npm run hf` uses this mechanism for its downloads, with its own cache as the
-library, and for a local folder, which becomes a root of its own: see
+library, and for each local policy, which becomes a root of its own: see
 [Run a policy from Hugging Face](huggingface.md). While it runs, `policies/` is
 not served.

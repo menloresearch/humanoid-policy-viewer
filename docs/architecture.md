@@ -5,7 +5,7 @@
 
 The viewer is a single browser app: Vue, MuJoCo compiled to WebAssembly, and an ONNX policy run by
 onnxruntime-web. A small Node server sits beside it as a Vite plugin. It serves policies from disk, reads and
-writes benchmark folders, and stores results. Every command starts the same server the same way, and every
+writes local benchmark folders (a benchmark downloaded from the Hub is only read), and stores results. Every command starts the same server the same way, and every
 benchmark run, whether it starts in the app or from the command line, goes through the same run engine and
 saves the same `result.json`.
 
@@ -28,29 +28,26 @@ saves the same `result.json`.
 
 ## Commands
 
-`dev` is for local work and `hf` is for anything that talks to the Hugging Face Hub. Nothing outside `npm run hf …`
-uploads.
+Nothing uploads: the viewer only reads from the Hugging Face Hub (policies and benchmarks). Publishing a benchmark
+and submitting results are done with [cyclotron](https://github.com/menloresearch/cyclotron), which uses this
+viewer as its benchmark harness and reads benchmarks through `inspect`.
 
 ```
-LOCAL
-npm run dev [<policy>...] [benchmark=<benchmark>] [port=<n>]   viewer on all interfaces, no browser opened
+npm run hf <policy>... [<benchmark>] [port=] [no-open]   first-run setup, then the viewer on localhost with the first policy open
+npm run dev [<policy>...] [<benchmark>] [port=<n>]       viewer on all interfaces, no browser opened
 npm run benchmark <policy>... [<benchmark>] [tests= repeats= jobs= robots= shard= out= watch force verbose]
                                                  result -> benchmark_results/<timestamp>/; never uploads
-npm run benchmark init <dir>                     new benchmark, a copy of benchmarks/default
+npm run benchmark init <dir>                     new benchmark, a copy of benchmarks/default (or HPV_BENCHMARK_TEMPLATE)
 npm run benchmark path-end <dir> [<test id>...]  where each test's path ends, for placing an end zone
 npm run benchmark merge <result dir...> [out=]   combine shards into one result
 npm run benchmark view <result dir> [port=] [no-open]   the viewer's results page on a result (same as /?result=<folder>/result.json)
+npm run -s benchmark inspect <dir> [<commit>]    a benchmark folder as JSON for publishing tools (node scripts/inspect.mjs benchmark ...)
+npm run -s benchmark policy-info <path>          a policy's .onnx, file hashes and problems as JSON (node scripts/inspect.mjs policy ...)
 npm run benchmark:golden [update]                check a smoke run against test/fixtures/smoke-benchmark/golden.json
-
-HUGGING FACE
-npm run hf <policy> [benchmark=] [port=] [no-open]   first-run setup, then the viewer on localhost with <policy> open
-npm run hf submit <result dir> [pr] [dry-run]        upload a result's .eval_results to each policy's model repo
-npm run hf pull datasets/org/name[@rev] <dir>        working copy of a benchmark on the Hub
-npm run hf diff <dir> [repo=] [base=<rev>]           what changed compared with the Hub
-npm run hf baseline <dir> [repo=] [base=<rev>] [policy=...]   reference policies on <dir> and on the base
-npm run hf publish <dir> [repo=] [base=<rev>] [pr] [create] [dry-run]
-npm run hf release datasets/org/name rev=<commit>    tag a publish PR that was merged later
 ```
+
+`npm run hf pull | diff | baseline | publish | release | submit` are gone; each prints one line pointing to
+cyclotron.
 
 This one must always work from a fresh clone, because Hugging Face links to it:
 
@@ -71,12 +68,13 @@ comes first. A swallowed flag is reported with the words form to use instead.
 | `org/name`, `org/name@rev`, a model URL | a policy on the Hub |
 | `datasets/org/name`, `datasets/org/name@rev`, a dataset URL | a benchmark on the Hub |
 | a folder with an `.onnx` and `env.yaml`, or an `.onnx` file | a local policy |
+| a folder with no `.onnx` of its own (`hf`, `dev`) | every policy folder below it (an `.onnx` with an `env.yaml`) |
 | a folder with a `benchmark.yaml` | a local benchmark |
-| a first word with no `/` that names a verb | that verb |
+| a first word with no `/` that names a sub-command (`benchmark`: `merge`, `view`, `init`, `path-end`, `inspect`, `policy-info`) | that sub-command |
 
-`npm run benchmark` also takes `policy=` (repeatable) and `benchmark=` as options; `dev` and `hf` take only
-`benchmark=`. Without a benchmark word,
-`npm run benchmark` and `npm run dev` use `benchmarks/default`.
+Policies and the benchmark can come in any order (`splitTargets` in `scripts/benchmarkTargets.mjs`). All three
+commands also take `policy=` (repeatable) and `benchmark=`, for a word that could be read as the other. Without a
+benchmark word, every command uses `benchmarks/default`.
 
 ## The pieces
 
@@ -98,10 +96,12 @@ flowchart LR
 | Piece | File | Job |
 |---|---|---|
 | First-run setup | `scripts/setup.mjs` | Fetches the `asimov-1` robot (`init-asimov-1.sh`), and runs `npm ci` if `node_modules` is missing. It has no dependencies, so it runs before anything is installed. `dev` and `hf` call it from their own script; `npm run benchmark` goes through `scripts/benchmark.mjs`, which calls it and then imports `run-benchmark.mjs`. It skips the robot for `merge`, `init` and `path-end`, and for a run it also installs Chromium (`setupBrowser`, after the dependencies) when Playwright has none. |
-| Start-up | `scripts/startViewer.mjs` | `startViewer({policies, benchmark, policyLibrary, resultsDir, host, port, open, editable, logLevel})`. It resolves the words (downloading Hub policies and benchmarks into the cache), starts Vite in-process with the server plugin, and returns `{server, url}`. `policyLibrary` (`{dir, roots}`) replaces the default library: `hf` passes its one policy, the runner a temporary folder of links. Every launcher calls it (`dev`, `hf <policy>`, a benchmark run and `benchmark view`). |
-| Server | `scripts/viewerServer.mjs` | The Vite plugin `viewerServer(options)`: the [routes](#server-routes). Its options are `{benchmarksDir, openBenchmark, resultsDir, policyLibraryDir, policyRoots, editable}`. `vite.config.mjs` fills them from `HPV_*` env vars for plain `npx vite`; the launchers pass them directly. |
-| Launchers | `scripts/dev.mjs`, `scripts/hf.mjs`, `scripts/run-benchmark.mjs` | Parse words with `scripts/cliArgs.mjs` `parseWords`, then call `startViewer`. `hf.mjs` dispatches on its first word. |
-| Hub | `scripts/hfPolicy.mjs`, `hfDataset.mjs`, `hfCommit.mjs`, `hfEvalResults.mjs`, `hfSubmit.mjs`, `hfBenchmark.mjs` | Download policies and benchmarks; build `eval.yaml` and `.eval_results`; commit, or open a pull request. |
+| Start-up | `scripts/startViewer.mjs` | `startViewer({policies, benchmark, policyLibrary, resultsDir, host, port, open, editable, logLevel})`. It resolves the words (downloading Hub policies and benchmarks into the cache, linking local policies into a temporary library), starts Vite in-process with the server plugin, and returns `{server, url}`. `policyLibrary` (`{dir, roots, labels}`) replaces the default library: `hf` passes the policies it was given, the runner a temporary folder of links. Every launcher calls it (`dev`, `hf <policy>`, a benchmark run and `benchmark view`). |
+| Policies to view | `scripts/viewPolicies.mjs`, `scripts/localPolicy.mjs` | The policies `hf` and `dev` were given: Hub ones downloaded, folders of policies expanded, local ones linked into a temporary library, each labelled by its shortest distinguishing path. |
+| Server | `scripts/viewerServer.mjs` | The Vite plugin `viewerServer(options)`: the [routes](#server-routes). Its options are `{benchmarksDir, benchmarkTemplate, openBenchmark, resultsDir, logDir, policyLibraryDir, policyRoots, policyLabels, editable}`. `vite.config.mjs` fills them from `HPV_*` env vars for plain `npx vite`; the launchers pass them directly. |
+| Launchers | `scripts/dev.mjs`, `scripts/hf.mjs`, `scripts/run-benchmark.mjs` | Parse words with `scripts/cliArgs.mjs` `parseWords` and `splitTargets`, then call `startViewer`. |
+| Hub (read only) | `scripts/hfPolicy.mjs`, `hfDataset.mjs`, `hfAuth.mjs` | Download policies and benchmarks into the cache, with the token for private repos. Nothing writes to the Hub. |
+| Inspection | `scripts/inspect.mjs` | A benchmark folder or a policy as JSON, for publishing tools ([Benchmarks](benchmarks.md#inspecting-a-benchmark-for-publishing)). Offline: no robot model, browser or network. |
 | App | `src/views/Demo.vue`, `src/simulation/` | The scene, the policy loop, commands and pushes, the robots of a group, the panels. |
 | Benchmark logic | `src/benchmark/` | Pure code with no Node APIs, so the app and the CLI share it: `settings.js` (`parseBenchmark`, `selectTests`, `expandCells`), `rng.js` (`cellSeed`), `run.js` (`groupCells`, `buildJobs`, `mergeResults`, `RESULT_SCHEMA`), `summary.js` (`summarizeTests`, `computeTasks`), `resultView.js` (the tables both result views draw), `protocol.js`. |
 | Stores | `src/state/testStore.js`, `resultStore.js`, `policyStore.js` | The app's clients for the routes, or for `/static-data/*` in a static build. |
@@ -110,25 +110,27 @@ flowchart LR
 
 | Mode | Started by | Server | Editing |
 |---|---|---|---|
-| Dev server | `npm run dev`, `npm run hf` | `viewerServer`, `editable: true` | Tests, benchmark settings and new benchmarks are saved to disk. |
+| Dev server | `npm run dev`, `npm run hf` | `viewerServer`, `editable: true` | Tests, benchmark settings and new benchmarks are saved to disk, except in a benchmark downloaded from the Hub, which is read-only. |
 | Headless run | `npm run benchmark` (Playwright, one Chromium process per page) | `viewerServer`, `editable: false` | None. The runner calls `window.__runBenchmarkGroup` and collects cells. |
 | Static build | `vite build --mode static` (used by the site that embeds the viewer) | None. The stores read `/static-data/*.json` | None. The editing controls are hidden. |
 
 ## Server routes
 
 `?benchmark=<key>` picks a listed benchmark folder; without it, the open one (`openBenchmark`) is used. Routes
-marked ✎ exist only when `editable` is on.
+marked ✎ exist only when `editable` is on. A benchmark downloaded from the Hub (its folder holds `.hf-dataset.json`)
+is read-only even then: PUT and DELETE on its tests and its `benchmark.yaml` answer 403, pointing to cyclotron, which
+edits a working copy and publishes it.
 
 | Route | Methods | Does |
 |---|---|---|
-| `/api/benchmarks` | GET, POST ✎ | Lists the open benchmark and every folder in `benchmarks/`. POST creates `benchmarks/<name>/` from the starter `benchmark.yaml` and README, with no tests. |
+| `/api/benchmarks` | GET, POST ✎ | Lists the open benchmark and every folder in `benchmarks/`, each with `readOnly` and, for a Hub download, `hub` (`{id, revision, sha}`). POST creates `benchmarks/<name>/` from the starter (`benchmarks/default`, or `HPV_BENCHMARK_TEMPLATE`), with no tests. |
 | `/api/benchmark/dataset?benchmark=` | GET | `benchmark.yaml` parsed, with every test row: what the in-app Run plans its cells from. |
 | `/api/benchmark?benchmark=` | GET, PUT ✎ | The `benchmark.yaml` text and its form fields (the ⚙ Benchmark settings dialog). PUT refuses an edit that `npm run benchmark` would reject, or one based on a stale copy. |
 | `/api/tests?benchmark=[&file=<config>/<name>.json]` | GET, PUT ✎, DELETE ✎ | Lists the tests, or reads, writes or deletes one row of `data/<config>/test.jsonl`. |
 | `/api/policies` | GET | The policies in the policy library: local folders and downloaded Hub policies. |
 | `/policy-library/<path>` | GET | Policy files (`.onnx`, `env.yaml`), confined to the library roots. |
 | `/api/results[?file=]` | GET, POST ✎, DELETE ✎ | Lists `benchmark_results/*/result.json`, or reads one. POST saves a result from the in-app Run: the server writes `benchmark_results/<timestamp>/{result.json,report.html}` and adds the provenance the browser cannot know (viewer commit, clean checkout, versions). |
-| `/api/save-log` | POST ✎ | Debug dumps into `logs/`. |
+| `/api/save-log` | POST ✎ | Debug dumps into `logs/` (gitignored; `HPV_LOG_DIR` moves it). |
 
 The app reads two query parameters when it starts (`Demo.vue`): `?policy=lib:<path>` selects a policy from the library
 (`npm run hf` opens it), and `?result=<folder>/result.json` opens that saved result's page (`npm run benchmark view`
@@ -158,7 +160,7 @@ flowchart LR
     end
     subgraph results["Results"]
         direction TB
-        result[result.json] --> submit[hf submit]
+        result[result.json] --> submit["cyclotron submits"]
         submit --> eval[".eval_results"]
         result --> summary[summary.js]
         summary --> view[resultView.js]
@@ -188,37 +190,30 @@ benchmarks/<name>/
 ├── benchmark.yaml            settings: name, version, protocol, seed, repeats, randomisation, tests, tasks
 ├── data/<config>/test.jsonl  the tests, one row each
 ├── calibration/*.json, tools/*, [A-Z_]*.md   optional, published as is
-└── .hpv-benchmark.json       only in a pulled copy: the dataset it came from
+└── .hf-dataset.json          only in a download from the Hub: the dataset and commit (makes it read-only)
 ```
 
 `benchmarks/default/` is tracked in git: `npm run dev` opens it, `npm run benchmark init` copies it, and changes
-to it show up in `git diff`. All other folders in `benchmarks/` are git-ignored, as are pulled working copies and
-the ones made with **New benchmark**.
+to it show up in `git diff`. All other folders in `benchmarks/` are git-ignored, as are the ones made with
+**New benchmark**. A benchmark from the Hub is downloaded into the cache, `hf-datasets/<org>__<name>/<commit>/`,
+and run or shown from there, read-only.
 
-**On the Hub**, a benchmark is a dataset repo. It holds the folder's files plus two that `hf publish` generates:
-- `eval.yaml` declares one task per leaderboard, `<id>_v<version>`. A new version gets new leaderboards, and the
-  older task ids are kept so old results stay listed.
-- `README.md` is the dataset card, with one dataset config per test config, plus `all`.
+**On the Hub**, a benchmark is a dataset repo. It holds the folder's files plus two the publisher generates:
+- `eval.yaml` declares one task per leaderboard, `<id>_v<version>` (`taskDescriptors`). A new version gets new
+  leaderboards, and the older task ids are kept so old results stay listed.
+- `README.md` is the dataset card, with one dataset config per test config, plus `all` (`cardFrontMatter`).
 
-**Publishing** (`hf publish <dir> repo=org/name`):
-1. Compare `<dir>` with the dataset's current `main` (or `base=<rev>`). No pull is needed.
-2. Check the tests and the protocol. If scores can change, `version` must have gone up. The viewer checkout must
-   be clean and its commit pushed to `menloresearch/humanoid-policy-viewer`.
-3. Record that viewer commit as `harness.tested_commit` in the uploaded `benchmark.yaml`, for reference. Any
-   viewer implementing the benchmark's protocol runs it.
-4. Commit on top of the revision it compared with, so a publish that happened in the meantime is never
-   overwritten. Commit directly if you own the namespace; otherwise, or with `pr`, open a pull request. `create`
-   makes a new private repo.
-5. On a direct commit, tag it `v<version>`. Policies are benchmarked against a tag (`datasets/org/name@v2`),
-   never a moving `main`. A pull request is tagged with `hf release` after it is merged.
+**Publishing** is done with [cyclotron](https://github.com/menloresearch/cyclotron). It reads the folder through
+`inspect` (the checks, `scored_hash`, the card front matter, the tasks and the exact files to upload, with
+`harness.tested_commit` set to the viewer commit), requires a version bump when `scored_hash` changed, and tags
+each release `v<version>`. Policies are benchmarked against a tag (`datasets/org/name@v2`), never a moving `main`.
 
 **Leaderboards** are built by the Hub, not by this repo. It collects every model repo's `.eval_results` entries
-that name a task in the dataset's `eval.yaml`. A dataset shows leaderboards only once its `evaluation_framework`
-(`humanoid-policy-viewer`) is in Hugging Face's list (or the field is omitted; an unknown value makes the Hub reject
-`eval.yaml`) and the dataset is allow-listed; see
+that name a task in the dataset's `eval.yaml`. A dataset shows leaderboards only once its `evaluation_framework` is
+in Hugging Face's list and the dataset is allow-listed; see
 [Hugging Face eval results](https://huggingface.co/docs/hub/eval-results).
 
-## Results and submitting
+## Results
 
 ```
 benchmark_results/<timestamp>/
@@ -236,39 +231,41 @@ benchmark_results/<timestamp>/
 - `perTest` and `tasks`;
 - `overrides` (`tests=`, `repeats=`) and `shard`.
 
-`hf submit <result dir>` uploads a result. It judges only what `result.json` recorded when the benchmark ran. It
-refuses unless the result has:
-- a Hub policy and a Hub benchmark pinned to a commit;
-- a clean checkout;
-- a matching protocol;
-- the whole benchmark, with no overrides and no unmerged shard;
-- no failed cell.
-
-For each policy it commits only `.eval_results/<org>__<name>.yaml` (one entry per task) to the model repo; the full
-run stays in the local result dir. Each entry's `notes` record
-`hpv@<commit> protocol=<n> benchmark=<name> v<version> asimov-1@<commit> policy@<commit>`. It commits
-directly in your own namespace; otherwise, or with `pr`, it opens a pull request, which the Hub shows as a
-community result.
+The viewer does not submit results; cyclotron does, judging only what `result.json` recorded when the benchmark
+ran. A result can be submitted only with a Hub policy and a Hub benchmark pinned to a commit, a clean checkout, a
+matching protocol, the whole benchmark with no overrides and no unmerged shard, and no failed cell.
 
 ## Folders and environment
 
 | Path | Tracked | Holds |
 |---|---|---|
 | `benchmarks/default/` | yes | The example benchmark. |
-| `benchmarks/*` | no | Your benchmarks and pulled copies. |
+| `benchmarks/*` | no | Your benchmarks. |
 | `benchmark_results/` | no | Results, one folder each. |
+| `logs/` | no | Debug dumps the app saves (`/api/save-log`). |
 | `policies/` | no (except `README.md`) | Local policies, one folder each. |
-| `~/.cache/humanoid-policy-viewer/hf/`, `hf-datasets/` | — | Downloaded Hub policies, and Hub benchmarks. |
+| `~/.cache/humanoid-policy-viewer/hf/`, `hf-datasets/` | — | Downloaded Hub policies, and Hub benchmarks (read-only). |
 | `public/policy-library/`, `public/static-data/` | no | Written by an embedding site's static build. |
 | `test/fixtures/smoke-benchmark/` | yes | A tiny benchmark for tests and the golden check. |
 
+### Environment variables
+
+Every variable the viewer reads, in one place. Paths are best given absolute (a relative one resolves against the
+working directory). The defaults are inside this checkout, so a repo that embeds the viewer sets them to keep its
+own files elsewhere.
+
 | Variable | Default | Sets |
 |---|---|---|
-| `HPV_BENCHMARKS_DIR` | `benchmarks/` | where benchmark folders are listed and created |
-| `HPV_BENCHMARK_RESULTS_DIR` | `benchmark_results/` | where results are saved |
+| `HPV_BENCHMARKS_DIR` | `benchmarks/` | where benchmark folders are listed and **New benchmark** creates them |
+| `HPV_BENCHMARK_TEMPLATE` | `benchmarks/default/` | the benchmark **New benchmark** and `npm run benchmark init` copy |
+| `HPV_BENCHMARK_RESULTS_DIR` | `benchmark_results/` | where results are listed and saved, by the app and by `npm run benchmark` (its default `out=` and `merge`'s) |
+| `HPV_LOG_DIR` | `logs/` | where `/api/save-log` writes the app's debug dumps |
 | `HPV_POLICY_LIBRARY_DIR`, `HPV_POLICY_ROOTS` | `policies/` + the Hub cache | the policy library ([Policy library](policy-library.md)) |
-| `HPV_CACHE_DIR` | `~/.cache/humanoid-policy-viewer` | downloads |
-| `HF_TOKEN`, `HF_ENDPOINT` | — | Hub access; without `HF_TOKEN`, the token `hf auth login` saved (`scripts/hfAuth.mjs`) |
+| `HPV_CACHE_DIR` | `~/.cache/humanoid-policy-viewer` (or `$XDG_CACHE_HOME/humanoid-policy-viewer`) | downloads: `hf/` policies, `hf-datasets/` benchmarks |
+| `HF_TOKEN` | the token `hf auth login` saved (`HF_TOKEN_PATH`, else `$HF_HOME/token`, else `~/.cache/huggingface/token`) | reading private Hub repos (`scripts/hfAuth.mjs`); never used to write |
+| `HF_ENDPOINT` | `https://huggingface.co` | the Hub to download from |
+
+`HPV_BENCHMARK_RUNS_DIR`, `HPV_MODEL_LIBRARY_DIR` and `HPV_MODEL_ROOTS` still work, with a warning (see below).
 
 ## Migration from the old names
 
@@ -281,19 +278,20 @@ renamed.
 | `npm run hf <model> -- --revision <rev> --port <n> --no-open` | `npm run hf <policy>@<rev> port=<n> no-open` |
 | `node scripts/run-hf-model.mjs …` (what cyclotron's `--view` runs) | `node scripts/hf.mjs …`, same words as `npm run hf` |
 | `npm run dev suite=<x> model=<m>` | `npm run dev <policy> benchmark=<x>` |
-| `npm run benchmark <model> <suite>` (uploaded when reproducible) | `npm run benchmark <policy> <benchmark>`, then `npm run hf submit <result dir>` |
+| `npm run benchmark <model> <suite>` (uploaded when reproducible) | `npm run benchmark <policy> <benchmark>`; results are submitted with cyclotron |
 | `npm run benchmark … suite= model=` | `benchmark= policy=` |
 | `npm run benchmark … suite-file=suites/<v>.yaml` | gone; use `tests=` / `repeats=`, or make it its own benchmark |
-| `npm run benchmark … upload / no-upload / pr` | gone; `npm run hf submit <dir> [pr]` |
-| `npm run benchmark merge <dirs> upload` | `npm run benchmark merge <dirs>`, then `npm run hf submit` |
+| `npm run benchmark … upload / no-upload / pr` | gone; results are submitted with cyclotron |
+| `npm run benchmark merge <dirs> upload` | `npm run benchmark merge <dirs>`; results are submitted with cyclotron |
 | `npm run suite init / path-end` | `npm run benchmark init / path-end` |
-| `npm run suite pull / diff / baseline / publish / release` | `npm run hf pull / diff / baseline / publish / release` |
-| `npm run suite publish` then `npm run suite release` | `npm run hf publish` (tags it itself on a direct commit) |
+| `npm run suite pull / diff / baseline / publish / release` | gone; benchmarks are published with cyclotron |
+| `npm run hf pull / diff / baseline / publish / release / submit` | gone; publishing and submitting are done with cyclotron |
+| `npm run dev benchmark=datasets/…` (pulled a working copy into `benchmarks/<org>__<name>`) | the same words open the download read-only; copy it to change it |
 | `npm run terrain-tests` | gone; terrain is part of a benchmark's tests |
 | **Files and folders** | |
 | `suite.yaml` (top-level key `suite:`) | `benchmark.yaml` (key `name:`) |
 | `suites/<v>.yaml` (extra settings files inside a benchmark) | gone |
-| `.hpv-suite.json` | `.hpv-benchmark.json` |
+| `.hpv-suite.json`, `.hpv-benchmark.json` (a pulled working copy) | gone; a download is marked by `.hf-dataset.json` |
 | `benchmark_datasets/` (default created at start-up) | `benchmarks/` (`default/` tracked in git) |
 | `benchmark_runs/<ts>/run.json`, in-app `benchmark_runs/run_<ts>.json` | `benchmark_results/<ts>/result.json` for both |
 | `models/` | `policies/` |
@@ -319,7 +317,8 @@ renamed.
 | `schema: hpv-benchmark-run/1` | `schema: hpv-benchmark-result/1` |
 | `suite: {…, suiteFile, raw}` | `benchmark: {…, raw}` |
 | `models[]`, `modelKey` | `policies[]` (`key`), `cells[].policyKey` |
-| `.eval_results` notes `suite=<name> v<n> … model@<sha>` | `benchmark=<name> v<n> … policy@<sha>` |
+| `.eval_results` written by the viewer's own submit verb | written by cyclotron |
+| `eval.yaml` built by the viewer under its own framework name (`buildEvalYaml`) | written by cyclotron; the viewer gives the tasks (`taskDescriptors`) |
 
 Unchanged on purpose:
 - MuJoCo's `model` / `mjModel`;

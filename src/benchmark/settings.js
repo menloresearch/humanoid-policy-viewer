@@ -7,7 +7,8 @@
 //   name: asimov-locomotion
 //   version: 1
 //   harness: { repo: https://github.com/menloresearch/humanoid-policy-viewer, protocol: 1, tested_commit: <sha> }
-//                              # tested_commit is set by `npm run hf publish`
+//                              # tested_commit: the viewer commit the benchmark was checked with,
+//                              # set by the publisher (cyclotron)
 //   requires: { robot: { name: asimov-1 }, policy_interface: velocity-command }
 //   defaults:
 //     repeats: 5
@@ -233,18 +234,17 @@ export function versionedTaskId(benchmark, task) {
   return `${task.id}_v${benchmark.version}`;
 }
 
-/** The Hugging Face eval.yaml for this benchmark; generated, never hand-edited. */
-export function buildEvalYaml(benchmark, { name, description }) {
-  return {
-    name,
-    description,
-    evaluation_framework: 'humanoid-policy-viewer',
-    // A task scoped to one category scores that dataset config; any other task
-    // (several categories, or a tag cutting across them) scores "all".
-    tasks: benchmark.tasks.map((task) => ({
-      id: versionedTaskId(benchmark, task),
-      config: typeof task.scope.config === 'string' ? task.scope.config : ALL_CONFIG,
-      split: 'test',
-    })),
-  };
+/**
+ * The benchmark's leaderboard tasks as an evaluation framework lists them in a
+ * dataset's eval.yaml: { id (with the benchmark version), config (the dataset
+ * config it scores), split }. The eval.yaml itself is written by the publisher.
+ */
+export function taskDescriptors(benchmark) {
+  // A task scoped to one category scores that dataset config; any other task
+  // (several categories, or a tag cutting across them) scores "all".
+  return benchmark.tasks.map((task) => ({
+    id: versionedTaskId(benchmark, task),
+    config: typeof task.scope.config === 'string' ? task.scope.config : ALL_CONFIG,
+    split: 'test',
+  }));
 }

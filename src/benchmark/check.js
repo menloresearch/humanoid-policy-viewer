@@ -2,7 +2,7 @@
 // anything runs: every test must load in the command player, no terrain course
 // may overlap the spawn area, the benchmark's selection must work, and a few
 // likely mistakes are flagged. `npm run benchmark` and the viewer's Run both run
-// this first; `npm run hf publish` runs it before uploading.
+// this first; the inspect command (scripts/inspect.mjs) reports it to publishers.
 
 import { commandSequencer, getActiveCommandLimits, setActiveCommandLimits } from '../simulation/commandSequencer.js';
 import { expandCells, selectTests } from './settings.js';

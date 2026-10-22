@@ -1,7 +1,7 @@
 // The command-line side of checking a loaded benchmark (loadBenchmarkDir() has
 // already validated the row schema and benchmark.yaml); the checks themselves
 // are src/benchmark/check.js, shared with the viewer's Run. `npm run benchmark`
-// runs them before starting the browser and `npm run hf publish` before uploading.
+// runs them before starting the browser.
 
 import { checkTests } from '../src/benchmark/check.js';
 import { commandedEnd, goalProblems } from '../src/benchmark/terrainCheck.js';

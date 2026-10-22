@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { cellSeed, mulberry32 } from './rng.js';
 import { ROW_FEATURES, rowFromHub, rowToHub, rowToSequence, sequenceToRow, validateTestRow } from './testRow.js';
-import { buildEvalYaml, compatibilityProblems, expandCells, parseBenchmark, selectTests } from './settings.js';
+import { compatibilityProblems, expandCells, parseBenchmark, selectTests, taskDescriptors } from './settings.js';
 import { computeTasks, summarizeTests } from './summary.js';
 import { BENCHMARK_PROTOCOL } from './protocol.js';
 import { computeMetrics, goalOutcome } from '../simulation/metrics.js';
@@ -212,9 +212,9 @@ test('metrics must name a version; aggregate and pass_rule are no longer setting
   assert.throws(() => benchmark({ tasks: [{ id: 'x', metric: 'survival_rate@1', scope: { body: 'pelvis' } }] }), /scope\.body is unknown/);
 });
 
-test('eval.yaml tasks carry the version and their dataset config', () => {
+test('task descriptors carry the version and their dataset config', () => {
   const s = benchmark({ tasks: [{ id: 'survival_rate', metric: 'survival_rate@1' }, { id: 'push', metric: 'survival_rate@1', scope: { config: 'push' } }] });
-  assert.deepEqual(buildEvalYaml(s, { name: 'N', description: 'D' }).tasks, [
+  assert.deepEqual(taskDescriptors(s), [
     { id: 'survival_rate_v2', config: 'all', split: 'test' },
     { id: 'push_v2', config: 'push', split: 'test' },
   ]);

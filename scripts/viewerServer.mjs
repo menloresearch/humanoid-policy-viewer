@@ -5,19 +5,26 @@
 // Nothing here reads process.env.
 //
 //   benchmarksDir     where benchmark folders are listed and "New benchmark" creates them
+//   benchmarkTemplate the benchmark folder "New benchmark" copies (default ./benchmarks/default)
 //   openBenchmark     the benchmark the app opens first (what a request without ?benchmark= uses)
 //   resultsDir        where results are listed, read and saved (<timestamp>/result.json, as `npm run benchmark` writes)
 //   policyLibraryDir  the folder holding the policy roots, served under /policy-library/
 //   policyRoots       folder names under policyLibraryDir to list (empty: no library)
+//   policyLabels      { root: { label, primary } } for roots that are one policy linked from disk
+//   logDir            where /api/save-log writes the policy logs the app dumps (default ./logs)
 //   editable          false drops every route that writes (the headless benchmark runner)
+//
+// A benchmark downloaded from Hugging Face (a folder holding .hf-dataset.json,
+// see hubDatasetOf) is read-only even when the server is editable: its tests and
+// benchmark.yaml are served but never written.
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, rmdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, dirname, extname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { discoverPolicies, listPolicyRoots } from './policyDiscovery.mjs';
 import { initBenchmark } from './benchmarkInit.mjs';
-import { BENCHMARK_FILE, readRows, readYamlFile, writeRows } from './benchmarkDir.mjs';
-import { collectProvenance, policyFileHashes } from './benchmarkProvenance.mjs';
+import { BENCHMARK_FILE, hubDatasetOf, readRows, readYamlFile, writeRows } from './benchmarkDir.mjs';
+import { CYCLOTRON_REPO, collectProvenance, policyFileHashes } from './benchmarkProvenance.mjs';
 import { applyBenchmarkEdit, benchmarkFormFields, checkBenchmarkText } from './benchmarkEdit.mjs';
 import { RESULT_SCHEMA, isComplete, summarize } from '../src/benchmark/run.js';
 import { OPT_IN_METRICS, rowToSequence, sequenceToRow, validateGoal, validateTestRow } from '../src/benchmark/testRow.js';
@@ -34,6 +41,9 @@ export function viewerServer({
   resultsDir,
   policyLibraryDir,
   policyRoots: policyRootNames = [],
+  policyLabels = {},
+  benchmarkTemplate = undefined,
+  logDir = resolve(appDir, 'logs'),
   editable = true,
 }) {
   const policyRoots = listPolicyRoots(policyLibraryDir, policyRootNames);
@@ -72,7 +82,18 @@ export function viewerServer({
   // (`npm run dev benchmark=<dir>`, by default ./benchmarks/default), or
   // another benchmark the request names (see /api/benchmarks below). Results live in
   // resultsDir. All are outside public/, so writing them never triggers a
-  // page reload.
+  // page reload. A benchmark downloaded from the Hub is only read.
+
+  /** Refuses (403) a write to a benchmark downloaded from the Hub; true when it did. */
+  function refuseHubWrite(res, dir) {
+    const hub = hubDatasetOf(dir);
+    if (!hub) return false;
+    sendJson(res, 403, {
+      error: `This benchmark is datasets/${hub.id}@${String(hub.sha).slice(0, 7)}, downloaded from Hugging Face, and is read-only here. `
+        + `To edit and publish it, use cyclotron (${CYCLOTRON_REPO}): ./cyclotron.sh --view <policy> --benchmark datasets/${hub.id}`,
+    });
+    return true;
+  }
   const RESULTS_DIR = resultsDir;
   const MAX_DURATION = 600;
   // A result is <timestamp>/result.json, the folder `npm run benchmark` writes.
@@ -258,9 +279,9 @@ export function viewerServer({
 
   // ---- Benchmarks (/api/benchmarks) ----
   // The viewer lists every benchmark dataset folder it can find: the session's
-  // (SESSION_BENCHMARK_DIR, what a request without ?benchmark= reads and writes) and each
-  // folder of BENCHMARKS_DIR (the default benchmark, Hub working copies pulled
-  // by `npm run dev benchmark=datasets/...`, and the benchmarks "New benchmark" makes).
+  // (SESSION_BENCHMARK_DIR, what a request without ?benchmark= reads and writes;
+  // read-only when it was downloaded from the Hub) and each folder of
+  // BENCHMARKS_DIR (the default benchmark and the benchmarks "New benchmark" makes).
   // A request names one by its key; only listed folders are accepted.
   const BENCHMARKS_DIR = resolve(benchmarksDir);
   const BENCHMARK_NAME_RE = /^[a-z0-9][a-z0-9-]*$/;
@@ -280,6 +301,7 @@ export function viewerServer({
       .map((dir) => {
         let raw = {};
         try { raw = readYamlFile(resolve(dir, BENCHMARK_FILE)) || {}; } catch {}
+        const hub = hubDatasetOf(dir);
         return {
           key: benchmarkKey(dir),
           dir,
@@ -287,6 +309,8 @@ export function viewerServer({
           description: typeof raw.description === 'string' ? raw.description : '',
           testCount: readRows(dir).rows.length,
           session: dir === SESSION_BENCHMARK_DIR,
+          readOnly: !!hub,
+          hub,
         };
       });
   }
@@ -323,7 +347,7 @@ export function viewerServer({
           return;
         }
         const title = typeof body.title === 'string' && body.title.trim() ? body.title.trim() : null;
-        initBenchmark(dir, { title, exampleTest: false, log: () => {} });
+        initBenchmark(dir, { title, exampleTest: false, template: benchmarkTemplate, log: () => {} });
         sendJson(res, 201, { ok: true, benchmark: listBenchmarks().find((benchmark) => benchmark.dir === dir) });
         return;
       }
@@ -365,6 +389,7 @@ export function viewerServer({
         return;
       }
       if (req.method === 'PUT') {
+        if (refuseHubWrite(res, dir)) return;
         let body;
         try {
           body = await readRequestJson(req);
@@ -448,6 +473,7 @@ export function viewerServer({
         sendJson(res, 200, { files: listTests(benchmarkDir), benchmarkDir });
         return;
       }
+      if ((req.method === 'PUT' || req.method === 'DELETE') && refuseHubWrite(res, benchmarkDir)) return;
       const id = file?.replace(/\.json$/, '');
       if (!id || !TEST_ID_RE.test(id)) {
         sendJson(res, 400, { error: 'A test is saved as <category>/<name>: lower case letters, digits and _' });
@@ -498,7 +524,7 @@ export function viewerServer({
 
   // ---- Policy catalog (/api/policies): ONNX policies for benchmarking ----
   function listPolicies() {
-    return discoverPolicies(policyLibraryDir, policyRootNames);
+    return discoverPolicies(policyLibraryDir, policyRootNames, { labels: policyLabels });
   }
 
   // ---- Benchmark results (/api/results) ----
@@ -678,7 +704,7 @@ export function viewerServer({
           try {
             const { filename, content } = JSON.parse(body);
             const safe = String(filename || ('dump_' + Date.now() + '.log')).replace(/[^a-zA-Z0-9_.-]/g, '_');
-            const outPath = resolve(appDir, 'logs', safe);
+            const outPath = resolve(logDir, safe);
             mkdirSync(dirname(outPath), { recursive: true });
             writeFileSync(outPath, String(content ?? ''), 'utf8');
             sendJson(res, 200, { ok: true, path: outPath });

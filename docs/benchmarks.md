@@ -1,10 +1,11 @@
 # Benchmarks
 
 A **benchmark** is a folder: a `benchmark.yaml` (what runs, how often, how it is scored) and its **tests**. You work
-on one locally, under `./benchmarks/` or anywhere else, and publish it to a Hugging Face **dataset** repo, registered
-as a Hub benchmark through its `eval.yaml`. The published dataset is the copy everyone runs and the leaderboards
-refer to; this repo holds the code that runs benchmarks, the example `benchmarks/default/`, and a tiny fixture,
-`test/fixtures/smoke-benchmark/`, for its own tests.
+on one locally, under `./benchmarks/` or anywhere else. It is published as a Hugging Face **dataset** repo,
+registered as a Hub benchmark through its `eval.yaml`, with [cyclotron](https://github.com/menloresearch/cyclotron):
+the viewer only reads from the Hub. The published dataset is the copy everyone runs and the leaderboards refer to;
+this repo holds the code that runs benchmarks (the format, its checks, the simulation and the scoring), the example
+`benchmarks/default/`, and a tiny fixture, `test/fixtures/smoke-benchmark/`, for its own tests.
 
 ```
 benchmark.yaml             what runs, how often, how it is scored, which numbers are leaderboards
@@ -17,10 +18,11 @@ tools/                     optional: scripts that generate the tests (published,
 ```
 
 That is all a benchmark needs locally. Publishing adds the Hugging Face files, built from `benchmark.yaml` and never
-kept in the working copy: `eval.yaml` (the Hub benchmark registration, one task per leaderboard) and the card's
-front matter (a default `all` config with every test, one config per category, the declared column types, the
-`humanoid-policy-viewer` tag plus `benchmark.yaml`'s `tags`, and its `license`). A task scoped to one
-category points at that config; any other task points at `all`, so `all` is not a valid category name. `npm run hf publish <dir> dry-run` shows them.
+kept in the folder: `eval.yaml` (the Hub benchmark registration, one task per leaderboard) and the card's
+front matter (a default `all` config with every test, one config per category, the declared column types,
+`benchmark.yaml`'s `tags`, and its `license`). A task scoped to one category points at that config; any other task
+points at `all`, so `all` is not a valid category name. The viewer works out the tasks, the card front matter and
+the exact files to upload, and a publisher reads them with [`inspect`](#inspecting-a-benchmark-for-publishing).
 
 ## A test (one row)
 
@@ -61,8 +63,8 @@ the gait symmetry metric (straight, steady walking only).
 patterns to values. The keys it gives replace the policy's own `init_state`, and its joint entries replace only the
 joints they match; `null` starts from the policy's own. For example, lying on its back with bent knees:
 `{"pos": [0, 0, 0.16], "rot": [0.7071068, 0, -0.7071068, 0], "joint_pos": {".*_knee_joint": 0.6}}`. On the Hub the
-column is JSON text (a dataset cannot declare a map keyed by joint patterns); `hf publish` writes it that way and
-everything that reads a benchmark accepts both. `drop_settle_s` (seconds, at most 10, or `null` for off) leaves the
+column is JSON text (a dataset cannot declare a map keyed by joint patterns); [`inspect`](#inspecting-a-benchmark-for-publishing)'s
+`publish_files` has it that way and everything that reads a benchmark accepts both. `drop_settle_s` (seconds, at most 10, or `null` for off) leaves the
 robot limp (no motor torque, light joint damping) until it comes to rest before the test's clock starts. The
 editor's Environment tab offers Policy default (the policy's own `init_state`) and two fixed poses, Standing and Lying on back, and the drop-and-settle checkbox; anything
 finer is written in the row by hand. The full schema is in `src/benchmark/testRow.js`.
@@ -108,11 +110,11 @@ name: asimov-locomotion
 title: Asimov Locomotion Benchmark
 version: 1                         # bump when anything that can change a score changes
 license: bsd-3-clause              # a Hugging Face license id, or a file in this folder (license: LICENSE)
-tags: [humanoid, locomotion]       # added to the card after humanoid-policy-viewer
+tags: [humanoid, locomotion]       # the card's tags (the publisher may add its own)
 harness:
   repo: https://github.com/menloresearch/humanoid-policy-viewer
   protocol: 2                      # the viewer's BENCHMARK_PROTOCOL this benchmark was validated with
-  tested_commit: <viewer commit>   # set by `npm run benchmark init` and `npm run hf publish`: the viewer commit that checked this benchmark
+  tested_commit: <viewer commit>   # the viewer commit that checked this benchmark; set by `npm run benchmark init` and when publishing
 requires: { robot: { name: asimov-1 }, policy_interface: velocity-command }
 defaults:
   repeats: 5
@@ -127,7 +129,7 @@ tasks:                             # leaderboard numbers; ids get _v<version> ap
   - { id: survival_rate, metric: survival_rate@2 }
   - { id: survival_time, metric: survival_time@2 }
   - { id: push_walking_survival_rate, metric: survival_rate@2, scope: { config: push_walking } }
-reference_policies: [menloresearch/asimov1-loco]   # used by `npm run hf baseline`
+reference_policies: [menloresearch/asimov1-loco]   # policies to compare a change against; not scored
 ```
 
 `license` goes on the dataset card. Use one of the Hub's
@@ -136,11 +138,9 @@ reference_policies: [menloresearch/asimov1-loco]   # used by `npm run hf baselin
 and the card says `license: other`, linking to it. `license` and `tags` only change the card, so they never need a
 version bump.
 
-A new benchmark (`npm run benchmark init`, **New benchmark**) starts with no `license:` line, so that its first
-`hf publish` asks. If `license:` is missing, `hf publish` warns and asks `Use bsd-3-clause instead? (N to cancel this workflow to specify your own)`: yes publishes with
-`bsd-3-clause`, no cancels before anything is uploaded (with no terminal to ask on, it cancels too). A blank
-`license:` means no license on purpose: it warns and asks `Use bsd-3-clause instead? (N to publish with no license)`:
-yes uses `bsd-3-clause`, no (or no terminal) goes ahead and publishes without one. `dry-run` never asks.
+A new benchmark (`npm run benchmark init`, **New benchmark**) starts with no `license:` line; choose one before
+publishing. A blank `license:` means no license on purpose. A `license:` that is neither a Hub license id nor a file
+in the folder is an error in [`inspect`](#inspecting-a-benchmark-for-publishing)'s output.
 
 The simulation is deterministic, so `repeats > 1` only makes sense with something randomised; the runner refuses
 otherwise. A scope narrows a task to `config`, `id` and/or `tag` (a test's tags);
@@ -191,8 +191,7 @@ genuinely probabilistic, and every metric is combined the same way:
 3. **Uncertainty**: the standard error of that mean over the seeds (the tests are fixed; only the randomisation is
    random) and a 95% interval, clipped to the metric's range. Each test's spread is smoothed as if one more repeat
    had landed at each end of the range, so 5 survivals out of 5 still show uncertainty. The interval is in
-   `result.json`, printed by `npm run benchmark`, and written into each `.eval_results` entry's `notes` (the Hub has
-   no field for it).
+   `result.json` and printed by `npm run benchmark` (the Hub's eval results have no field for it).
 
 More repeats narrow the interval roughly as 1/√repeats; 5 is a reasonable default. A metric's version fixes how
 it is computed and combined: adding a metric or a new version needs no `BENCHMARK_PROTOCOL` bump, but a published
@@ -202,75 +201,63 @@ leaderboard yet; each can become a metric when it is trustworthy.
 
 ## Workflow
 
+The viewer reads benchmarks from the Hub and never writes to it. A benchmark on the Hub is downloaded into the
+cache (`~/.cache/humanoid-policy-viewer/hf-datasets/<org>__<name>/<commit>/`) and run or shown from there:
+
 ```bash
-npm run hf pull datasets/<org>/<name> ./bench   # working copy (+ .hpv-benchmark.json, which records the dataset)
-npm run dev benchmark=./bench                   # edit tests in the trajectory editor (or edit data/*/test.jsonl)
-npm run hf diff ./bench                         # what changed compared with the dataset's main, and whether scores can move
-npm run hf baseline ./bench                     # run reference policies on main and on the folder -> ./bench/baseline.md
-npm run hf publish ./bench dry-run              # the files, eval.yaml and the description, without writing
-npm run hf publish ./bench [pr]                 # commit + tag v<version> (owners) or pull request; description = diff + baseline
+npm run benchmark <policy> datasets/<org>/<name>@v2      # run it
+npm run dev benchmark=datasets/<org>/<name>              # look at it in the viewer: read-only
 ```
 
-`diff`, `baseline` and `publish` always compare with the dataset's current `main` on the Hub, not with the revision
-that was pulled, so a change someone published in the meantime is not hidden. `base=<rev>` compares with another
-revision instead; `publish` refuses a `base=` that is no longer `main` (it would publish on top of a stale
-revision). A folder that was not pulled names its dataset with `repo=<org>/<name>`.
+The viewer refuses to save a test or the settings of a benchmark downloaded from the Hub, and marks it
+**read-only**. To change one, copy the folder to one of your own (leave out its `.hf-dataset.json`, which marks a
+download) and work on the copy, which stays editable:
 
-`npm run dev benchmark=datasets/<org>/<name>[@rev]` does the pull for you: the first time it pulls the dataset into
-`./benchmarks/<org>__<name>` (gitignored), an ordinary working copy like `./bench` above; later runs open
-that copy as it is, edits included (delete the folder to pull afresh).
+```bash
+npm run dev benchmark=./bench                  # edit tests in the trajectory editor (or edit data/*/test.jsonl)
+npm run benchmark <policy> ./bench             # real runs, results stay local
+```
 
 There is no separate check step. `npm run benchmark` checks the tests before it starts a browser: every row loads
-in the command player, the benchmark's selection works, and it warns about tests no selector picks. `publish` runs
-the same checks plus "a change that can move a score needs a new `version`" (compared with `main`).
+in the command player, the benchmark's selection works, and it warns about tests no selector picks.
 
-`publish` also refuses a viewer checkout with uncommitted changes, or one whose commit is not on a branch of
-`menloresearch/humanoid-policy-viewer` (push it and `git fetch` first), since nobody else could check out the code
-that checked the benchmark. It records that commit as `harness.tested_commit` in the uploaded `benchmark.yaml` (your
-folder is left as it is). The commit is a record, not a requirement: any viewer implementing the benchmark's
-`harness.protocol` runs it, and each result records the viewer commit it actually ran on.
-
-When you own the dataset's namespace, `publish` commits to `main` and tags the commit `v<version>`; it does not tag
-when the version did not change (nothing that affects scores changed). Otherwise, or with `pr`, it opens a pull
-request and prints the release command. Hub dataset pull requests have no CI, so the reviewer reproduces the
-checks: `npm run hf pull datasets/<id>@refs/pr/<n> ./review`, then `baseline`. After merging, a maintainer tags
-the release:
-
-```bash
-npm run hf release datasets/<org>/<name> rev=<merged commit>   # tags v<version>
-```
-
-and re-runs `npm run benchmark <policy> datasets/<org>/<name>@v<version>` for the reference policies, then
-`npm run hf submit` for each result, so the new leaderboards are not empty.
+A change that can move a score needs a new `version`. Whether one can is decided by `scored_hash` (from
+[`inspect`](#inspecting-a-benchmark-for-publishing)): a hash of the rows and of `benchmark.yaml` without its prose
+(`title`, `description`), `version`, `license`, `tags`, `reference_policies` and `harness.tested_commit`. Publish the
+changed folder with [cyclotron](https://github.com/menloresearch/cyclotron), which compares it with the Hub's
+current version, records the viewer commit that checked it as `harness.tested_commit` in the uploaded
+`benchmark.yaml` and tags the release. The commit is a record, not a requirement: any viewer implementing the
+benchmark's `harness.protocol` runs it, and each result records the viewer commit it actually ran on.
 
 ### When the viewer changes
 
-A change that moves numbers bumps `BENCHMARK_PROTOCOL` (and `npm run benchmark:golden update`). Benchmarks validated
-with the old protocol are then refused by `npm run hf submit` until they are re-validated: set `harness.protocol`, bump
-`version`, publish (which records the new `tested_commit`), release. Old results keep their old task ids.
+A change that moves numbers bumps `BENCHMARK_PROTOCOL` (and `npm run benchmark:golden update`). The runner then
+refuses benchmarks validated with the old protocol (`force` runs them locally anyway) until they are re-validated:
+set `harness.protocol`, bump `version`, and publish. Old results keep their old task ids.
 
 ### Creating a new benchmark
 
-Everything happens locally until `publish`:
+Everything happens locally:
 
 ```bash
 npm run benchmark init ./new-bench                         # a copy of ./benchmarks/default: benchmark.yaml + three example tests
 npm run dev benchmark=./new-bench                          # add tests; type a new Category in the editor to start a category
 npm run benchmark <policy> ./new-bench                     # real runs, results stay local
-npm run hf publish ./new-bench repo=<org>/<name> dry-run   # what would be uploaded (works before the repo exists)
-npm run hf publish ./new-bench repo=<org>/<name> create    # creates a PRIVATE dataset repo first, then commits and tags v1
 ```
+
+Then publish it with [cyclotron](https://github.com/menloresearch/cyclotron).
 
 Plain `npm run dev` uses `./benchmarks/default`, the example benchmark kept in this repo for trying things out: a
 forward walk, a 1 m radius circle walk, and one test with four 100 N chest pushes (front, back, left, right).
-`npm run benchmark init` starts every new benchmark as a copy of it.
+`npm run benchmark init` starts every new benchmark as a copy of it (`HPV_BENCHMARK_TEMPLATE` names another folder to
+copy instead, for a repo that embeds the viewer).
 
 Or start in the viewer: the **Tests & Benchmark** panel lists every benchmark the dev server knows (the one
 `npm run dev` opened and each folder under `./benchmarks/`). **New benchmark** asks for a
 folder name and an optional title and creates `./benchmarks/<name>/` (gitignored) from the starter `benchmark.yaml` and
-README, with no tests (`HPV_BENCHMARKS_DIR` moves that folder); **Add test** inside an open benchmark opens the editor, and Save writes into that benchmark. Click a
-benchmark to open it, double-click it to run its tests. The folder is the same working copy `npm run benchmark init` makes, so
-`npm run benchmark <policy> ./benchmarks/<name>` and `npm run hf publish` work on it as above.
+README, with no tests (`HPV_BENCHMARKS_DIR` moves that folder, `HPV_BENCHMARK_TEMPLATE` the starter); **Add test** inside an open benchmark opens the editor, and Save writes into that benchmark. Click a
+benchmark to open it, double-click it to run its tests. The folder is the same kind `npm run benchmark init` makes, so
+`npm run benchmark <policy> ./benchmarks/<name>` works on it as above.
 
 #### Editing `benchmark.yaml` in the viewer
 
@@ -301,16 +288,43 @@ icy or custom) and the gait-symmetry opt-in. A terrain test shows a top view (co
 and a side profile, with the same spawn error and path warnings `npm run benchmark` gives; Save is disabled while
 the course overlaps the spawn. **Apply to viewer** loads the course into the 3D view.
 
-To appear as a Hub benchmark, `eval.yaml`'s `evaluation_framework: humanoid-policy-viewer` must be in the Hub's
-list of frameworks (a pull request to `huggingface/huggingface.js`, `packages/tasks/src/eval.ts`; or the field
-omitted, since an unknown value makes the Hub reject `eval.yaml`), and the
-dataset must be allow-listed by Hugging Face (beta). Until then results still land in model repos; they just are
-not aggregated into a leaderboard.
+## Inspecting a benchmark for publishing
 
-Until both are done, each model repo's `.eval_results` file shows a Hub banner per entry, `Task ID "survival_rate_v1"
-does not match any task in dataset "org/bench". Available: none`. The entries are fine: the Hub reads the dataset's
-`eval.yaml` but rejects it, because `evaluation_framework: humanoid-policy-viewer` is not a framework it knows (it
-accepts a known one, or none), so the dataset registers no tasks and carries no `benchmark:eval-yaml` tag (the Hub
-derives that tag from a valid `eval.yaml`; registered benchmarks such as `Idavidrein/gpqa` have it). The banner
-clears once the framework is registered and the dataset's `eval.yaml` is re-read; push a new commit to the dataset
-if it does not.
+Publishing tools (cyclotron) never import the viewer's code. They ask it about a folder with one offline command,
+which needs only the npm dependencies: no robot model, no browser, no network.
+
+```bash
+node scripts/inspect.mjs benchmark <dir> [<commit>]   # or: npm run -s benchmark inspect <dir> [<commit>]
+node scripts/inspect.mjs policy <folder | file.onnx>  # or: npm run -s benchmark policy-info <path>
+```
+
+Each prints one JSON object on stdout (`-s` keeps npm's banner out of it); a folder that does not load at all is an
+error on stderr and exit status 1. `<commit>` is the viewer commit to record as `harness.tested_commit`.
+
+`benchmark` (schema `hpv-inspection/1`):
+
+| field | |
+|---|---|
+| `raw` | `benchmark.yaml`, parsed |
+| `rows` | every test row as the viewer reads it (`start` as an object) |
+| `tasks` | the leaderboard tasks for `eval.yaml`: `[{ id, config, split }]`, ids with `_v<version>` |
+| `errors`, `warnings` | the checks `npm run benchmark` runs, plus an unusable `license:` |
+| `problems` | why this viewer cannot run the benchmark as specified (protocol, robot, policy interface) |
+| `cells`, `tests` | the run plan: every cell (test × repeat, with its seed) of a full run, and the tests in it |
+| `scored_hash` | hash of everything that can change a score (see [Workflow](#workflow)) |
+| `files` | the publishable files in the folder, sorted |
+| `provenance`, `public` | this viewer checkout (commit, uncommitted changes, protocol, robot model commit, runtime), and whether the commit is on a fetched branch of the public repo |
+| `card` | the dataset card's front matter: configs, declared column types, `tags`, license fields |
+| `benchmark_yaml` | `benchmark.yaml` with `harness.tested_commit` set to `<commit>` (comments kept); `null` without one |
+| `publish_files` | `{ path: text }`, the exact text to upload for every file in `files` but `README.md`: `benchmark.yaml` as `benchmark_yaml` (as on disk without a commit), each `data/*/test.jsonl` with `start` as JSON text, the rest as they are. `README.md` is the card's body; the publisher puts `card` in front of it |
+
+`policy` (schema `hpv-policy-inspection/1`): `policyDir` and `primary` (the folder and the `.onnx` the viewer runs),
+`hashes` (`{ onnx, envYaml }`, sha256 of the files every result records) and the `errors` / `warnings` of its
+`env.yaml` and `agent.yaml`.
+
+The same helpers are exported by `scripts/benchmarkDir.mjs` for tools written in JavaScript: `scoredContentHash`,
+`withTestedCommit`, `hubRowsText`, `BENCHMARK_FILES`, `cardFrontMatter` and `licenseFields` (and `taskDescriptors`
+from `src/benchmark/settings.js`).
+
+On the Hub, a dataset shows leaderboards once the `evaluation_framework` its `eval.yaml` names is one the Hub knows
+and the dataset is allow-listed by Hugging Face; cyclotron's documentation covers both.

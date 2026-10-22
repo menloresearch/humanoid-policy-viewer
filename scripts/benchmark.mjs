@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // npm run benchmark ...: first-run setup, then the command itself (run-benchmark.mjs,
 // which has the usage text). Running a benchmark needs the dependencies, the robot
-// model and Chromium; `view` needs the first two; merge, init and path-end only the
-// dependencies. Nothing here may import an npm dependency before setup() has installed them.
+// model and Chromium; `view` needs the first two; merge, init, path-end, inspect and
+// policy-info only the dependencies. Nothing here may import an npm dependency before setup() has installed them.
 
 import { setup, setupBrowser } from './setup.mjs';
 
@@ -11,7 +11,7 @@ const first = words[0];
 // Usage text and `help` need nothing, so a first look at the usage does not install anything.
 if (words.length && !words.includes('help')) {
   try {
-    const local = ['merge', 'init', 'path-end'].includes(first);
+    const local = ['merge', 'init', 'path-end', 'inspect', 'policy-info'].includes(first);
     setup({ scene: !local });
     if (!local && first !== 'view') await setupBrowser();
   } catch (error) {

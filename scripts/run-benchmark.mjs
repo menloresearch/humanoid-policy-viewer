@@ -2,11 +2,12 @@
 // npm run benchmark <policy...> [benchmark] [options]
 // npm run benchmark merge <dir...>
 // npm run benchmark init <dir> | path-end <dir> [<test id>...]
+// npm run -s benchmark inspect <dir> [<commit>] | policy-info <path>
 //
 // Benchmarks policies against a benchmark (a Hugging Face benchmark
 // dataset or a local folder; see scripts/benchmarkDir.mjs) in headless
-// Chromium and writes result.json + report.html. It never uploads: a result
-// that can be reproduced is submitted afterwards with `npm run hf submit <dir>`.
+// Chromium and writes result.json + report.html. It never uploads: HPV only
+// reads from the Hub; results are submitted with cyclotron.
 // Run with no arguments for the full usage text.
 
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmdirSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
@@ -21,8 +22,8 @@ import { rowToSequence } from '../src/benchmark/testRow.js';
 import { buildBenchmarkReportHtml } from '../src/simulation/benchmarkReport.js';
 import { runJobs } from './benchmarkBrowser.mjs';
 import { collectProvenance, policyFileHashes } from './benchmarkProvenance.mjs';
-import { formatOutcomes, formatTasks, parseShard, parseTests, resultTarget, shardJobs, submitHint, viewHint } from './benchmarkRun.mjs';
-import { classifyTarget, describeTarget } from './benchmarkTargets.mjs';
+import { formatOutcomes, formatTasks, parseShard, parseTests, resultTarget, shardJobs, viewHint } from './benchmarkRun.mjs';
+import { describeTarget, splitTargets } from './benchmarkTargets.mjs';
 import { checkPolicyDir, readReferenceJointNames } from './policyChecks.mjs';
 import { parsePort, parseWords, rejectSwallowedNpmFlags } from './cliArgs.mjs';
 import { ensureDataset } from './hfDataset.mjs';
@@ -31,15 +32,12 @@ import { findLocalPolicy } from './localPolicy.mjs';
 import { assertTestsRunnable, pathEnds } from './benchmarkCheck.mjs';
 import { defaultBenchmarkDir, loadBenchmarkDir } from './benchmarkDir.mjs';
 import { initBenchmark } from './benchmarkInit.mjs';
+import { getBenchmarkResultsDir, getBenchmarkTemplate } from './policyLibraryConfig.mjs';
 
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 const KEYS = ['benchmark', 'policy', 'tests', 'repeats', 'jobs', 'robots', 'shard', 'out', 'port'];
 const FLAGS = ['force', 'watch', 'verbose', 'help', 'no-open'];
-// Words this command took before submitting moved to `npm run hf submit`.
-const SUBMIT_MOVED = 'results are submitted separately now: npm run hf submit <result dir> [pr] [dry-run]';
-const RETIRED = ['upload', 'no-upload', 'pr', 'dry-run'];
-const HINTS = Object.fromEntries(RETIRED.map((word) => [word, SUBMIT_MOVED]));
 
 const USAGE = `Usage:
   npm run benchmark <policy...> [<benchmark>] [key=value...] [flags...]
@@ -47,15 +45,22 @@ const USAGE = `Usage:
   npm run benchmark view <result dir | result.json> [port=<n>] [no-open]
   npm run benchmark init <dir>
   npm run benchmark path-end <dir> [<test id>...]
+  npm run -s benchmark inspect <dir> [<commit>]
+  npm run -s benchmark policy-info <folder | file.onnx>
 
   merge                combine the out dirs of a sharded run (shard=)
   view                 open a result on the viewer's results page, in your browser
                        (the same page as http://localhost:<port>/?result=<folder>/result.json
                        on a running \`npm run dev\`); Ctrl+C stops it
-  init                 new benchmark: a copy of benchmarks/default (three example tests)
+  init                 new benchmark: a copy of benchmarks/default (three example tests),
+                       or of the folder HPV_BENCHMARK_TEMPLATE names
   path-end             where each test's commands end the path (x, y in m, 2 decimals) and
                        whether its end zone contains / is crossed by the path; JSON lines,
                        for picking a goal by hand or from a script
+  inspect              what this viewer reads from a benchmark folder, as JSON for publishing
+                       tools (schema hpv-inspection/1; offline). <commit> is recorded as
+                       harness.tested_commit in the benchmark.yaml to publish
+  policy-info          the .onnx a policy folder runs, its file hashes and problems, as JSON
 
 A policy is a Hugging Face model repo (org/name, org/name@rev or its URL) or a local
 folder / .onnx file. A benchmark is a Hub dataset (datasets/org/name[@rev] or
@@ -71,7 +76,8 @@ Options (no "--" needed):
   robots=<n>           most repeats of a test a page runs at once, as robots in
                        one scene (1-${MAX_ROBOTS}, default ${MAX_ROBOTS}); results do not depend on it
   shard=<i>/<n>        run slice i of n; combine with \`npm run benchmark merge\`
-  out=<dir>            where to write results (default: benchmark_results/<timestamp>)
+  out=<dir>            where to write results (default: benchmark_results/<timestamp>,
+                       under HPV_BENCHMARK_RESULTS_DIR when set)
 
 Flags:
   force                run even if this viewer does not match the benchmark (local-only)
@@ -79,10 +85,8 @@ Flags:
                        repeats walk side by side as see-through robots)
   verbose              print all browser console output
 
-Nothing is uploaded. A result that can be reproduced (Hub policy + Hub benchmark
-pinned to a commit, a clean viewer checkout implementing the benchmark's protocol,
-the whole benchmark, no failed cells) is submitted to each policy's Hub repo with
-\`npm run hf submit <result dir> [pr] [dry-run]\`; the run says whether it can be.
+Nothing is uploaded: HPV only reads from Hugging Face. Results are submitted to
+the Hub with cyclotron (https://github.com/menloresearch/cyclotron).
 
 Examples:
   npm run benchmark menloresearch/asimov1-loco
@@ -161,7 +165,7 @@ function writeOutputs(outDir, run) {
   writeFileSync(join(outDir, 'report.html'), buildBenchmarkReportHtml(run));
 }
 
-/** Each policy's scores, then whether the result can be submitted to the Hub. */
+/** Each policy's scores, then where to look at the result. */
 function printSummary(run, outDir) {
   for (const policy of run.policies) {
     console.log(`\n${policy.label}`);
@@ -172,16 +176,11 @@ function printSummary(run, outDir) {
   console.log('');
   const dir = relative(process.cwd(), outDir) || '.';
   for (const line of viewHint(dir, join(outDir, 'report.html'))) console.log(line);
-  for (const line of submitHint(run, dir)) console.log(line);
 }
 
 async function runBenchmarkCommand(args) {
   const { positionals, options, flags } = args;
-  const targets = [...positionals, ...(options.policy ?? [])].map((word) => classifyTarget(word));
-  if (options.benchmark) targets.push({ ...classifyTarget(options.benchmark), kind: 'benchmark' });
-  const benchmarks = targets.filter((t) => t.kind === 'benchmark');
-  const policyTargets = targets.filter((t) => t.kind === 'policy');
-  if (benchmarks.length > 1) throw new Error(`Give one benchmark, got ${benchmarks.map(describeTarget).join(' and ')}`);
+  const { policies: policyTargets, benchmark: benchmarkTarget } = splitTargets(positionals, options);
   if (!policyTargets.length) throw new Error(`No policy to benchmark.\n\n${USAGE}`);
 
   const watch = flags.has('watch');
@@ -191,13 +190,13 @@ async function runBenchmarkCommand(args) {
   if (robots > MAX_ROBOTS) throw new Error(`robots= must be at most ${MAX_ROBOTS}`);
   const shard = options.shard ? parseShard(options.shard) : null;
   const only = parseTests(options.tests);
-  const outDir = resolve(options.out ?? join(appDir, 'benchmark_results', timestamp()));
+  const outDir = resolve(options.out ?? join(getBenchmarkResultsDir(appDir), timestamp()));
   const log = (line) => console.log(line);
 
-  const loaded = await resolveBenchmark(benchmarks[0], log);
+  const loaded = await resolveBenchmark(benchmarkTarget ?? undefined, log);
   const problems = compatibilityProblems(loaded.benchmark);
   if (problems.length && !flags.has('force')) {
-    throw new Error(`This viewer cannot run ${describeTarget(benchmarks[0] ?? { kind: 'benchmark', ...loaded.info })}:\n${problems.map((p) => `  - ${p}`).join('\n')}\n(add "force" to run it anyway; the results will be local-only)`);
+    throw new Error(`This viewer cannot run ${describeTarget(benchmarkTarget ?? { kind: 'benchmark', ...loaded.info })}:\n${problems.map((p) => `  - ${p}`).join('\n')}\n(add "force" to run it anyway; the results will be local-only)`);
   }
   // Every test must load before any browser starts, so a broken test fails in a second, not mid-run.
   assertTestsRunnable(loaded);
@@ -298,7 +297,7 @@ async function mergeCommand(args) {
     return JSON.parse(readFileSync(path, 'utf8'));
   });
   const merged = mergeResults(runs);
-  const outDir = resolve(options.out ?? join(appDir, 'benchmark_results', `${timestamp()}_merged`));
+  const outDir = resolve(options.out ?? join(getBenchmarkResultsDir(appDir), `${timestamp()}_merged`));
   writeOutputs(outDir, merged);
   console.log(`Merged ${runs.length} shards into ${join(outDir, 'result.json')}`);
   printSummary(merged, outDir);
@@ -330,7 +329,7 @@ async function viewCommand({ positionals, options, flags }) {
 
 function initCommand({ positionals }) {
   if (!positionals[1]) throw new Error('init needs <dir>');
-  initBenchmark(resolve(positionals[1]));
+  initBenchmark(resolve(positionals[1]), { template: getBenchmarkTemplate(appDir) });
   return true;
 }
 
@@ -341,13 +340,21 @@ function pathEndCommand({ positionals }) {
   return true;
 }
 
-const COMMANDS = { merge: mergeCommand, view: viewCommand, init: initCommand, 'path-end': pathEndCommand };
+/** `inspect` and `policy-info`: scripts/inspect.mjs, one JSON object on stdout. */
+async function inspectCommand({ positionals }) {
+  const { inspect } = await import('./inspect.mjs');
+  const kind = positionals[0] === 'inspect' ? 'benchmark' : 'policy';
+  console.log(JSON.stringify(inspect([kind, ...positionals.slice(1)])));
+  return true;
+}
+
+const COMMANDS = {
+  merge: mergeCommand, view: viewCommand, init: initCommand, 'path-end': pathEndCommand, inspect: inspectCommand, 'policy-info': inspectCommand,
+};
 
 async function main() {
-  rejectSwallowedNpmFlags(process.env, { keys: KEYS, flags: FLAGS, hints: HINTS });
-  const args = parseWords(process.argv.slice(2), { keys: KEYS, flags: FLAGS, repeatable: ['policy'], hints: HINTS });
-  const retired = args.positionals.filter((word) => RETIRED.includes(word));
-  if (retired.length) throw new Error(`"${retired.join(' ')}": ${SUBMIT_MOVED}`);
+  rejectSwallowedNpmFlags(process.env, { keys: KEYS, flags: FLAGS });
+  const args = parseWords(process.argv.slice(2), { keys: KEYS, flags: FLAGS, repeatable: ['policy'] });
   if (args.flags.has('help') || (!args.positionals.length && !args.options.policy)) {
     console.log(USAGE);
     return args.flags.has('help');

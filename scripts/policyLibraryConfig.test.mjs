@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { resolve } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { getBenchmarkResultsDir, getPolicyLibrary, readEnv } from './policyLibraryConfig.mjs';
+import { getBenchmarkResultsDir, getBenchmarkTemplate, getLogDir, getPolicyLibrary, readEnv } from './policyLibraryConfig.mjs';
 
 const appDir = fileURLToPath(new URL('..', import.meta.url)).replace(/\/$/, '');
 
@@ -35,4 +35,13 @@ test('the pre-rename variable names still work, with one warning each; the new n
 
 test('an empty HPV_POLICY_ROOTS turns the library off', () => {
   assert.deepEqual(getPolicyLibrary({ HPV_POLICY_ROOTS: '' }).roots, []);
+});
+
+test('results, the benchmark template and logs default to the checkout and follow their variables', () => {
+  assert.equal(getBenchmarkResultsDir(appDir, {}), resolve(appDir, 'benchmark_results'));
+  assert.equal(getBenchmarkResultsDir(appDir, { HPV_BENCHMARK_RESULTS_DIR: '/r' }), resolve('/r'));
+  assert.equal(getBenchmarkTemplate(appDir, {}), resolve(appDir, 'benchmarks', 'default'));
+  assert.equal(getBenchmarkTemplate(appDir, { HPV_BENCHMARK_TEMPLATE: '/t' }), resolve('/t'));
+  assert.equal(getLogDir(appDir, {}), resolve(appDir, 'logs'));
+  assert.equal(getLogDir(appDir, { HPV_LOG_DIR: '/l' }), resolve('/l'));
 });

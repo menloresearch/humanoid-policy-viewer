@@ -1,170 +1,124 @@
 #!/usr/bin/env node
-// npm run hf <org/name[@rev] | folder | file.onnx> [benchmark=<...>] [port=<n>] [no-open]
-// npm run hf pull|diff|baseline|publish|release|submit ...
+// npm run hf <policy...> [<benchmark>] [policy=<...>] [benchmark=<...>] [port=<n>] [no-open]
 //
-// The Hugging Face command. With a policy it downloads the policy (or links one
-// from disk) and starts the viewer with it selected. Its verbs work on a
-// benchmark dataset on the Hub (scripts/hfBenchmark.mjs), or submit benchmark
-// results to the policies' model repos (scripts/hfSubmit.mjs).
+// The Hugging Face command: downloads the policy (or links one from disk) and
+// starts the viewer on localhost with it selected. Hugging Face's `asimov`
+// library snippet runs `npm run hf <model id>` from every `library_name: asimov`
+// model page. Several policies, or a folder of policies, are all listed in the
+// viewer's policy list, the first one selected. HPV only reads from the Hub;
+// publishing benchmarks and submitting results are done with cyclotron.
 // Run with no arguments for the usage text.
 // Nothing here may import an npm dependency before setup() has installed them.
 
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { classifyTarget } from './benchmarkTargets.mjs';
+import { CYCLOTRON_REPO } from './benchmarkProvenance.mjs';
+import { splitTargets } from './benchmarkTargets.mjs';
 import { parsePort, parseWords, rejectSwallowedNpmFlags } from './cliArgs.mjs';
-import { HF_POLICY_ROOT, ensurePolicy } from './hfPolicy.mjs';
-import { linkLocalPolicy } from './localPolicy.mjs';
-import { checkPolicyDir, libraryNameWarning, readReferenceJointNames } from './policyChecks.mjs';
+import { HF_POLICY_ROOT, defaultCacheDir } from './hfPolicy.mjs';
 import { setup } from './setup.mjs';
+import { cleanupOnExit, libraryFor, printPolicyWarnings, resolvePolicies } from './viewPolicies.mjs';
 
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 const USAGE = `Usage:
-  npm run hf <policy> [benchmark=<dir | datasets/org/name[@rev]>] [port=<n>] [no-open]
-  npm run hf <verb> ...
+  npm run hf <policy...> [<benchmark>] [port=<n>] [no-open]
 
-With a policy, downloads it from Hugging Face (policy .onnx + env.yaml) and opens
-the viewer with it selected. Example: npm run hf Menlo/asimov1-locomotion-0818
+Downloads a policy from Hugging Face (policy .onnx + env.yaml) and opens the viewer
+with it selected. Example: npm run hf Menlo/asimov1-locomotion-0818
 A policy is a Hub model repo (org/name, org/name@<branch|tag|commit> or its URL)
 or a folder / .onnx file on disk, run in place with no download. The folder needs
 the same files as a Hub repo: the .onnx and env.yaml (or params/env.yaml) next to
 it. Example: npm run hf ./my-policy
+Several policies, or a folder of policies (every folder below it holding an .onnx
+with an env.yaml, e.g. a training run's logs), are all listed in the viewer's policy
+list and the first one is selected. Example: npm run hf ./logs/rsl_rl/asimov Menlo/asimov1-locomotion-0818
 
-  benchmark=<...>      the benchmark the viewer opens (default ./benchmarks/default)
+A benchmark (default ./benchmarks/default) is a folder with a benchmark.yaml, or a
+Hub dataset datasets/org/name[@rev] (or its URL), downloaded and opened read-only.
+Policies and the benchmark can come in any order.
+
+  policy=<...>         a policy, when the word alone could be read as something else (repeatable)
+  benchmark=<...>      the benchmark, likewise
   port=<n>             dev server port (default: 3000, or the next free one)
   no-open              do not open a browser window
 
-Verbs, for a benchmark dataset on the Hub:
-  pull <dataset>[@rev|@refs/pr/<n>] <dir>  working copy of a Hub dataset (e.g. datasets/org/bench@refs/pr/3)
-  diff <dir> [repo=] [base=]               what changed compared with the dataset's main (or base=<rev>)
-  baseline <dir> [repo=] [base=] [policy=<policy>...]
-                                           run reference policies on the folder and on main (or base=);
-                                           writes <dir>/baseline.md
-  publish <dir> [repo=<org/name>] [base=<rev>] [pr] [create] [dry-run]
-                                           check against main (or base=, which must still be main), build
-                                           eval.yaml + the dataset card, then commit (owner), tagged
-                                           v<version> when that version is new, or open a pull request
-                                           (tag it with release after merging); "create" makes a new
-                                           PRIVATE dataset repo
-  release <dataset> rev=<commit>           tag a revision v<version> (a merged pull request)
-
-  repo= is the dataset (org/name); it can be left out for a folder made by pull.
-
-For benchmark results:
-  submit <result dir> [pr] [dry-run]       add the results of \`npm run benchmark\` to each policy's model
-                                           repo (.eval_results only): a commit if you own it, else
-                                           (or with pr) a pull request. Only reproducible results.
-
 Write options as key=value and flags as plain words, without "--".
 
-Environment:
-  HF_TOKEN             access token, needed for private repos and for writing; without it, the token
-                       \`hf auth login\` saved (HF_TOKEN_PATH, else HF_HOME/token, else
-                       ~/.cache/huggingface/token). Make one at https://huggingface.co/settings/tokens
-  HF_ENDPOINT          alternative Hub endpoint (default: https://huggingface.co)
-  HPV_CACHE_DIR        where downloads are kept (default: ~/.cache/humanoid-policy-viewer)`;
+HPV only reads from Hugging Face. Publishing benchmarks and submitting results
+are done with cyclotron (${CYCLOTRON_REPO}).
 
-// args: how many plain words a verb takes (default 1); more is an error, not ignored.
-const VERBS = {
-  pull: { args: 2 },
-  diff: { keys: ['repo', 'base'] },
-  baseline: { keys: ['policy', 'repo', 'base'], repeatable: ['policy'] },
-  publish: { keys: ['repo', 'base'], flags: ['pr', 'create', 'dry-run'] },
-  release: { keys: ['rev'] },
-  submit: { flags: ['pr', 'dry-run'] },
-};
-const VIEW = { keys: ['benchmark', 'port'], flags: ['no-open'] };
+Environment:
+  HF_TOKEN             access token, needed for private repos; without it, the token
+                       \`hf auth login\` saved (HF_TOKEN_PATH, else HF_HOME/token, else
+                       ~/.cache/huggingface/token)
+  HF_ENDPOINT          alternative Hub endpoint (default: https://huggingface.co)
+  HPV_CACHE_DIR        where downloads are kept (default: ~/.cache/humanoid-policy-viewer)
+  More in docs/architecture.md (Environment variables).`;
+
+// The Hub write verbs `npm run hf` had; cyclotron does all of that now.
+export const RETIRED_VERBS = ['pull', 'diff', 'baseline', 'publish', 'release', 'submit'];
+const VIEW = { keys: ['benchmark', 'policy', 'port'], flags: ['no-open', 'help'], repeatable: ['policy'] };
 // Names the old `npm run hf` took as --flags, spelled the new way.
 const HINTS = { revision: 'write the revision as org/name@rev (e.g. Menlo/asimov1-locomotion-0818@main)' };
 
-function words(argv, spec) {
-  const options = { keys: spec.keys ?? [], flags: [...(spec.flags ?? []), 'help'], repeatable: spec.repeatable ?? [], hints: HINTS };
-  rejectSwallowedNpmFlags(process.env, options);
-  return parseWords(argv, options);
+/** The one-line answer to a retired verb (publish, submit, ...). */
+export function retiredVerbMessage(verb) {
+  return `npm run hf ${verb} is gone: HPV only reads from Hugging Face; publishing benchmarks and submitting results are done with cyclotron (${CYCLOTRON_REPO}).`;
 }
 
-/** The dir argument of a verb, resolved; a missing one is an error, not the current folder. */
-function needDir(verb, dir) {
-  if (!dir) throw new Error(`${verb} needs <dir>\n\n${USAGE}`);
-  return resolve(dir);
-}
-
-async function runVerb(verb, argv) {
-  const { positionals, options, flags } = words(argv, VERBS[verb]);
-  if (flags.has('help')) return console.log(USAGE);
-  const max = VERBS[verb].args ?? 1;
-  if (positionals.length > max) {
-    throw new Error(`${verb} takes ${max === 1 ? 'one argument' : `${max} arguments`}, not ${positionals.join(' ')}${verb === 'submit' ? '; submit one result dir at a time' : ''}`);
-  }
-  const [a, b] = positionals;
-  const { repo, base } = options;
-  setup();
-  if (verb === 'submit') {
-    const { submit } = await import('./hfSubmit.mjs');
-    return submit(needDir(verb, a), { pr: flags.has('pr'), dryRun: flags.has('dry-run') });
-  }
-  const hub = await import('./hfBenchmark.mjs');
-  switch (verb) {
-    case 'pull': return hub.pull(a, b && resolve(b));
-    case 'diff': return hub.diff(needDir(verb, a), { repo, base });
-    case 'baseline': return hub.baseline(needDir(verb, a), options.policy ?? [], { repo, base });
-    case 'publish': return hub.publish(needDir(verb, a), { repo, base, pr: flags.has('pr'), create: flags.has('create'), dryRun: flags.has('dry-run') });
-    case 'release': return hub.release(a, options.rev);
-  }
-}
-
-/** The words of `npm run hf <policy> ...`: { word, target, benchmark, port, open, help }. */
-export function viewArgs(argv) {
-  const { positionals, options, flags } = words(argv, VIEW);
+/** The words of `npm run hf <policy...> ...`: { policies, benchmark, port, open, help } (policies and benchmark classified). */
+export function viewArgs(argv, env = process.env) {
+  const spec = { ...VIEW, hints: HINTS };
+  rejectSwallowedNpmFlags(env, spec);
+  const { positionals, options, flags } = parseWords(argv, spec);
   if (flags.has('help')) return { help: true };
-  const [word, ...extra] = positionals;
-  if (!word) throw new Error(`No policy given.\n\n${USAGE}`);
-  if (extra.length) throw new Error(`One policy at a time (got ${positionals.join(' ')}); npm run dev lists several.`);
-  const target = classifyTarget(word);
-  if (target.kind === 'benchmark') throw new Error(`${word} is a benchmark, not a policy; open it with npm run dev benchmark=${word}`);
-  return { word, target, benchmark: options.benchmark ?? null, port: parsePort(options.port), open: !flags.has('no-open') };
+  const { policies, benchmark } = splitTargets(positionals, options);
+  if (!policies.length) throw new Error(`No policy given.\n\n${USAGE}`);
+  return { policies, benchmark, port: parsePort(options.port), open: !flags.has('no-open') };
 }
 
 async function view(argv) {
-  const { help, word, target, benchmark, port, open } = viewArgs(argv);
+  const { help, policies: targets, benchmark, port, open } = viewArgs(argv);
   if (help) return console.log(USAGE);
-  const local = target.source === 'local' ? linkLocalPolicy(word) : null;
-  if (local) {
-    // Remove the temporary link however the server stops; a signal alone skips 'exit'.
-    process.on('exit', local.cleanup);
-    for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => process.exit(130));
-  }
 
   setup();
 
-  const policy = local ?? await ensurePolicy(target.id, { revision: target.revision ?? 'main', log: console.log });
-  const name = local ? local.policyDir : policy.repo;
-
-  const { errors, warnings } = checkPolicyDir(policy.policyDir, readReferenceJointNames(appDir));
-  // A local folder has no model card to check.
-  const libraryWarning = local ? null : libraryNameWarning(policy.libraryName);
-  if (libraryWarning) warnings.unshift(libraryWarning);
-  if (warnings.length) {
-    console.warn(`\nWarning: ${name} has ${warnings.length} issue(s):`);
-    for (const warning of warnings) console.warn(`  - ${warning}`);
+  const cacheDir = defaultCacheDir();
+  const found = await resolvePolicies(targets, { appDir, cacheDir, log: console.log });
+  for (const policy of found) printPolicyWarnings(policy);
+  // A policy named on the command line must run; one found in a folder of policies is left out instead.
+  const fatal = found.filter((policy) => policy.errors.length && !policy.scanned);
+  if (fatal.length) {
+    throw new Error(fatal.map((policy) => `${policy.name} cannot be run:\n${policy.errors.map((error) => `  - ${error}`).join('\n')}`).join('\n'));
   }
-  if (errors.length) {
-    throw new Error(`${name} cannot be run:\n${errors.map((error) => `  - ${error}`).join('\n')}`);
+  for (const policy of found.filter((p) => p.errors.length)) {
+    console.warn(`\nWarning: left out ${policy.name}, which cannot be run:\n${policy.errors.map((error) => `  - ${error}`).join('\n')}`);
   }
-  if (!warnings.length) console.log('Checked env.yaml and agent.yaml: OK');
+  const policies = found.filter((policy) => !policy.errors.length);
+  if (!policies.length) throw new Error('None of these policies can be run.');
+  if (!found.some((policy) => policy.warnings.length || policy.errors.length)) {
+    console.log(`Checked env.yaml and agent.yaml${policies.length > 1 ? ` of ${policies.length} policies` : ''}: OK`);
+  }
   console.log('');
 
-  // The bare URL opens the bundled example policy; this path selects the one just checked.
-  const policyPath = `/?policy=${encodeURIComponent(policy.policyValue)}`;
+  // Only the policies given are listed, plus every download in the Hub cache when one is from the Hub.
+  const base = policies.some((policy) => policy.source === 'hub') ? { dir: cacheDir, roots: [HF_POLICY_ROOT] } : { dir: cacheDir, roots: [] };
+  const library = libraryFor(policies, { base });
+  if (library.dir !== base.dir) cleanupOnExit(library.cleanup);
+
+  const [first, ...others] = policies;
+  // The bare URL opens the bundled example policy; this path selects the first one given.
+  const policyPath = `/?policy=${encodeURIComponent(first.value)}`;
   const { startViewer } = await import('./startViewer.mjs');
   const { server } = await startViewer({
     benchmark,
-    policyLibrary: { dir: policy.cacheDir, roots: [local ? local.root : HF_POLICY_ROOT] },
+    policyLibrary: library,
     port,
     open: open ? policyPath : false,
   });
-  console.log(`\nRunning ${name}${policy.primary === 'policy.onnx' ? '' : ` (${policy.primary})`}`);
+  console.log(`\nRunning ${first.name}${first.primary === 'policy.onnx' ? '' : ` (${first.primary})`}`);
+  if (others.length) console.log(`Also in the policy list: ${others.map((policy) => policy.label).join(', ')}`);
   const urls = server.resolvedUrls;
   if (!urls) {
     server.printUrls();
@@ -175,11 +129,11 @@ async function view(argv) {
   for (const url of urls.network) console.log(`  ➜  Network: ${new URL(policyPath, url)}`);
 }
 
-/** What the first word asks for: a verb, the usage text, or a policy to view. */
+/** What the first word asks for: the usage text, a retired Hub write verb, or policies to view. */
 export function command(argv) {
   const first = argv[0];
   if (first === undefined || first === 'help') return 'help';
-  if (Object.hasOwn(VERBS, first)) return first;
+  if (RETIRED_VERBS.includes(first)) return 'retired';
   return 'view';
 }
 
@@ -190,7 +144,8 @@ async function main(argv) {
     if (!argv.length) process.exitCode = 2;
     return;
   }
-  return which === 'view' ? view(argv) : runVerb(which, argv.slice(1));
+  if (which === 'retired') throw new Error(retiredVerbMessage(argv[0]));
+  return view(argv);
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
