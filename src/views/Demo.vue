@@ -437,7 +437,11 @@
           ></v-switch>
 
           <v-divider class="my-2"/>
-          <span class="status-name">Telemetry</span>
+          <details>
+          <summary style="cursor:pointer; font-size: 12px;">
+            <b>Telemetry</b>
+            <span :style="{color: robotStatus.color, fontWeight: 'bold', marginLeft: '6px'}">{{ robotStatus.label }}</span>
+          </summary>
           <div class="telemetry-grid mt-1" style="font-family: monospace; font-size: 11px; line-height: 1.4;">
             <div><b>Base vel:</b> x={{ telemetry.vx }} y={{ telemetry.vy }} z={{ telemetry.vz }}</div>
             <div><b>Ang vel:</b> {{ telemetry.wx }} {{ telemetry.wy }} {{ telemetry.wz }}</div>
@@ -445,13 +449,14 @@
             <div><b>Pull force:</b> {{ telemetry.pullForce }}N (peak: {{ telemetry.peakPullForce }}N)</div>
             <div><b>Max action:</b> {{ telemetry.maxAction }}</div>
             <div><b>Gyro mag:</b> {{ telemetry.gyroMag }} rad/s</div>
-            <div><b>Grav:</b> {{ telemetry.gravX }} {{ telemetry.gravY }} {{ telemetry.gravZ }} <span :style="{color: telemetry.settling ? '#ffaa00' : telemetry.fallen ? '#ff4444' : '#44ff44', fontWeight: 'bold'}">{{ telemetry.settling ? 'SETTLING' : telemetry.fallen ? 'FALLEN' : 'OK' }}</span></div>
+            <div><b>Grav:</b> {{ telemetry.gravX }} {{ telemetry.gravY }} {{ telemetry.gravZ }}</div>
             <div><b>Peak gyro:</b> {{ telemetry.peakGyro }} rad/s</div>
             <div><b>Joint vel RMS:</b> {{ telemetry.jointVelRms }} rad/s</div>
             <div><b>Action jitter:</b> {{ telemetry.actionJitter }}</div>
             <div><b>Torque jitter:</b> {{ telemetry.torqueJitter }}</div>
             <div><b>Vel jerk:</b> {{ telemetry.velJerk }} rad/s³</div>
           </div>
+          </details>
           <v-divider class="my-1"/>
           <details>
             <summary style="cursor:pointer; font-size: 12px;"><b>Joint Torques</b></summary>
@@ -469,7 +474,7 @@
               </div>
             </div>
           </details>
-          <details open>
+          <details>
             <summary style="cursor:pointer; font-size: 12px;"><b>L/R Symmetry Debug</b> (Δ=|L+R|, should be ~0)</summary>
             <div style="font-family: monospace; font-size: 10px; line-height: 1.3;">
               <div>Total asymmetry: <b :style="{color: parseFloat(telemetry.lrAsymmetryTotal) > 0.3 ? '#ff4444' : '#44ff44'}">{{ telemetry.lrAsymmetryTotal }}</b></div>
@@ -910,7 +915,11 @@
         </div>
       </v-card-text>
       <v-card-actions>
-        <v-btn color="primary" block :disabled="!!settleError" @click="reset">Reset</v-btn>
+        <v-btn
+          :color="damped ? 'success' : 'warning'" variant="tonal" :disabled="state !== 1" @click="toggleDamp"
+          :title="damped ? 'Turn the policy back on, starting from where the robot is now' : 'Stop the policy and hold the joints weakly where they are (DAMP)'"
+        >{{ damped ? 'Resume policy' : 'Damp' }}</v-btn>
+        <v-btn color="primary" class="flex-grow-1" :disabled="!!settleError" @click="reset">Reset</v-btn>
       </v-card-actions>
     </v-card>
   </div>
@@ -1081,6 +1090,7 @@ export default {
     startPreset: 'standing',
     settleOn: false,
     settleSeconds: DEFAULT_SETTLE_S,
+    damped: false, // the Damp button's state (demo.damp)
     minimapError: '0.00',
     telemetry: {
       vx: '0.00', vy: '0.00', vz: '0.00',
@@ -1110,6 +1120,12 @@ export default {
     _peakPullForceValue: 0
   }),
   computed: {
+    robotStatus() {
+      if (this.damped) return { label: 'DAMP', color: '#ffaa00' };
+      if (this.telemetry.settling) return { label: 'SETTLING', color: '#ffaa00' };
+      if (this.telemetry.fallen) return { label: 'FALLEN', color: '#ff4444' };
+      return { label: 'OK', color: '#44ff44' };
+    },
     settleError() {
       return this.settleOn ? (validateSettle(Number(this.settleSeconds))[0] ?? '') : '';
     },
@@ -1669,6 +1685,7 @@ export default {
       };
       // The viewer shows the drop: it settles over the next policy ticks, not inside Reset.
       this.demo.resetSimulation(this.demo, { settleLive: true });
+      this.damped = false;
       this._peakGyroValue = 0;
       this.telemetry.peakGyro = '0.00';
       this._peakPullForceValue = 0;
@@ -2428,6 +2445,11 @@ export default {
         this.demo.simulation.qvel[1] += Math.sin(angle) * force;
       }
     },
+    toggleDamp() {
+      if (!this.demo) return;
+      this.demo.setDamp(!this.demo.damp);
+      this.damped = this.demo.damp;
+    },
     resetVelocities() {
       if (!this.demo?.simulation) return;
       const qvel = this.demo.simulation.qvel;
@@ -2481,6 +2503,7 @@ export default {
         this.telemetry.gravZ = f(gravZval);
         this.telemetry.fallen = this.demo.fallen || false;
         this.telemetry.settling = this.demo.settleTicksLeft > 0;
+        this.damped = !!this.demo.damp;
         if (gyroMag > this._peakGyroValue) {
           this._peakGyroValue = gyroMag;
           this.telemetry.peakGyro = f(gyroMag);
