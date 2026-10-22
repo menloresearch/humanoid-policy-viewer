@@ -10,29 +10,22 @@
 // It imports npm packages, so scripts/hf.mjs loads it after setup().
 
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { cpSync, existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
-import { parseDocument } from 'yaml';
 import { compatibilityProblems } from '../src/benchmark/settings.js';
 import { HPV_REPO, collectProvenance, onPublicRepo } from './benchmarkProvenance.mjs';
 import { classifyTarget } from './benchmarkTargets.mjs';
 import { explainAuthError, requireToken } from './hfAuth.mjs';
 import { commitFiles, hubCredentials } from './hfCommit.mjs';
-import { BENCHMARK_FILES, ensureDataset, fetchDatasetInfo, hubSettings } from './hfDataset.mjs';
+import { ensureDataset, fetchDatasetInfo, hubSettings } from './hfDataset.mjs';
 import { checkTests } from '../src/benchmark/check.js';
-import { rowToHub } from '../src/benchmark/testRow.js';
-import { hubFiles, loadBenchmarkDir, readYamlFile } from './benchmarkDir.mjs';
+import { BENCHMARK_FILES, hubFiles, hubRowsText, loadBenchmarkDir, readYamlFile, scoredContentHash, withTestedCommit } from './benchmarkDir.mjs';
 
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 // Written by pull: which dataset a working copy came from, so repo= can be left out.
 const PULLED_FILE = '.hpv-benchmark.json';
-
-function sha256(text) {
-  return createHash('sha256').update(text).digest('hex');
-}
 
 /** This checkout: { commit, dirty, public } (public = on a branch of HPV_REPO). */
 function viewerCheckout() {
@@ -86,31 +79,6 @@ async function chooseLicense(raw, { confirm, log }, dryRun) {
   throw new Error(answer === null
     ? `Not published: benchmark.yaml has no license and there is no terminal to ask on. Set license: in benchmark.yaml (leave it blank for none).`
     : 'Not published: no license chosen, nothing was uploaded. Set license: in benchmark.yaml (leave it blank for none).');
-}
-
-/**
- * Hash of everything that can change a score: the rows and benchmark.yaml without
- * its prose (title, description), its version and harness.tested_commit.
- */
-export function scoredContentHash(rawBenchmark, rows) {
-  const { title, description, version, reference_policies: referencePolicies, license, tags, ...rest } = rawBenchmark;
-  const harness = { ...(rest.harness ?? {}) };
-  delete harness.tested_commit;
-  const canonical = (value) => (Array.isArray(value)
-    ? value.map(canonical)
-    : value && typeof value === 'object'
-      ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])]))
-      : value);
-  return sha256(JSON.stringify(canonical({ benchmark: { ...rest, harness }, rows: [...rows].sort((a, b) => a.id.localeCompare(b.id)) })));
-}
-
-/** benchmark.yaml text with harness.tested_commit set to `commit`, its comments and layout kept. */
-export function withTestedCommit(text, commit) {
-  const doc = parseDocument(text);
-  const node = doc.getIn(['harness', 'tested_commit'], true);
-  if (node?.range && node.range[1] > node.range[0]) return text.slice(0, node.range[0]) + commit + text.slice(node.range[1]);
-  doc.setIn(['harness', 'tested_commit'], commit);
-  return doc.toString();
 }
 
 const withoutTestedCommit = (raw) => ({ ...raw, harness: { ...raw.harness, tested_commit: undefined } });
@@ -271,15 +239,6 @@ export async function baseline(dir, policies, { repo, base: rev } = {}, io) {
   const text = `Baseline: candidate vs ${previous ? describeBase(previous) : '(nothing on the Hub to compare with)'}, viewer ${runs.candidate.provenance.hpv.commit?.slice(0, 7)}\n\n${lines.join('\n')}\n`;
   writeFileSync(join(dir, 'baseline.md'), text);
   io.log(`\n${text}\nWrote ${join(dir, 'baseline.md')}`);
-}
-
-/** A test.jsonl's text with every row in its published form (rowToHub); rows without a start are left as written. */
-export function hubRowsText(text) {
-  return text.split('\n').map((line) => {
-    if (!line.trim()) return line;
-    const row = JSON.parse(line);
-    return row.start && typeof row.start === 'object' ? JSON.stringify(rowToHub(row)) : line;
-  }).join('\n');
 }
 
 // eval.yaml and README.md are built by hubFiles(), never taken from disk.

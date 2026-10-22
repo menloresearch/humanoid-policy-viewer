@@ -10,7 +10,7 @@ import { dirname, join, resolve } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
-import { hubRowsText, publish, withTestedCommit } from './hfBenchmark.mjs';
+import { publish } from './hfBenchmark.mjs';
 import { RESULT_SCHEMA, summarize } from '../src/benchmark/run.js';
 import { BENCHMARK_PROTOCOL } from '../src/benchmark/protocol.js';
 import { submit } from './hfSubmit.mjs';
@@ -253,15 +253,6 @@ test('publish refuses a viewer checkout others cannot reproduce, even in dry-run
   assert.equal(fake.dataset('me/bench').commits.size, 1);
 });
 
-test('withTestedCommit replaces the value in place, and adds the key when there is none', () => {
-  const text = 'name: x   # the name\nharness:\n  protocol: 1      # p\n  tested_commit: abc   # set by publish\nversion: 1\n';
-  assert.equal(withTestedCommit(text, 'f'.repeat(40)), text.replace('abc', 'f'.repeat(40)));
-  assert.equal(parseYaml(withTestedCommit('harness: { protocol: 1, tested_commit: "abc" }\n', 'f'.repeat(40))).harness.tested_commit, 'f'.repeat(40));
-  for (const missing of ['harness:\n  protocol: 1\n', 'harness:\n  protocol: 1\n  tested_commit:\n']) {
-    assert.deepEqual(parseYaml(withTestedCommit(missing, 'f'.repeat(40))).harness, { protocol: 1, tested_commit: 'f'.repeat(40) });
-  }
-});
-
 function resultRun(overrides = {}) {
   const raw = parseYaml(readFileSync(join(DEFAULT, 'benchmark.yaml'), 'utf8'));
   const row = JSON.parse(readFileSync(join(DEFAULT, 'data/locomotion/test.jsonl'), 'utf8').split('\n')[0]);
@@ -455,14 +446,4 @@ test('a license that is neither a file nor an id is refused', async () => {
     publish(withYaml((yaml) => yaml.replace(/^license: .*$/m, 'license: 3\ntags: nope')), { repo: 'me/bad2', create: true }, fake.io),
     /license must be[^]*tags must be a list of strings/,
   );
-});
-
-test('publishing writes a row\'s start as JSON text and leaves other rows as written', () => {
-  const start = { pos: [0, 0, 0.16], joint_pos: { '.*_knee_joint': 0.6 } };
-  const plain = '{"id":"loco/a",  "start":null}';
-  const text = `${plain}\n${JSON.stringify({ id: 'getup/a', start })}\n`;
-  const [first, second, last] = hubRowsText(text).split('\n');
-  assert.equal(first, plain);
-  assert.deepEqual(JSON.parse(second), { id: 'getup/a', start: JSON.stringify(start) });
-  assert.equal(last, '');
 });

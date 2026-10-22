@@ -5,18 +5,11 @@
 
 import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
+import { BENCHMARK_FILES } from './benchmarkDir.mjs';
 import { hubToken } from './hfAuth.mjs';
 import { defaultCacheDir, downloadFile, notFoundHint } from './hfPolicy.mjs';
 
 export const DATASET_META_FILE = '.hf-dataset.json';
-
-// The files of a benchmark folder that `hf publish` uploads as they are. It also
-// uploads eval.yaml and README.md, which it builds (benchmarkDir.mjs hubFiles).
-export const BENCHMARK_FILES = [
-  /^benchmark\.yaml$/, /^[A-Z_]+\.md$/, /^data\/[^/]+\/test\.jsonl$/, /^calibration\/[^/]+\.json$/,
-  /^tools\/[^/]+\.(mjs|js|py)$/, // optional scripts that generate the tests, kept for reviewers
-  /^(LICEN[CS]E|COPYING)(\.[A-Za-z0-9]+)?$/, // a license file benchmark.yaml's `license:` can point at
-];
 
 // Everything `hf publish` uploads, so a pulled copy publishes back unchanged; never large data files.
 export function datasetFilesToFetch(files) {

@@ -12,15 +12,25 @@
 // The same layout is used for a local working copy, a downloaded revision and
 // the test fixture in test/fixtures/smoke-benchmark/.
 
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
+import { parseDocument, parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { buildEvalYaml, parseBenchmark } from '../src/benchmark/settings.js';
-import { ALL_CONFIG, rowFeaturesYaml, rowFromHub, validateTestRow } from '../src/benchmark/testRow.js';
+import { ALL_CONFIG, rowFeaturesYaml, rowFromHub, rowToHub, validateTestRow } from '../src/benchmark/testRow.js';
 
 export const BENCHMARK_FILE = 'benchmark.yaml';
 export const DATA_DIR = 'data';
 export const ROWS_FILE = 'test.jsonl';
+
+// The files of a benchmark folder that are published as they are (each
+// data/*/test.jsonl in its Hub form, see hubRowsText). eval.yaml and the dataset
+// card's front matter are built when the benchmark is published.
+export const BENCHMARK_FILES = [
+  /^benchmark\.yaml$/, /^[A-Z_]+\.md$/, /^data\/[^/]+\/test\.jsonl$/, /^calibration\/[^/]+\.json$/,
+  /^tools\/[^/]+\.(mjs|js|py)$/, // optional scripts that generate the tests, kept for reviewers
+  /^(LICEN[CS]E|COPYING)(\.[A-Za-z0-9]+)?$/, // a license file benchmark.yaml's `license:` can point at
+];
 
 // Local benchmarks live in ./benchmarks: default/ (tracked; the one plain
 // `npm run dev` opens and the one new benchmarks are copied from), and,
@@ -167,4 +177,39 @@ export function hubFiles({ dir, benchmark, rows, rawBenchmark }, { previousEvalY
       })),
     },
   ];
+}
+
+/**
+ * Hash of everything that can change a score: the rows and benchmark.yaml without
+ * its prose (title, description), its version and harness.tested_commit.
+ */
+export function scoredContentHash(rawBenchmark, rows) {
+  const { title, description, version, reference_policies: referencePolicies, license, tags, ...rest } = rawBenchmark;
+  const harness = { ...(rest.harness ?? {}) };
+  delete harness.tested_commit;
+  const canonical = (value) => (Array.isArray(value)
+    ? value.map(canonical)
+    : value && typeof value === 'object'
+      ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])]))
+      : value);
+  const text = JSON.stringify(canonical({ benchmark: { ...rest, harness }, rows: [...rows].sort((a, b) => a.id.localeCompare(b.id)) }));
+  return createHash('sha256').update(text).digest('hex');
+}
+
+/** benchmark.yaml text with harness.tested_commit set to `commit`, its comments and layout kept. */
+export function withTestedCommit(text, commit) {
+  const doc = parseDocument(text);
+  const node = doc.getIn(['harness', 'tested_commit'], true);
+  if (node?.range && node.range[1] > node.range[0]) return text.slice(0, node.range[0]) + commit + text.slice(node.range[1]);
+  doc.setIn(['harness', 'tested_commit'], commit);
+  return doc.toString();
+}
+
+/** A test.jsonl's text with every row in its published form (rowToHub); rows without a start are left as written. */
+export function hubRowsText(text) {
+  return text.split('\n').map((line) => {
+    if (!line.trim()) return line;
+    const row = JSON.parse(line);
+    return row.start && typeof row.start === 'object' ? JSON.stringify(rowToHub(row)) : line;
+  }).join('\n');
 }

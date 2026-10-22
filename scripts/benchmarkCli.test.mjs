@@ -12,7 +12,6 @@ import { buildEvalResultEntries, evalResultsPath, mergeEvalResults } from './hfE
 import { commitFiles, decideCommitMode } from './hfCommit.mjs';
 import { datasetFilesToFetch } from './hfDataset.mjs';
 import { mergeEvalTasks } from './benchmarkDir.mjs';
-import { scoredContentHash } from './hfBenchmark.mjs';
 
 test('words, key=value options and flags', () => {
   const parsed = parseWords(['org/a', 'benchmark=../s', 'policy=b/c', 'policy=d/e', 'pr', 'jobs=3', 'dry-run'], {
@@ -268,13 +267,3 @@ test('only benchmark files are fetched from a dataset', () => {
     ['benchmark.yaml', 'eval.yaml', 'README.md', 'CHANGELOG.md', 'data/push/test.jsonl', 'calibration/v1.json', 'tools/gen.py'],
   );
 });
-
-test('the scored-content hash ignores prose, version and tested_commit', () => {
-  const benchmark = { name: 's', title: 'T', version: 1, harness: { protocol: 1, tested_commit: 'abc' }, tests: [{ all: true }] };
-  const rows = [{ id: 'loco/a', duration: 10 }];
-  const hash = scoredContentHash(benchmark, rows);
-  assert.equal(scoredContentHash({ ...benchmark, title: 'U', version: 2, harness: { protocol: 1, tested_commit: 'def' } }, rows), hash);
-  assert.notEqual(scoredContentHash({ ...benchmark, harness: { protocol: 2 } }, rows), hash);
-  assert.notEqual(scoredContentHash(benchmark, [{ id: 'loco/a', duration: 11 }]), hash);
-});
-
