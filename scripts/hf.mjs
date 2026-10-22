@@ -1,11 +1,10 @@
 #!/usr/bin/env node
 // npm run hf <org/name[@rev] | folder | file.onnx> [benchmark=<...>] [port=<n>] [no-open]
-// npm run hf pull|diff|baseline|publish|release|submit ...
 //
-// The Hugging Face command. With a policy it downloads the policy (or links one
-// from disk) and starts the viewer with it selected. Its verbs work on a
-// benchmark dataset on the Hub (scripts/hfBenchmark.mjs), or submit benchmark
-// results to the policies' model repos (scripts/hfSubmit.mjs).
+// The Hugging Face command: downloads the policy (or links one from disk) and
+// starts the viewer with it selected. Hugging Face's `asimov` library snippet
+// runs it from every `library_name: asimov` model page. HPV only reads from the
+// Hub; publishing benchmarks and submitting results are done with cyclotron.
 // Run with no arguments for the usage text.
 // Nothing here may import an npm dependency before setup() has installed them.
 
@@ -20,98 +19,50 @@ import { setup } from './setup.mjs';
 
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
+export const CYCLOTRON = 'https://github.com/menloresearch/cyclotron';
+
 const USAGE = `Usage:
   npm run hf <policy> [benchmark=<dir | datasets/org/name[@rev]>] [port=<n>] [no-open]
-  npm run hf <verb> ...
 
-With a policy, downloads it from Hugging Face (policy .onnx + env.yaml) and opens
-the viewer with it selected. Example: npm run hf Menlo/asimov1-locomotion-0818
+Downloads a policy from Hugging Face (policy .onnx + env.yaml) and opens the viewer
+with it selected. Example: npm run hf Menlo/asimov1-locomotion-0818
 A policy is a Hub model repo (org/name, org/name@<branch|tag|commit> or its URL)
 or a folder / .onnx file on disk, run in place with no download. The folder needs
 the same files as a Hub repo: the .onnx and env.yaml (or params/env.yaml) next to
 it. Example: npm run hf ./my-policy
 
-  benchmark=<...>      the benchmark the viewer opens (default ./benchmarks/default)
+  benchmark=<...>      the benchmark the viewer opens (default ./benchmarks/default);
+                       one from the Hub is downloaded and opened read-only
   port=<n>             dev server port (default: 3000, or the next free one)
   no-open              do not open a browser window
 
-Verbs, for a benchmark dataset on the Hub:
-  pull <dataset>[@rev|@refs/pr/<n>] <dir>  working copy of a Hub dataset (e.g. datasets/org/bench@refs/pr/3)
-  diff <dir> [repo=] [base=]               what changed compared with the dataset's main (or base=<rev>)
-  baseline <dir> [repo=] [base=] [policy=<policy>...]
-                                           run reference policies on the folder and on main (or base=);
-                                           writes <dir>/baseline.md
-  publish <dir> [repo=<org/name>] [base=<rev>] [pr] [create] [dry-run]
-                                           check against main (or base=, which must still be main), build
-                                           eval.yaml + the dataset card, then commit (owner), tagged
-                                           v<version> when that version is new, or open a pull request
-                                           (tag it with release after merging); "create" makes a new
-                                           PRIVATE dataset repo
-  release <dataset> rev=<commit>           tag a revision v<version> (a merged pull request)
-
-  repo= is the dataset (org/name); it can be left out for a folder made by pull.
-
-For benchmark results:
-  submit <result dir> [pr] [dry-run]       add the results of \`npm run benchmark\` to each policy's model
-                                           repo (.eval_results only): a commit if you own it, else
-                                           (or with pr) a pull request. Only reproducible results.
-
 Write options as key=value and flags as plain words, without "--".
 
+HPV only reads from Hugging Face. Publishing benchmarks and submitting results
+are done with cyclotron (${CYCLOTRON}).
+
 Environment:
-  HF_TOKEN             access token, needed for private repos and for writing; without it, the token
+  HF_TOKEN             access token, needed for private repos; without it, the token
                        \`hf auth login\` saved (HF_TOKEN_PATH, else HF_HOME/token, else
-                       ~/.cache/huggingface/token). Make one at https://huggingface.co/settings/tokens
+                       ~/.cache/huggingface/token)
   HF_ENDPOINT          alternative Hub endpoint (default: https://huggingface.co)
   HPV_CACHE_DIR        where downloads are kept (default: ~/.cache/humanoid-policy-viewer)`;
 
-// args: how many plain words a verb takes (default 1); more is an error, not ignored.
-const VERBS = {
-  pull: { args: 2 },
-  diff: { keys: ['repo', 'base'] },
-  baseline: { keys: ['policy', 'repo', 'base'], repeatable: ['policy'] },
-  publish: { keys: ['repo', 'base'], flags: ['pr', 'create', 'dry-run'] },
-  release: { keys: ['rev'] },
-  submit: { flags: ['pr', 'dry-run'] },
-};
+// The Hub write verbs `npm run hf` had; cyclotron does all of that now.
+export const RETIRED_VERBS = ['pull', 'diff', 'baseline', 'publish', 'release', 'submit'];
 const VIEW = { keys: ['benchmark', 'port'], flags: ['no-open'] };
 // Names the old `npm run hf` took as --flags, spelled the new way.
 const HINTS = { revision: 'write the revision as org/name@rev (e.g. Menlo/asimov1-locomotion-0818@main)' };
+
+/** The one-line answer to a retired verb such as `npm run hf publish`. */
+export function retiredVerbMessage(verb) {
+  return `npm run hf ${verb} is gone: HPV only reads from Hugging Face; publishing benchmarks and submitting results are done with cyclotron (${CYCLOTRON}).`;
+}
 
 function words(argv, spec) {
   const options = { keys: spec.keys ?? [], flags: [...(spec.flags ?? []), 'help'], repeatable: spec.repeatable ?? [], hints: HINTS };
   rejectSwallowedNpmFlags(process.env, options);
   return parseWords(argv, options);
-}
-
-/** The dir argument of a verb, resolved; a missing one is an error, not the current folder. */
-function needDir(verb, dir) {
-  if (!dir) throw new Error(`${verb} needs <dir>\n\n${USAGE}`);
-  return resolve(dir);
-}
-
-async function runVerb(verb, argv) {
-  const { positionals, options, flags } = words(argv, VERBS[verb]);
-  if (flags.has('help')) return console.log(USAGE);
-  const max = VERBS[verb].args ?? 1;
-  if (positionals.length > max) {
-    throw new Error(`${verb} takes ${max === 1 ? 'one argument' : `${max} arguments`}, not ${positionals.join(' ')}${verb === 'submit' ? '; submit one result dir at a time' : ''}`);
-  }
-  const [a, b] = positionals;
-  const { repo, base } = options;
-  setup();
-  if (verb === 'submit') {
-    const { submit } = await import('./hfSubmit.mjs');
-    return submit(needDir(verb, a), { pr: flags.has('pr'), dryRun: flags.has('dry-run') });
-  }
-  const hub = await import('./hfBenchmark.mjs');
-  switch (verb) {
-    case 'pull': return hub.pull(a, b && resolve(b));
-    case 'diff': return hub.diff(needDir(verb, a), { repo, base });
-    case 'baseline': return hub.baseline(needDir(verb, a), options.policy ?? [], { repo, base });
-    case 'publish': return hub.publish(needDir(verb, a), { repo, base, pr: flags.has('pr'), create: flags.has('create'), dryRun: flags.has('dry-run') });
-    case 'release': return hub.release(a, options.rev);
-  }
 }
 
 /** The words of `npm run hf <policy> ...`: { word, target, benchmark, port, open, help }. */
@@ -175,11 +126,11 @@ async function view(argv) {
   for (const url of urls.network) console.log(`  ➜  Network: ${new URL(policyPath, url)}`);
 }
 
-/** What the first word asks for: a verb, the usage text, or a policy to view. */
+/** What the first word asks for: the usage text, a retired Hub write verb, or a policy to view. */
 export function command(argv) {
   const first = argv[0];
   if (first === undefined || first === 'help') return 'help';
-  if (Object.hasOwn(VERBS, first)) return first;
+  if (RETIRED_VERBS.includes(first)) return 'retired';
   return 'view';
 }
 
@@ -190,7 +141,8 @@ async function main(argv) {
     if (!argv.length) process.exitCode = 2;
     return;
   }
-  return which === 'view' ? view(argv) : runVerb(which, argv.slice(1));
+  if (which === 'retired') throw new Error(retiredVerbMessage(argv[0]));
+  return view(argv);
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

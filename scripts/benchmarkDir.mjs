@@ -5,18 +5,19 @@
 //   data/<config>/test.jsonl   one test per line (src/benchmark/testRow.js)
 //   README.md                  optional notes; becomes the dataset card
 //
-// Running and editing a benchmark needs only these. The Hugging Face files
-// (eval.yaml and the card's front matter) are built by hubFiles() when the
-// benchmark is published, and are never written to a working copy.
+// Running and editing a benchmark needs only these. HPV never writes to the
+// Hub: a benchmark is published with cyclotron, which builds eval.yaml and the
+// card's front matter with cardFrontMatter, taskDescriptors (settings.js) and
+// the helpers at the end of this file.
 //
-// The same layout is used for a local working copy, a downloaded revision and
-// the test fixture in test/fixtures/smoke-benchmark/.
+// The same layout is used for a local folder, a downloaded revision and the
+// test fixture in test/fixtures/smoke-benchmark/.
 
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { parseDocument, parse as parseYaml, stringify as stringifyYaml } from 'yaml';
-import { buildEvalYaml, parseBenchmark } from '../src/benchmark/settings.js';
+import { parseDocument, parse as parseYaml } from 'yaml';
+import { parseBenchmark } from '../src/benchmark/settings.js';
 import { ALL_CONFIG, rowFeaturesYaml, rowFromHub, rowToHub, validateTestRow } from '../src/benchmark/testRow.js';
 
 export const BENCHMARK_FILE = 'benchmark.yaml';
@@ -37,7 +38,7 @@ export const BENCHMARK_FILES = [
 
 // Local benchmarks live in ./benchmarks: default/ (tracked; the one plain
 // `npm run dev` opens and the one new benchmarks are copied from), and,
-// gitignored, the ones "New benchmark" makes and Hub working copies.
+// gitignored, the ones "New benchmark" makes.
 export const defaultBenchmarkDir = (appDir) => join(appDir, 'benchmarks', 'default');
 
 export function readYamlFile(path) {
@@ -133,14 +134,17 @@ export function licenseFields(dir, license, benchmarkName) {
   throw new Error(`benchmark.yaml license "${license}" is neither a file in ${dir} nor a Hugging Face license id such as bsd-3-clause, apache-2.0, mit or cc-by-4.0`);
 }
 
-/** Dataset card front matter: one Hub config per test category, all in split "test". */
+/**
+ * Dataset card front matter: one Hub config per test category, all in split
+ * "test", and the tags in benchmark.yaml (the publisher adds its own).
+ */
 export function cardFrontMatter(rows, { license = {}, tags = [], prettyName }) {
   const configs = [...new Set(rows.map((row) => row.config))].sort();
   return {
     ...license,
     pretty_name: prettyName,
     task_categories: ['robotics'],
-    tags: [...new Set(['humanoid-policy-viewer', ...tags])],
+    tags: [...new Set(tags ?? [])],
     // Declared column types for every config (see ROW_FEATURES).
     dataset_info: [ALL_CONFIG, ...configs].map((config) => ({ config_name: config, features: rowFeaturesYaml() })),
     // "all" (the default) holds every test; tasks spanning categories score it.
@@ -152,47 +156,6 @@ export function cardFrontMatter(rows, { license = {}, tags = [], prettyName }) {
       })),
     ],
   };
-}
-
-/** Replaces (or adds) the README's YAML front matter, keeping its body. */
-export function withFrontMatter(readme, frontMatter) {
-  const body = readme.replace(/^---\n[\s\S]*?\n---\n?/, '');
-  return `---\n${stringifyYaml(frontMatter)}---\n${body.startsWith('\n') ? body : `\n${body}`}`;
-}
-
-/**
- * Keeps the task ids of earlier benchmark versions that the Hub's eval.yaml already
- * lists, so results uploaded for them keep resolving after a version bump.
- */
-export function mergeEvalTasks(previous, generated) {
-  const ids = new Set(generated.tasks.map((task) => task.id));
-  const kept = (previous?.tasks ?? []).filter((task) => !ids.has(task.id));
-  return { ...generated, tasks: [...generated.tasks, ...kept] };
-}
-
-/**
- * The Hugging Face files for publishing: eval.yaml built from benchmark.yaml, and
- * README.md with the dataset card front matter (configs, tags) put in front of
- * the working copy's README. `previousEvalYaml` is the eval.yaml already on the
- * Hub, whose task ids for earlier benchmark versions are kept. Nothing is written.
- */
-export function hubFiles({ dir, benchmark, rows, rawBenchmark }, { previousEvalYaml = null } = {}) {
-  const name = rawBenchmark.title ?? benchmark.name;
-  const description = (rawBenchmark.description ?? '').trim() || `Benchmark ${benchmark.name}, run with humanoid-policy-viewer.`;
-  const evalYaml = mergeEvalTasks(previousEvalYaml, buildEvalYaml(benchmark, { name, description }));
-  const readmePath = join(dir, 'README.md');
-  const readme = existsSync(readmePath) ? readFileSync(readmePath, 'utf8') : `\n# ${name}\n`;
-  return [
-    { path: 'eval.yaml', content: `# Generated from benchmark.yaml by \`npm run hf publish\`; do not edit by hand.\n${stringifyYaml(evalYaml)}` },
-    {
-      path: 'README.md',
-      content: withFrontMatter(readme, cardFrontMatter(rows, {
-        license: licenseFields(dir, rawBenchmark.license, benchmark.name),
-        tags: rawBenchmark.tags,
-        prettyName: name,
-      })),
-    },
-  ];
 }
 
 /**

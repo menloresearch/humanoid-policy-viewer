@@ -5,8 +5,8 @@
 //
 // Benchmarks policies against a benchmark (a Hugging Face benchmark
 // dataset or a local folder; see scripts/benchmarkDir.mjs) in headless
-// Chromium and writes result.json + report.html. It never uploads: a result
-// that can be reproduced is submitted afterwards with `npm run hf submit <dir>`.
+// Chromium and writes result.json + report.html. It never uploads: HPV only
+// reads from the Hub; results are submitted with cyclotron.
 // Run with no arguments for the full usage text.
 
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmdirSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
@@ -21,7 +21,7 @@ import { rowToSequence } from '../src/benchmark/testRow.js';
 import { buildBenchmarkReportHtml } from '../src/simulation/benchmarkReport.js';
 import { runJobs } from './benchmarkBrowser.mjs';
 import { collectProvenance, policyFileHashes } from './benchmarkProvenance.mjs';
-import { formatOutcomes, formatTasks, parseShard, parseTests, resultTarget, shardJobs, submitHint, viewHint } from './benchmarkRun.mjs';
+import { formatOutcomes, formatTasks, parseShard, parseTests, resultTarget, shardJobs, viewHint } from './benchmarkRun.mjs';
 import { classifyTarget, describeTarget } from './benchmarkTargets.mjs';
 import { checkPolicyDir, readReferenceJointNames } from './policyChecks.mjs';
 import { parsePort, parseWords, rejectSwallowedNpmFlags } from './cliArgs.mjs';
@@ -36,10 +36,6 @@ const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 const KEYS = ['benchmark', 'policy', 'tests', 'repeats', 'jobs', 'robots', 'shard', 'out', 'port'];
 const FLAGS = ['force', 'watch', 'verbose', 'help', 'no-open'];
-// Words this command took before submitting moved to `npm run hf submit`.
-const SUBMIT_MOVED = 'results are submitted separately now: npm run hf submit <result dir> [pr] [dry-run]';
-const RETIRED = ['upload', 'no-upload', 'pr', 'dry-run'];
-const HINTS = Object.fromEntries(RETIRED.map((word) => [word, SUBMIT_MOVED]));
 
 const USAGE = `Usage:
   npm run benchmark <policy...> [<benchmark>] [key=value...] [flags...]
@@ -79,10 +75,8 @@ Flags:
                        repeats walk side by side as see-through robots)
   verbose              print all browser console output
 
-Nothing is uploaded. A result that can be reproduced (Hub policy + Hub benchmark
-pinned to a commit, a clean viewer checkout implementing the benchmark's protocol,
-the whole benchmark, no failed cells) is submitted to each policy's Hub repo with
-\`npm run hf submit <result dir> [pr] [dry-run]\`; the run says whether it can be.
+Nothing is uploaded: HPV only reads from Hugging Face. Results are submitted to
+the Hub with cyclotron (https://github.com/menloresearch/cyclotron).
 
 Examples:
   npm run benchmark menloresearch/asimov1-loco
@@ -161,7 +155,7 @@ function writeOutputs(outDir, run) {
   writeFileSync(join(outDir, 'report.html'), buildBenchmarkReportHtml(run));
 }
 
-/** Each policy's scores, then whether the result can be submitted to the Hub. */
+/** Each policy's scores, then where to look at the result. */
 function printSummary(run, outDir) {
   for (const policy of run.policies) {
     console.log(`\n${policy.label}`);
@@ -172,7 +166,6 @@ function printSummary(run, outDir) {
   console.log('');
   const dir = relative(process.cwd(), outDir) || '.';
   for (const line of viewHint(dir, join(outDir, 'report.html'))) console.log(line);
-  for (const line of submitHint(run, dir)) console.log(line);
 }
 
 async function runBenchmarkCommand(args) {
@@ -344,10 +337,8 @@ function pathEndCommand({ positionals }) {
 const COMMANDS = { merge: mergeCommand, view: viewCommand, init: initCommand, 'path-end': pathEndCommand };
 
 async function main() {
-  rejectSwallowedNpmFlags(process.env, { keys: KEYS, flags: FLAGS, hints: HINTS });
-  const args = parseWords(process.argv.slice(2), { keys: KEYS, flags: FLAGS, repeatable: ['policy'], hints: HINTS });
-  const retired = args.positionals.filter((word) => RETIRED.includes(word));
-  if (retired.length) throw new Error(`"${retired.join(' ')}": ${SUBMIT_MOVED}`);
+  rejectSwallowedNpmFlags(process.env, { keys: KEYS, flags: FLAGS });
+  const args = parseWords(process.argv.slice(2), { keys: KEYS, flags: FLAGS, repeatable: ['policy'] });
   if (args.flags.has('help') || (!args.positionals.length && !args.options.policy)) {
     console.log(USAGE);
     return args.flags.has('help');

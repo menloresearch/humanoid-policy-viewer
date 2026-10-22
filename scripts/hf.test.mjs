@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { command, viewArgs } from './hf.mjs';
+import { RETIRED_VERBS, command, viewArgs } from './hf.mjs';
 
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -13,8 +13,8 @@ function hf(...args) {
   return spawnSync(process.execPath, [join(appDir, 'scripts/hf.mjs'), ...args], { cwd: appDir, encoding: 'utf8', env });
 }
 
-test('the first word picks a verb; anything else is a policy to view', () => {
-  for (const verb of ['pull', 'diff', 'baseline', 'publish', 'release', 'submit']) assert.equal(command([verb, 'x']), verb);
+test('the first word is help, a retired Hub write verb, or a policy to view', () => {
+  for (const verb of ['pull', 'diff', 'baseline', 'publish', 'release', 'submit']) assert.equal(command([verb, 'x']), 'retired');
   assert.equal(command([]), 'help');
   assert.equal(command(['help']), 'help');
   assert.equal(command(['Menlo/asimov1-locomotion-0818']), 'view');
@@ -43,14 +43,19 @@ test('old --flags fail with the words form to write instead', () => {
   assert.match(run.stderr, /org\/name@rev/);
 });
 
-test('verbs check their own words', () => {
-  assert.match(hf('submit').stderr, /submit needs <dir>/);
-  assert.match(hf('submit', 'x', 'base=main').stderr, /Unknown option "base="/);
-  assert.match(hf('submit', 'out/a', 'out/b').stderr, /submit takes one argument, not out\/a out\/b; submit one result dir at a time/);
-  assert.match(hf('pull', 'datasets/a/b', 'dir', 'extra').stderr, /pull takes 2 arguments/);
-  assert.match(hf('diff', 'port=3').stderr, /Unknown option "port="/);
-  assert.match(hf('release', '--rev=abc').stderr, /write rev=abc/);
+test('the retired Hub write verbs fail with one line that points to cyclotron', () => {
+  assert.deepEqual(RETIRED_VERBS, ['pull', 'diff', 'baseline', 'publish', 'release', 'submit']);
+  for (const args of [['publish', './bench', 'pr'], ['submit', 'benchmark_results/x'], ['pull', 'datasets/a/b', 'dir'], ['release', 'datasets/a/b', 'rev=abc'], ['diff'], ['baseline', './b']]) {
+    const run = hf(...args);
+    assert.equal(run.status, 1, args.join(' '));
+    assert.equal(run.stdout, '');
+    const lines = run.stderr.trim().split('\n');
+    assert.equal(lines.length, 1, run.stderr);
+    assert.equal(lines[0], `npm run hf ${args[0]} is gone: HPV only reads from Hugging Face; publishing benchmarks and submitting results are done with cyclotron (https://github.com/menloresearch/cyclotron).`);
+  }
   const usage = hf();
   assert.equal(usage.status, 2);
   assert.match(usage.stdout, /npm run hf <policy>/);
+  assert.match(usage.stdout, /HPV only reads from Hugging Face/);
+  assert.doesNotMatch(usage.stdout, /publish <dir>|submit <result dir>|for writing/);
 });
