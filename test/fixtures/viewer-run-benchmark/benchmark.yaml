@@ -1,0 +1,23 @@
+# Two short tests for the viewer's browser tests (test/browser/), one on the
+# default scene and one on a course. Their numbers mean nothing.
+name: viewer-run
+title: Viewer Run benchmark
+description: One flat and one terrain test, one repeat each.
+version: 1
+harness:
+  repo: https://github.com/menloresearch/humanoid-policy-viewer
+  protocol: 2
+requires:
+  robot: { name: asimov-1 }
+  policy_interface: velocity-command
+defaults:
+  repeats: 1
+  seed: 0
+  randomize:
+    action_delay: env_range
+    initial_joint_noise_rad: 0.01
+  timeout_s: 120
+tests:
+  - { all: true }
+tasks:
+  - { id: survival_rate, metric: survival_rate@2 }

@@ -122,6 +122,7 @@ same everywhere: the `asimov-1` submodule.
 - `benchmarks/` - local benchmarks: `default/` (tracked; what `npm run dev` opens and what new benchmarks are copied from), and, gitignored, benchmarks made with the app's **New benchmark**
 - `benchmark_results/` - (gitignored) saved benchmark results
 - `test/fixtures/smoke-benchmark/` - a tiny benchmark for tests and the golden check
+- `test/browser/` - tests that drive the viewer in headless Chromium (`npm run test:browser`, not part of `npm test`), on `test/fixtures/viewer-run-benchmark/`
 - an optional [policy library](docs/policy-library.md) served by local Vite middleware under `/policy-library/`
 
 ## License and acknowledgements

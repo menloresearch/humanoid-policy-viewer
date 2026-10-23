@@ -11,7 +11,8 @@
     "benchmark:golden": "node scripts/check-golden.mjs",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node scripts/test.mjs"
+    "test": "node scripts/test.mjs",
+    "test:browser": "node scripts/test.mjs test/browser"
   },
   "dependencies": {
     "@fontsource/roboto": "5.2.5",

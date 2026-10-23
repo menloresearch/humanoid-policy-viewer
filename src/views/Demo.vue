@@ -1290,10 +1290,12 @@ export default {
     editorPage(page) {
       if (page === 'viewer') {
         // Returning from the editor: restore prior pause state and pick up any
-        // tests saved on disk while editing.
-        if (this.demo?.params) {
-          this.demo.params.paused = this._pausedBeforeEditor ?? false;
+        // tests saved on disk while editing. Only the editor pauses the sim, so
+        // coming back from the results page leaves it paused or not as it was.
+        if (this._pausedBeforeEditor !== undefined && this.demo?.params) {
+          this.demo.params.paused = this._pausedBeforeEditor;
         }
+        this._pausedBeforeEditor = undefined;
         this.$refs.benchmarkBrowser?.refresh();
       }
     }
@@ -1630,7 +1632,9 @@ export default {
       try {
         // If the selected policy has a different scene, reload the full scene first
         if (selected.scenePath) {
-          this.demo.alive = false;
+          // Wait for the tick in flight: it may still be awaiting inference and
+          // would then step the model reloadScene frees.
+          await this.demo.stopMainLoop();
           await this.demo.reloadScene(selected.scenePath);
           this.demo.updateFollowBodyId();
           this.demo.timestep = this.demo.model.opt.timestep;
@@ -1971,6 +1975,7 @@ export default {
       if (!this.demo || this.benchmark.running || !plan) return;
       const { dataset, problems, only, cells, tests, groups, policies } = plan;
       const previousPolicy = this.currentPolicy;
+      const wasPaused = this.demo.params?.paused ?? false;
       const sequences = Object.fromEntries(tests.map((row) => [row.id, rowToSequence(row)]));
 
       this.benchmark = {
@@ -2058,13 +2063,28 @@ export default {
         this.benchmark.stopping = false;
         this.benchmark.label = '';
         this._runPolicyKey = null;
-        // Restore the policy that was showing live before the sweep.
+        // Put the viewer back as it was before the sweep: the default scene (a
+        // terrain test leaves its course loaded), the policy that was showing
+        // live, and the real-time loop, which every group stopped and
+        // runBenchmarkGroup leaves to its caller to restart. main_loop() does
+        // nothing if onPolicyChange already restarted it.
+        try {
+          await loadTestScene(this.demo, null, { restartLoop: false });
+        } catch (e) {
+          console.error('Could not restore the default scene:', e);
+        }
         if (this.currentPolicy !== previousPolicy) {
           this.currentPolicy = previousPolicy;
         }
         await this.onPolicyChange(previousPolicy, { force: true });
         commandSequencer.bindSim(this.demo);
         this.syncSlidersFromCommandState();
+        this.demo.alive = true;
+        this.demo.main_loop();
+        // The Run's resets unpaused the sim before onPolicyChange looked, so put
+        // back the pause state from before the Run. A paused loop runs but does
+        // not step.
+        this.demo.params.paused = wasPaused;
       }
     },
     /**
