@@ -12,7 +12,7 @@
 
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmdirSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { availableParallelism, tmpdir } from 'node:os';
-import { dirname, join, relative, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compatibilityProblems } from '../src/benchmark/settings.js';
 import {
@@ -22,7 +22,7 @@ import { rowToSequence } from '../src/benchmark/testRow.js';
 import { buildBenchmarkReportHtml } from '../src/simulation/benchmarkReport.js';
 import { runJobs } from './benchmarkBrowser.mjs';
 import { collectProvenance, policyFileHashes } from './benchmarkProvenance.mjs';
-import { formatOutcomes, formatTasks, parseShard, parseTests, resultTarget, shardJobs, viewHint } from './benchmarkRun.mjs';
+import { formatOutcomes, formatTasks, parseShard, parseTests, resultTarget, shardJobs } from './benchmarkRun.mjs';
 import { describeTarget, splitTargets } from './benchmarkTargets.mjs';
 import { checkPolicyDir, readReferenceJointNames } from './policyChecks.mjs';
 import { parsePort, parseWords, rejectSwallowedNpmFlags } from './cliArgs.mjs';
@@ -165,7 +165,7 @@ function writeOutputs(outDir, run) {
   writeFileSync(join(outDir, 'report.html'), buildBenchmarkReportHtml(run));
 }
 
-/** Each policy's scores, then where to look at the result. */
+/** Each policy's scores, then where the report is. */
 function printSummary(run, outDir) {
   for (const policy of run.policies) {
     console.log(`\n${policy.label}`);
@@ -174,8 +174,7 @@ function printSummary(run, outDir) {
     if (outcomes) console.log(`  ${outcomes}`);
   }
   console.log('');
-  const dir = relative(process.cwd(), outDir) || '.';
-  for (const line of viewHint(dir, join(outDir, 'report.html'))) console.log(line);
+  console.log(`Open the report: ${join(outDir, 'report.html')}`);
 }
 
 async function runBenchmarkCommand(args) {

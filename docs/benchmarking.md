@@ -42,8 +42,7 @@ Policies and the benchmark can come in any order. A bare `org/name` is always a 
 protocol, asimov-1 commit, mujoco-js / onnxruntime-web / Chromium versions), the benchmark.yaml and test rows that
 ran, the policy (Hub commit, sha256 of the ONNX and env.yaml), and for every **cell** (one test, one repeat) the
 seed, the action delay drawn, the commands actually sent if a policy's command range clamped them, and the full
-metrics. `<out>/report.html` is the readable report. The run ends by printing how to look at the result
-(`npm run benchmark view <out>`, and the path of `report.html` to open directly).
+metrics. `<out>/report.html` is the readable report. The run ends by printing the path of `report.html`.
 
 To look at a result again later, run `npm run benchmark view <out>` (the folder or its `result.json`; add `no-open` to
 skip the browser, `port=<n>` to pick the port). It serves the viewer read-only and opens its results page on that

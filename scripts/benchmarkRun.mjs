@@ -29,11 +29,6 @@ export function shardJobs(jobs, shard) {
   return jobs.filter((_, i) => i % shard.count === shard.index - 1);
 }
 
-/** Where to look at the result in `dir` (shown relative to the shell, as typed): the viewer's results page, or the report file. */
-export function viewHint(dir, reportPath) {
-  return [`View it in the viewer with: npm run benchmark view ${dir}`, `Or open the report directly: ${reportPath}`];
-}
-
 /**
  * The result `npm run benchmark view` was given: a result folder or its result.json.
  * The viewer reads results as <folder>/result.json under one directory, so that
