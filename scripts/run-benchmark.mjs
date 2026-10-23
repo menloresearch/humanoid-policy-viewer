@@ -165,7 +165,7 @@ function writeOutputs(outDir, run) {
   writeFileSync(join(outDir, 'report.html'), buildBenchmarkReportHtml(run));
 }
 
-/** Each policy's scores, then where the report is. */
+/** Each policy's scores, then where the results are. */
 function printSummary(run, outDir) {
   for (const policy of run.policies) {
     console.log(`\n${policy.label}`);
@@ -174,7 +174,7 @@ function printSummary(run, outDir) {
     if (outcomes) console.log(`  ${outcomes}`);
   }
   console.log('');
-  console.log(`Open the report: ${join(outDir, 'report.html')}`);
+  console.log(`Results can be found at: ${outDir}`);
 }
 
 async function runBenchmarkCommand(args) {
