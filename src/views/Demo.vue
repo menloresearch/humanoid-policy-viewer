@@ -1632,7 +1632,9 @@ export default {
       try {
         // If the selected policy has a different scene, reload the full scene first
         if (selected.scenePath) {
-          this.demo.alive = false;
+          // Wait for the tick in flight: it may still be awaiting inference and
+          // would then step the model reloadScene frees.
+          await this.demo.stopMainLoop();
           await this.demo.reloadScene(selected.scenePath);
           this.demo.updateFollowBodyId();
           this.demo.timestep = this.demo.model.opt.timestep;
