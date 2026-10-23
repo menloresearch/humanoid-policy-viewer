@@ -123,7 +123,8 @@ the CLI records, and the results page opens. Its cells are the CLI's, seed for s
 local folder, so these results are for looking at, not for submitting.
 
 However a Run ends (finished, stopped or failed), the viewer is then put back as it was: the default scene (a terrain
-test leaves its course loaded), the policy that was live, and its real-time loop, which the Run stopped.
+test leaves its course loaded), the policy that was live, its pause state, and its real-time loop, which the Run
+stopped.
 
 ## Results
 

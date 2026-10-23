@@ -1290,10 +1290,12 @@ export default {
     editorPage(page) {
       if (page === 'viewer') {
         // Returning from the editor: restore prior pause state and pick up any
-        // tests saved on disk while editing.
-        if (this.demo?.params) {
-          this.demo.params.paused = this._pausedBeforeEditor ?? false;
+        // tests saved on disk while editing. Only the editor pauses the sim, so
+        // coming back from the results page leaves it paused or not as it was.
+        if (this._pausedBeforeEditor !== undefined && this.demo?.params) {
+          this.demo.params.paused = this._pausedBeforeEditor;
         }
+        this._pausedBeforeEditor = undefined;
         this.$refs.benchmarkBrowser?.refresh();
       }
     }
@@ -1971,6 +1973,7 @@ export default {
       if (!this.demo || this.benchmark.running || !plan) return;
       const { dataset, problems, only, cells, tests, groups, policies } = plan;
       const previousPolicy = this.currentPolicy;
+      const wasPaused = this.demo.params?.paused ?? false;
       const sequences = Object.fromEntries(tests.map((row) => [row.id, rowToSequence(row)]));
 
       this.benchmark = {
@@ -2076,6 +2079,10 @@ export default {
         this.syncSlidersFromCommandState();
         this.demo.alive = true;
         this.demo.main_loop();
+        // The Run's resets unpaused the sim before onPolicyChange looked, so put
+        // back the pause state from before the Run. A paused loop runs but does
+        // not step.
+        this.demo.params.paused = wasPaused;
       }
     },
     /**
