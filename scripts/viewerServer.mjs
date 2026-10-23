@@ -90,7 +90,7 @@ export function viewerServer({
     if (!hub) return false;
     sendJson(res, 403, {
       error: `This benchmark is datasets/${hub.id}@${String(hub.sha).slice(0, 7)}, downloaded from Hugging Face, and is read-only here. `
-        + `To edit and publish it, use cyclotron (${CYCLOTRON_REPO}): ./cyclotron.sh --view <policy> --benchmark datasets/${hub.id}`,
+        + `To edit and publish it, use cyclotron (${CYCLOTRON_REPO}).`,
     });
     return true;
   }

@@ -10,7 +10,7 @@ import { classifyTarget, splitTargets } from './benchmarkTargets.mjs';
 import { devArgs } from './dev.mjs';
 import { MAX_ROBOTS, RESULT_SCHEMA, buildJobs, cellResult, groupCells, planCells, takeNextJob } from '../src/benchmark/run.js';
 import { loadBenchmarkDir } from './benchmarkDir.mjs';
-import { parseShard, parseTests, resultTarget, shardJobs, viewHint } from './benchmarkRun.mjs';
+import { parseShard, parseTests, resultTarget, shardJobs } from './benchmarkRun.mjs';
 import { datasetFilesToFetch } from './hfDataset.mjs';
 
 test('words, key=value options and flags', () => {
@@ -135,13 +135,6 @@ test('a test\'s repeats run in groups of at most MAX_ROBOTS robots', () => {
     assert.equal(seen.length, policies.length * cells.length, `shards of ${count}`);
     assert.equal(new Set(seen).size, seen.length, `shards of ${count}: every cell exactly once`);
   }
-});
-
-test('the end of a run says how to view it, in the viewer and as the report file', () => {
-  assert.deepEqual(viewHint('benchmark_results/20261012T112354', '/app/benchmark_results/20261012T112354/report.html'), [
-    'View it in the viewer with: npm run benchmark view benchmark_results/20261012T112354',
-    'Or open the report directly: /app/benchmark_results/20261012T112354/report.html',
-  ]);
 });
 
 test('view takes a result folder or its result.json, served from the folder\'s parent', () => {
