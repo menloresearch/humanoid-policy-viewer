@@ -118,8 +118,8 @@ flowchart LR
 
 `?benchmark=<key>` picks a listed benchmark folder; without it, the open one (`openBenchmark`) is used. Routes
 marked ✎ exist only when `editable` is on. A benchmark downloaded from the Hub (its folder holds `.hf-dataset.json`)
-is read-only even then: PUT and DELETE on its tests and its `benchmark.yaml` answer 403, pointing to cyclotron, which
-edits a working copy and publishes it.
+is read-only even then: PUT and DELETE on its tests and its `benchmark.yaml` answer 403, pointing to cyclotron to
+edit and publish it.
 
 | Route | Methods | Does |
 |---|---|---|
