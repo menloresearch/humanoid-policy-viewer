@@ -2058,13 +2058,24 @@ export default {
         this.benchmark.stopping = false;
         this.benchmark.label = '';
         this._runPolicyKey = null;
-        // Restore the policy that was showing live before the sweep.
+        // Put the viewer back as it was before the sweep: the default scene (a
+        // terrain test leaves its course loaded), the policy that was showing
+        // live, and the real-time loop, which every group stopped and
+        // runBenchmarkGroup leaves to its caller to restart. main_loop() does
+        // nothing if onPolicyChange already restarted it.
+        try {
+          await loadTestScene(this.demo, null, { restartLoop: false });
+        } catch (e) {
+          console.error('Could not restore the default scene:', e);
+        }
         if (this.currentPolicy !== previousPolicy) {
           this.currentPolicy = previousPolicy;
         }
         await this.onPolicyChange(previousPolicy, { force: true });
         commandSequencer.bindSim(this.demo);
         this.syncSlidersFromCommandState();
+        this.demo.alive = true;
+        this.demo.main_loop();
       }
     },
     /**
