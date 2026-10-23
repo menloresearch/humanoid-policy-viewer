@@ -44,6 +44,7 @@ npm run benchmark view <result dir> [port=] [no-open]   the viewer's results pag
 npm run -s benchmark inspect <dir> [<commit>]    a benchmark folder as JSON for publishing tools (node scripts/inspect.mjs benchmark ...)
 npm run -s benchmark policy-info <path>          a policy's .onnx, file hashes and problems as JSON (node scripts/inspect.mjs policy ...)
 npm run benchmark:golden [update]                check a smoke run against test/fixtures/smoke-benchmark/golden.json
+npm run test:browser                             the viewer in headless Chromium (test/browser/); not part of npm test
 ```
 
 `npm run hf pull | diff | baseline | publish | release | submit` are gone; each prints one line pointing to
@@ -247,6 +248,7 @@ matching protocol, the whole benchmark with no overrides and no unmerged shard, 
 | `~/.cache/humanoid-policy-viewer/hf/`, `hf-datasets/` | — | Downloaded Hub policies, and Hub benchmarks (read-only). |
 | `public/policy-library/`, `public/static-data/` | no | Written by an embedding site's static build. |
 | `test/fixtures/smoke-benchmark/` | yes | A tiny benchmark for tests and the golden check. |
+| `test/browser/`, `test/fixtures/viewer-run-benchmark/` | yes | Tests that drive the viewer in headless Chromium (`npm run test:browser`), and their benchmark. |
 
 ### Environment variables
 
