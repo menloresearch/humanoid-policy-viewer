@@ -22,8 +22,8 @@ Three kinds of file describe a policy, and they have different owners:
 | `action_scale`, `default_joint_pos` | fallback only | yes | **`env.yaml`** |
 | Action delay range | fallback only | if declared | `env.yaml` if declared, else the JSON |
 | Command limits (`vx`, `vy`, `wz`) | - | if declared | `env.yaml` if declared, else a global default |
-| Torque limits | - | `effort_limit` | **`env.yaml`**; without it torque is unclamped and the console warns |
-| Start pose (base `pos`, `rot`, velocities, joint velocities) | - | `scene.robot.init_state` | **`env.yaml`**; without it the robot starts upright at 0.614 m. A benchmark test's `start`, or the viewer's Start pose, replaces parts of it |
+| Torque limits | - | `effort_limit` (`actuator_effort_limit` since Isaac Lab 3.0) | **`env.yaml`**; without it torque is unclamped and the console warns |
+| Start pose (base `pos`, `rot`, velocities, joint velocities) | - | `scene.robot.init_state` | **`env.yaml`**; without it the robot starts upright at 0.614 m. Isaac Lab 3.0 writes `rot` as [x, y, z, w], which the viewer reorders to MuJoCo's [w, x, y, z]. A benchmark test's `start`, or the viewer's Start pose, replaces parts of it |
 
 ## Precedence rule
 
@@ -45,7 +45,8 @@ In the folder the `.onnx` sits in, as `params/env.yaml` first and then
 actuator stiffness/damping (one value per actuator group, or a map per joint
 pattern) and initial joint pose to `policy_joint_names`, builds the observation
 recipe from `observations.policy`, and
-applies the actuators' `effort_limit` as each joint's torque cap. If there is no
+applies the actuators' `effort_limit` (Isaac Lab 3.0: `actuator_effort_limit`)
+as each joint's torque cap. If there is no
 `env.yaml`, the JSON arrays are used and torque is unclamped.
 
 ## Per-policy `tracking_policy.json`
@@ -74,7 +75,7 @@ hardware maxima that usually differ. See `public/examples/scenes/README.md`.
 
 Ship `env.yaml` (and `agent.yaml` as a record of the training run) with every
 policy, and make sure `env.yaml` explicitly declares stiffness, damping and
-`effort_limit` for every joint in `policy_joint_names`. Otherwise the viewer
+`effort_limit` (or `actuator_effort_limit`) for every joint in `policy_joint_names`. Otherwise the viewer
 silently falls back to the JSON's gains and unclamped torque, so every
 policy would be benchmarked with the same gains. A
 CI job can enforce this before running the benchmark.

@@ -224,7 +224,7 @@ async function reloadPolicyUnguarded(policy_path, options = {}) {
   this.control_type = config.control_type ?? 'joint_position';
 
   if (!Array.isArray(config.torque_limit)) {
-    console.warn(`[torque] no effort_limit from env.yaml for ${config.onnx?.path ?? policy_path} — joint torque is unclamped`);
+    console.warn(`[torque] no effort_limit (actuator_effort_limit since Isaac Lab 3.0) from env.yaml for ${config.onnx?.path ?? policy_path} — joint torque is unclamped`);
   }
   applyTorqueLimits(this.model, this.ctrl_adr_policy, Array.isArray(config.torque_limit) ? config.torque_limit : null);
 
