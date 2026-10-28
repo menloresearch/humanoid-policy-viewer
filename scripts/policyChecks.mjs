@@ -32,7 +32,7 @@ export function policyProblems({ envYaml, agentYaml, jointNames }) {
     try {
       const settings = parseEnvPolicySettings(envYaml, jointNames);
       if (!settings.torque_limit) {
-        warnings.push('env.yaml declares no numeric effort_limit for the actuators, so torque would be unclamped');
+        warnings.push('env.yaml declares no numeric effort_limit (actuator_effort_limit since Isaac Lab 3.0) for the actuators, so torque would be unclamped');
       }
       if (settings.obs_config_error) {
         warnings.push(`${settings.obs_config_error}, so the viewer will refuse the policy`);

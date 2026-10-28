@@ -59,7 +59,8 @@ warn when the commanded path never enters a test's end zone. `metrics_opt_in: ["
 the gait symmetry metric (straight, steady walking only).
 
 `start` is where the robot starts, written like the robot's `init_state` in env.yaml: `pos` [x, y, z], `rot`
-[w, x, y, z], `lin_vel` and `ang_vel` (world frame), and `joint_pos` / `joint_vel` mapping joint names or regex
+[w, x, y, z] (MuJoCo's order, as Isaac Lab 2.x and mjlab write it; Isaac Lab 3.0's env.yaml has [x, y, z, w]),
+`lin_vel` and `ang_vel` (world frame), and `joint_pos` / `joint_vel` mapping joint names or regex
 patterns to values. The keys it gives replace the policy's own `init_state`, and its joint entries replace only the
 joints they match; `null` starts from the policy's own. For example, lying on its back with bent knees:
 `{"pos": [0, 0, 0.16], "rot": [0.7071068, 0, -0.7071068, 0], "joint_pos": {".*_knee_joint": 0.6}}`. On the Hub the
