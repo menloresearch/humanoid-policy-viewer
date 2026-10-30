@@ -18,6 +18,12 @@ export class PolicyRunner {
     this.actionScale = toFloatArray(options.actionScale ?? config.action_scale, this.numActions, 1.0);
     this.defaultJointPos = toFloatArray(options.defaultJointPos ?? [], this.numActions, 0.0);
     this.actionClip = typeof config.action_clip === 'number' ? config.action_clip : 10.0;
+    // env.yaml's actions.joint_pos.clip: one [min, max] per joint for the joint
+    // position target (envPolicyConfig.js), or null when training did not clip.
+    this.targetClip = Array.isArray(config.target_clip) ? config.target_clip : null;
+    if (this.targetClip && this.targetClip.length !== this.numActions) {
+      throw new Error(`target_clip has ${this.targetClip.length} entries, but the policy drives ${this.numActions} joints`);
+    }
 
     this.module = new ONNXModule(config.onnx);
     this.inputKey = config.onnx?.meta?.in_keys?.[0] ?? 'policy';
@@ -199,6 +205,14 @@ export class PolicyRunner {
       const target = new Float32Array(this.numActions);
       for (let i = 0; i < this.numActions; i++) {
         target[i] = this.defaultJointPos[i] + this.actionScale[i] * this.lastActions[i];
+      }
+      // As Isaac Lab's JointAction.process_actions: the target is clipped after
+      // scale and offset, before it reaches the action delay and the actuators.
+      if (this.targetClip) {
+        for (let i = 0; i < this.numActions; i++) {
+          const [min, max] = this.targetClip[i];
+          target[i] = Math.min(max, Math.max(min, target[i]));
+        }
       }
 
       if (this._dumpsRemaining > 0) {

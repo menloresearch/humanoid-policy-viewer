@@ -20,8 +20,11 @@ export function basicYamlSanityCheck(text) {
 }
 
 // envYaml / agentYaml are the file contents, or null when the file is absent.
-// A missing env.yaml is an error (the run must not start: the policy's gains,
-// action scale and torque limits would be guessed); everything else is a warning.
+// The run must not start (an error) when env.yaml is missing (the policy's
+// gains, action scale and torque limits would be guessed) or when the viewer
+// would refuse the policy at load (env.yaml cannot be read, or records
+// observations or control the viewer cannot reproduce); otherwise every cell
+// would fail. Everything else is a warning.
 export function policyProblems({ envYaml, agentYaml, jointNames }) {
   const errors = [];
   const warnings = [];
@@ -35,13 +38,13 @@ export function policyProblems({ envYaml, agentYaml, jointNames }) {
         warnings.push('env.yaml declares no numeric effort_limit for the actuators, so torque would be unclamped');
       }
       if (settings.obs_config_error) {
-        warnings.push(`${settings.obs_config_error}, so the viewer will refuse the policy`);
+        errors.push(`${settings.obs_config_error}, so the viewer will refuse the policy`);
       }
       if (settings.control_errors) {
-        warnings.push(`env.yaml drove the robot differently than the viewer does: ${settings.control_errors.join('; ')}, so the viewer will refuse the policy`);
+        errors.push(`env.yaml drove the robot differently than the viewer does: ${settings.control_errors.join('; ')}, so the viewer will refuse the policy`);
       }
     } catch (error) {
-      warnings.push(`env.yaml is incomplete: ${error.message}`);
+      errors.push(`env.yaml is incomplete: ${error.message}, so the viewer will refuse the policy`);
     }
   }
 

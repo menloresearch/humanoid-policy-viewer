@@ -122,6 +122,12 @@ test('inspect policy names the .onnx the viewer runs, its hashes and its problem
   assert.equal(info.primary, 'policy_isaaclab_new.onnx');
   assert.match(info.hashes.onnx, /^[0-9a-f]{64}$/);
   assert.deepEqual(info.errors, []);
+  // A policy the viewer would refuse is an error, so a publishing tool stops before running it.
+  const envPath = join(policy, 'env.yaml');
+  writeFileSync(envPath, readFileSync(envPath, 'utf8').replace('\ndecimation: 4\n', '\ndecimation: 2\n'));
+  const refused = JSON.parse(run('policy', policy).stdout);
+  assert.equal(refused.errors.length, 1);
+  assert.match(refused.errors[0], /every 0\.01 s in training .*, so the viewer will refuse the policy$/);
   const empty = join(scratch, 'empty');
   mkdirSync(empty);
   assert.match(run('policy', empty).stderr, /contains no \.onnx file/);
