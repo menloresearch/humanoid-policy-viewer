@@ -303,15 +303,6 @@ export const asimovCommandState = {
 };
 
 /**
- * Global interrupt-mask state. 0 = policy controls upper body (arm outputs
- * used). 1 = arms driven externally (teleop / CAN-garbage fallback); arm
- * outputs from the policy should be ignored by firmware.
- */
-export const asimovInterruptState = {
-  active: 0
-};
-
-/**
  * Global IMU bias state for simulating miscalibrated IMU.
  * Adds constant offset to projected gravity observation ONLY (not physics).
  */
@@ -502,27 +493,6 @@ class AsimovPrevActions {
 }
 
 /**
- * Interrupt mask flag. Reads from `policy.interruptMask` (0 or 1).
- * 0 = policy controls upper body (arm outputs used).
- * 1 = upper body externally driven (teleop/held at default); policy outputs
- *     for arms are ignored by downstream firmware.
- * UI provides a toggle that writes policy.interruptMask.
- */
-class AsimovInterruptMask {
-  get size() {
-    return 1;
-  }
-
-  reset() {}
-
-  compute() {
-    const out = new Float32Array(1);
-    out[0] = asimovInterruptState.active ? 1.0 : 0.0;
-    return out;
-  }
-}
-
-/**
  * Stacks the last `length` values of another observation, oldest first, the
  * way Isaac Lab / mjlab flatten a term's history_length. After a reset every
  * slot is filled with the first value computed.
@@ -579,6 +549,5 @@ export const Observations = {
   AsimovCommand,
   AsimovJointPosSlot,
   AsimovJointVelSlot,
-  AsimovPrevActions,
-  AsimovInterruptMask
+  AsimovPrevActions
 };
