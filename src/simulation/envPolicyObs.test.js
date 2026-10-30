@@ -190,7 +190,8 @@ test('another policy rate or action order is refused, alongside the size check',
   const errorsFor = (from, to) => parseEnvPolicySettings(actionsWith((actions) => actions.replace(from, to)), joints).control_errors;
   assert.match(errorsFor('preserve_order: true', 'preserve_order: false')[0], /does not set preserve_order/);
   assert.match(errorsFor('use_default_offset: true', 'use_default_offset: false')[0], /not added to the default pose/);
-  assert.match(errorsFor('    clip: null', '    clip:\n      .*: !!python/tuple\n      - -1.0\n      - 1.0')[0], /clipped in training/);
+  // A clip on the actions is applied, not refused (actionClip.test.js).
+  assert.equal(errorsFor('    clip: null', '    clip:\n      .*: !!python/tuple\n      - -1.0\n      - 1.0'), undefined);
   // A pattern follows the robot asset's joint order, which the viewer cannot see, so it is not compared.
   const pattern = actionsWith((actions) => actions.replace(/    joint_names:\n(    - .*\n)+/, '    joint_names:\n    - .*\n'));
   assert.equal(parseEnvPolicySettings(pattern, joints).control_errors, undefined);
