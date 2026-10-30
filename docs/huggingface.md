@@ -116,8 +116,8 @@ the one `cyclotron` trains) is used:
 
 | Values | Observation | Scale |
 |---|---|---|
-| 3 | Base angular velocity (IMU gyro, body frame) | 0.25 |
-| 3 | Projected gravity (body frame) | 1 |
+| 3 | Base angular velocity (IMU gyro, pelvis frame) | 0.25 |
+| 3 | Projected gravity (pelvis frame) | 1 |
 | 3 | Velocity command `vx, vy, wz` | 1 |
 | 23 | Joint positions relative to `default_joint_pos`, in motor-slot order (below) | 1 |
 | 23 | Joint velocities, in motor-slot order | 0.1 |
@@ -138,8 +138,8 @@ The `env.yaml` terms the viewer can compute, recognised by their function name
 
 | `env.yaml` term | Values | Notes |
 |---|---|---|
-| `base_ang_vel` | 3 | `scale` applied |
-| `projected_gravity` | 3 | unscaled |
+| `base_ang_vel` | 3 | `scale` applied; read at the pelvis, so a term whose `asset_cfg.body_names` names another body (a torso IMU at `waist_yaw_link`) is refused |
+| `projected_gravity` | 3 | unscaled; read at the pelvis, same body rule |
 | `generated_commands` of a `...VelocityCommand` | 3 | `vx, vy, wz` from the UI |
 | `generated_commands` of a `GaitClockCommand` | 2 | `sin, cos` of the gait phase; the period goes from `period_slow` at `speed_slow` to `period_fast` at `speed_fast` (planar command speed); `0, 0` and phase reset while the command is below `stand_threshold` |
 | `joint_pos_rel` | one per listed joint | relative to `default_joint_pos`; needs `joint_names` with `preserve_order: true` |
@@ -177,7 +177,7 @@ After downloading, the script checks the repo before running it:
 |---|---|
 | `env.yaml` is present | **Error**: the run is refused and nothing starts. `env.yaml` supplies the policy's gains, action scale and torque limits, and guessing them gives a simulation that does not match the trained policy |
 | `env.yaml` is complete | **Error**: the viewer would fail to load the policy. It is parsed against the Asimov joint list; missing actuators, gains, action scale or default pose are reported |
-| `env.yaml` matches what the viewer runs | **Error**: the viewer would refuse the policy. Every policy observation must be one the viewer computes, and training must have driven the robot as the viewer does (see below) |
+| `env.yaml` matches what the viewer runs | **Error**: the viewer would refuse the policy. Every policy observation must be one the viewer computes (at the pelvis, for angular velocity and gravity), and training must have driven the robot as the viewer does (see below) |
 | `env.yaml` declares a numeric `effort_limit` | Warning: joint torque would be unclamped |
 | `agent.yaml` is present and is real YAML | Warning. Not empty, no tab indentation, has top-level keys; the viewer never reads it |
 | Model card has `library_name: asimov` | Warning: the repo may not be an Asimov policy |

@@ -291,14 +291,27 @@ function slotIndices(name, termLines, jointNames) {
   });
 }
 
+// The body the viewer reads angular velocity and gravity at: the robot's root,
+// as Isaac Lab's base_ang_vel and projected_gravity do.
+const IMU_BODY = 'pelvis_link';
+
+// A term may read the IMU quantity at another body through
+// params.asset_cfg.body_names (e.g. a torso IMU at waist_yaw_link), which the
+// viewer does not compute.
+function atRootBody(name, termLines) {
+  const bodies = listAfter(block(termLines, ['params', 'asset_cfg']) ?? [], 'body_names');
+  const other = bodies.filter((body) => body !== IMU_BODY);
+  if (other.length) throw new Error(`${name} is read at ${other.join(', ')} in training, but the viewer reads it at the pelvis (${IMU_BODY})`);
+}
+
 function unscaled(name, scale) {
   if (scale !== null && scale !== 1) throw new Error(`${name} is scaled by ${scale}, which the viewer does not support for this observation`);
 }
 
 function obsEntryFor(name, termLines, kind, scale, lines, jointNames) {
   const params = directFields(block(termLines, ['params']));
-  if (kind === 'ang_vel') return { name: 'AsimovAngVel', scale: scale ?? 1 };
-  if (kind === 'gravity') { unscaled(name, scale); return { name: 'AsimovProjectedGravity' }; }
+  if (kind === 'ang_vel') { atRootBody(name, termLines); return { name: 'AsimovAngVel', scale: scale ?? 1 }; }
+  if (kind === 'gravity') { atRootBody(name, termLines); unscaled(name, scale); return { name: 'AsimovProjectedGravity' }; }
   if (kind === 'last_action') { unscaled(name, scale); return { name: 'AsimovPrevActions' }; }
   if (kind === 'joint_pos') {
     unscaled(name, scale);

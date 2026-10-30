@@ -171,6 +171,23 @@ test('a clipped or modified observation term is refused, since the viewer feeds 
   assert.match(modified.obs_config_error, /base_ang_vel has modifiers, which the viewer does not apply$/);
 });
 
+test('angular velocity or gravity read at another body than the pelvis is refused', () => {
+  const atBody = (body) => envWith((group) => {
+    const edited = group.replace(/(    (?:base_ang_vel|projected_gravity):\n      func: .*\n      params:\n)/g,
+      `$1        asset_cfg:\n          name: robot\n          body_names:\n          - ${body}\n          preserve_order: false\n`);
+    assert.equal(edited.split(`          - ${body}\n`).length, 3);
+    return edited;
+  });
+  // As Menlo/asimov1-locomotion-26-10-26-lower-body-27dof: a torso IMU, which the viewer does not compute.
+  assert.equal(parseEnvPolicySettings(atBody('waist_yaw_link'), joints).obs_config_error,
+    "env.yaml's policy observations cannot be reproduced: base_ang_vel is read at waist_yaw_link in training, but the viewer reads it at the pelvis (pelvis_link); "
+    + 'projected_gravity is read at waist_yaw_link in training, but the viewer reads it at the pelvis (pelvis_link)');
+  // The pelvis, named or not (Isaac Lab's base_ang_vel and projected_gravity read the root), is what the viewer reads.
+  const pelvis = parseEnvPolicySettings(atBody('pelvis_link'), joints);
+  assert.equal(pelvis.obs_config_error, undefined);
+  assert.deepEqual(pelvis, parseEnvPolicySettings(bundledEnv, joints));
+});
+
 test('another policy rate or action order is refused, alongside the size check', () => {
   assert.equal(parseEnvPolicySettings(bundledEnv, joints).control_errors, undefined);
 
