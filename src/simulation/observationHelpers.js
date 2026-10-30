@@ -63,7 +63,7 @@ class JointPos {
   constructor(policy, kwargs = {}) {
     const { pos_steps = [0, 1, 2, 3, 4, 8] } = kwargs;
     this.posSteps = pos_steps.slice();
-    this.numJoints = policy.numActions;
+    this.numJoints = policy.numJoints;
 
     this.maxStep = Math.max(...this.posSteps);
     this.history = Array.from({ length: this.maxStep + 1 }, () => new Float32Array(this.numJoints));
