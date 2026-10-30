@@ -191,6 +191,11 @@ async function reloadPolicyUnguarded(policy_path, options = {}) {
 
   const envSettings = await loadEnvPolicySettings(config.onnx?.path, policyJointNames);
   if (envSettings) Object.assign(config, envSettings);
+  if (Array.isArray(config.action_joint_indices)) {
+    // The PD loop (main.js) still covers every motor: PolicyRunner holds these at the default pose.
+    const held = policyJointNames.filter((_, i) => !config.action_joint_indices.includes(i));
+    console.log(`[policy] drives ${config.action_joint_indices.length} of ${policyJointNames.length} joints; holding ${held.join(', ')} at the default pose`);
+  }
   setActiveCommandLimits(config.command_limits ?? null);
   // Only commit to the new path once loading has gotten past every point
   // that can throw above (bad URL, malformed config, missing joint names) —

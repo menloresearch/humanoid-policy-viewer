@@ -9,16 +9,34 @@ export class PolicyRunner {
   constructor(config, options = {}) {
     this.config = config;
     this.options = options;
+    // The robot's motor joints, in the viewer's order: the joints observations
+    // read and the joint position target covers.
     this.policyJointNames = (options.policyJointNames ?? config.policy_joint_names ?? []).slice();
     if (this.policyJointNames.length === 0) {
       throw new Error('PolicyRunner requires policy_joint_names in config');
     }
-    this.numActions = this.policyJointNames.length;
+    this.numJoints = this.policyJointNames.length;
+    // The joints the policy's actions drive, as indices into policyJointNames
+    // (env.yaml's actions.joint_pos.joint_names; envPolicyConfig.js): every
+    // joint unless the policy drives only some, e.g. the legs. Action i drives
+    // joint actionJointIndices[i]; the others hold their default pose.
+    this.actionJointIndices = Array.isArray(config.action_joint_indices)
+      ? config.action_joint_indices.slice()
+      : this.policyJointNames.map((_, i) => i);
+    if (this.actionJointIndices.length === 0
+      || new Set(this.actionJointIndices).size !== this.actionJointIndices.length
+      || !this.actionJointIndices.every((i) => Number.isInteger(i) && i >= 0 && i < this.numJoints)) {
+      throw new Error(`action_joint_indices must name distinct joints among the ${this.numJoints} the robot has`);
+    }
+    this.actionJointNames = this.actionJointIndices.map((i) => this.policyJointNames[i]);
+    this.numActions = this.actionJointIndices.length;
 
+    // One per action.
     this.actionScale = toFloatArray(options.actionScale ?? config.action_scale, this.numActions, 1.0);
-    this.defaultJointPos = toFloatArray(options.defaultJointPos ?? [], this.numActions, 0.0);
+    // One per joint.
+    this.defaultJointPos = toFloatArray(options.defaultJointPos ?? [], this.numJoints, 0.0);
     this.actionClip = typeof config.action_clip === 'number' ? config.action_clip : 10.0;
-    // env.yaml's actions.joint_pos.clip: one [min, max] per joint for the joint
+    // env.yaml's actions.joint_pos.clip: one [min, max] per action for the joint
     // position target (envPolicyConfig.js), or null when training did not clip.
     this.targetClip = Array.isArray(config.target_clip) ? config.target_clip : null;
     if (this.targetClip && this.targetClip.length !== this.numActions) {
@@ -30,6 +48,7 @@ export class PolicyRunner {
     this.outputKey = config.onnx?.meta?.out_keys?.[0] ?? 'action';
     this.inputDict = {};
     this.isInferencing = false;
+    // The policy's raw output (Isaac Lab's last_action): one per action.
     this.lastActions = new Float32Array(this.numActions);
     // 0 = policy controls upper body, 1 = arms externally driven (teleop).
     this.interruptMask = 0;
@@ -105,6 +124,7 @@ export class PolicyRunner {
       outputName: session.outputNames[outKeys.indexOf(this.outputKey)],
       numObs: this.numObs,
       numActions: this.numActions,
+      actionsFromEnv: Array.isArray(this.config.action_joint_indices),
       recipeError: this.config.obs_config_error,
       controlErrors: this.config.control_errors,
     }), ...this.module.statePlan.errors];
@@ -202,16 +222,20 @@ export class PolicyRunner {
         this.lastActions[i] = clamped;
       }
 
-      const target = new Float32Array(this.numActions);
+      // A joint the policy does not drive is held at its default pose, with
+      // its own gains and torque limit (main.js), like the others.
+      const target = Float32Array.from(this.defaultJointPos);
       for (let i = 0; i < this.numActions; i++) {
-        target[i] = this.defaultJointPos[i] + this.actionScale[i] * this.lastActions[i];
+        const joint = this.actionJointIndices[i];
+        target[joint] = this.defaultJointPos[joint] + this.actionScale[i] * this.lastActions[i];
       }
       // As Isaac Lab's JointAction.process_actions: the target is clipped after
       // scale and offset, before it reaches the action delay and the actuators.
       if (this.targetClip) {
         for (let i = 0; i < this.numActions; i++) {
+          const joint = this.actionJointIndices[i];
           const [min, max] = this.targetClip[i];
-          target[i] = Math.min(max, Math.max(min, target[i]));
+          target[joint] = Math.min(max, Math.max(min, target[joint]));
         }
       }
 
@@ -291,13 +315,13 @@ export class PolicyRunner {
     } else if (name === 'AsimovJointVelSlot') {
       this._pushJointSlotCsvParts(labels, values, entry, `joint_vel_${entry.slot_name ?? 'slot'}`, segment);
     } else if (name === 'AsimovPrevActions') {
-      this._pushPolicyJointCsvParts(labels, values, 'prev_action', 1, segment);
+      this._pushPolicyJointCsvParts(labels, values, 'prev_action', 1, segment, this.actionJointNames);
     } else if (name === 'PrevActions') {
       const steps = Math.max(1, Math.floor(entry.history_steps ?? 4));
-      this._pushPolicyJointCsvParts(labels, values, 'prev_action', steps, segment);
+      this._pushPolicyJointCsvParts(labels, values, 'prev_action', steps, segment, this.actionJointNames);
     } else if (name === 'JointPos') {
       const steps = entry.pos_steps ?? [0, 1, 2, 3, 4, 8];
-      const perStep = this.numActions;
+      const perStep = this.numJoints;
       for (let stepIdx = 0; stepIdx < steps.length; stepIdx++) {
         const stepSegment = segment ? segment.slice(stepIdx * perStep, (stepIdx + 1) * perStep) : null;
         this._pushPolicyJointCsvParts(labels, values, `joint_pos_history_t_minus_${steps[stepIdx]}`, 1, stepSegment);
@@ -348,18 +372,18 @@ export class PolicyRunner {
     return ordered;
   }
 
-  _pushPolicyJointCsvParts(labels, values, prefix, repeats, segment) {
+  _pushPolicyJointCsvParts(labels, values, prefix, repeats, segment, names = this.policyJointNames) {
     for (let step = 0; step < repeats; step++) {
       const stepPrefix = repeats > 1 ? `${prefix}_${step}` : prefix;
-      for (let i = 0; i < this.policyJointNames.length; i++) {
-        labels.push(this._cleanColumnName(`${stepPrefix}_${this.policyJointNames[i]}`));
-        if (segment) values.push(segment[(step * this.numActions) + i]);
+      for (let i = 0; i < names.length; i++) {
+        labels.push(this._cleanColumnName(`${stepPrefix}_${names[i]}`));
+        if (segment) values.push(segment[(step * names.length) + i]);
       }
     }
   }
 
   _buildActionLabels() {
-    return this.policyJointNames.map((name, i) => `action_${this._cleanColumnName(name ?? `joint_${i}`)}`);
+    return this.actionJointNames.map((name, i) => `action_${this._cleanColumnName(name ?? `joint_${i}`)}`);
   }
 
   _cleanColumnName(value) {
@@ -521,7 +545,8 @@ draw();
 
   _logDump(obs, rawActions, target) {
     const f = (v, d = 4) => Number(v).toFixed(d);
-    const n = this.numActions;
+    const n = this.numJoints;
+    const m = this.numActions;
     const fmt3 = (a, i) => `[${f(a[i])}, ${f(a[i+1])}, ${f(a[i+2])}]`;
 
     const lines = [];
@@ -529,16 +554,20 @@ draw();
     lines.push(`ang_vel: ${fmt3(obs, 0)}`);
     lines.push(`gravity: ${fmt3(obs, 3)}`);
     lines.push(`cmd:     ${fmt3(obs, 6)}`);
-    lines.push(`joint_pos + joint_vel + prev_act (${n} each):`);
+    lines.push(m === n ? `joint_pos + joint_vel + prev_act (${n} each):` : `joint_pos + joint_vel (${n} each) + prev_act (${m}):`);
     const posOff = 9;
     const velOff = 9 + n;
     const actOff = 9 + 2 * n;
     for (let i = 0; i < n; i++) {
-      lines.push(`  [${String(i).padStart(2)}] pos=${f(obs[posOff + i])} vel=${f(obs[velOff + i])} act=${f(obs[actOff + i])}`);
+      lines.push(`  [${String(i).padStart(2)}] pos=${f(obs[posOff + i])} vel=${f(obs[velOff + i])}${i < m ? ` act=${f(obs[actOff + i])}` : ''}`);
     }
     lines.push(`=== ACTION DUMP #${this._dumpIdx} ===`);
-    for (let i = 0; i < n; i++) {
-      lines.push(`  action[${String(i).padStart(2)}] raw=${f(rawActions[i])} -> motor[${String(i).padStart(2)}] pos=${f(target[i])} scale=${f(this.actionScale[i])} offset=${f(this.defaultJointPos[i])}`);
+    for (let i = 0; i < m; i++) {
+      const j = this.actionJointIndices[i];
+      lines.push(`  action[${String(i).padStart(2)}] raw=${f(rawActions[i])} -> motor[${String(j).padStart(2)}] pos=${f(target[j])} scale=${f(this.actionScale[i])} offset=${f(this.defaultJointPos[j])}`);
+    }
+    for (let j = 0; j < n; j++) {
+      if (!this.actionJointIndices.includes(j)) lines.push(`  held -> motor[${String(j).padStart(2)}] pos=${f(target[j])} (default pose)`);
     }
     const text = lines.join('\n');
     if (!this._dumpSilent) {

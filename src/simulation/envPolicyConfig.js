@@ -286,7 +286,7 @@ function slotIndices(name, termLines, jointNames) {
   }
   return names.map((joint) => {
     const index = jointNames.indexOf(joint);
-    if (index < 0) throw new Error(`${name} reads ${joint}, which the policy does not drive`);
+    if (index < 0) throw new Error(`${name} reads ${joint}, which the viewer's robot does not have`);
     return index;
   });
 }
@@ -441,6 +441,39 @@ function actionClipFor(action, jointNames) {
   return clip;
 }
 
+// The joints the policy's actions drive: actions.joint_pos.joint_names resolved
+// against the viewer's joints as Isaac Lab's resolve_matching_names resolves
+// them against the robot's. A pattern applies to every joint it fully matches;
+// a joint two patterns match, or a pattern that matches no joint, is an error
+// (Isaac Lab raises on both). Returns { indices } into jointNames, in the
+// viewer's joint order, with `errors`, the `patterns` themselves and, per
+// joint, the pattern that matched it (`matchedBy`). When
+// env.yaml does not list them (e.g. an mjlab layout), the actions drive every
+// joint, as before.
+function actionJointsFor(action, jointNames) {
+  const patterns = listAfter(action, 'joint_names');
+  if (!patterns.length) return { indices: jointNames.map((_, i) => i), patterns, errors: [] };
+  const errors = [];
+  const matchedBy = jointNames.map(() => null);
+  for (const pattern of patterns) {
+    let regex;
+    try { regex = new RegExp(`^(?:${pattern})$`); } catch {
+      errors.push(`its actions.joint_pos.joint_names has an invalid joint pattern: ${pattern}`);
+      continue;
+    }
+    let matched = false;
+    jointNames.forEach((joint, j) => {
+      if (!regex.test(joint)) return;
+      matched = true;
+      if (matchedBy[j] === null) matchedBy[j] = pattern;
+      else errors.push(`its actions.joint_pos.joint_names match ${joint} with both ${matchedBy[j]} and ${pattern}`);
+    });
+    if (!matched) errors.push(`its actions.joint_pos.joint_names drive ${pattern}, which matches none of the viewer's robot joints`);
+  }
+  const indices = jointNames.flatMap((_, j) => (matchedBy[j] === null ? [] : [j]));
+  return { indices, patterns, matchedBy, errors };
+}
+
 // The policy period the viewer runs every policy at (main.js, mujocoUtils.js and
 // Demo.vue step it at 50 Hz).
 const POLICY_PERIOD_S = 0.02;
@@ -450,8 +483,9 @@ const POLICY_PERIOD_S = 0.02;
 // default offset. The policy would load and run, but every action would land at
 // the wrong time or on the wrong joint. Settings env.yaml does not record (e.g.
 // an mjlab layout's sim.dt or action joints) are not checked. A clip on the
-// actions is applied (actionClipFor) rather than refused.
-function controlErrorsFor(lines, action, jointNames) {
+// actions is applied (actionClipFor) rather than refused. The viewer sends the
+// actions to the action joints (actionJointsFor) in its own joint order.
+function controlErrorsFor(lines, action, jointNames, actionJoints) {
   const errors = [];
   const dt = optionalNumber(directFields(block(lines, ['sim']) ?? []).dt);
   const decimation = optionalNumber(fields(lines, 0).decimation);
@@ -459,15 +493,29 @@ function controlErrorsFor(lines, action, jointNames) {
     errors.push(`it ran every ${+(dt * decimation).toFixed(6)} s in training (sim.dt ${dt} x decimation ${decimation}), but the viewer runs it every ${POLICY_PERIOD_S} s`);
   }
   const settings = directFields(action);
-  const actionJoints = listAfter(action, 'joint_names');
-  // Patterns such as `.*` follow the robot asset's order, which the viewer cannot see.
-  if (actionJoints.length > 0 && actionJoints.every((joint) => jointNames.includes(joint))) {
-    const first = jointNames.findIndex((joint, i) => actionJoints[i] !== joint);
-    if (actionJoints.length > 1 && settings.preserve_order !== 'true') {
+  const { patterns, indices, matchedBy } = actionJoints;
+  const driven = indices.map((i) => jointNames[i]);
+  const outOfOrder = (trained) => {
+    const first = driven.findIndex((joint, i) => trained[i] !== joint);
+    return first < 0 ? null : `its actions.joint_pos.joint_names are in another order: action ${first + 1} drove ${trained[first] ?? 'no joint'} in training, but drives ${driven[first]} in the viewer`;
+  };
+  errors.push(...actionJoints.errors);
+  if (patterns.length > 0 && patterns.every((joint) => jointNames.includes(joint))) {
+    // Joint names: the order training sent the actions in is the list's.
+    if (patterns.length > 1 && settings.preserve_order !== 'true') {
       errors.push('its actions.joint_pos does not set preserve_order, so training sent the actions in the robot asset\'s joint order, which the viewer cannot see');
-    } else if (first >= 0) {
-      errors.push(`its actions.joint_pos.joint_names are in another order: action ${first + 1} drove ${actionJoints[first] ?? 'no joint'} in training, but drives ${jointNames[first]} in the viewer`);
+    } else {
+      const error = outOfOrder(patterns);
+      if (error) errors.push(error);
     }
+  } else if (indices.length < jointNames.length && settings.preserve_order === 'true') {
+    // Patterns for some of the joints: Isaac Lab orders the actions pattern by
+    // pattern. Within one pattern, and for patterns that drive every joint
+    // (such as `.*`), the order follows the robot asset, which the viewer
+    // cannot see, so it is taken to be the viewer's.
+    const trained = patterns.flatMap((pattern) => driven.filter((joint) => matchedBy[jointNames.indexOf(joint)] === pattern));
+    const error = outOfOrder(trained);
+    if (error) errors.push(error);
   }
   if (settings.use_default_offset === 'false') {
     errors.push('its actions were not added to the default pose in training (actions.joint_pos.use_default_offset: false), but the viewer adds them');
@@ -503,33 +551,45 @@ export function parseEnvPolicySettings(yaml, jointNames) {
   };
   const gainFor = (name, key) => scalar(matchOneActuator(name)[key]);
 
+  // A policy may drive only some of the robot's joints (e.g. the legs). The
+  // action settings are for those joints; every joint, the ones the policy does
+  // not drive included, gets its default pose, gains and torque limit, since
+  // the viewer holds those at the default pose (policyRunner.js).
+  const actionJoints = actionJointsFor(action, jointNames);
+  const actionJointNames = actionJoints.indices.map((i) => jointNames[i]);
+
   const scaleLine = action.find((line) => line.text.startsWith('scale:') && line.indent === Math.min(...action.map((item) => item.indent)));
   if (!scaleLine) throw new Error('env.yaml is missing actions.joint_pos.scale');
   const scaleText = scaleLine.text.slice('scale:'.length).trim();
   let actionScale;
   if (scaleText) {
-    actionScale = jointNames.map(() => scalar(scaleText));
+    actionScale = actionJointNames.map(() => scalar(scaleText));
   } else {
     const index = action.indexOf(scaleLine);
     let end = index + 1;
     while (end < action.length && action[end].indent > scaleLine.indent) end++;
-    actionScale = valuesForJoints(directFields(action.slice(index + 1, end)), jointNames, 'action scale');
+    actionScale = valuesForJoints(directFields(action.slice(index + 1, end)), actionJointNames, 'action scale');
   }
 
   const defaultJointPos = valuesForJoints(directFields(pose), jointNames, 'default pose');
-  const delay = delayForJoints(actuators, jointNames, matchOneActuator);
+  // One delay for the whole target; it only matters on the joints the policy moves.
+  const delay = delayForJoints(actuators, actionJointNames, matchOneActuator);
   const commandRanges = commandRangesFor(lines);
   const torqueLimit = torqueLimitsFor(jointNames, matchOneActuator);
-  const controlErrors = controlErrorsFor(lines, action, jointNames);
+  const controlErrors = controlErrorsFor(lines, action, jointNames, actionJoints);
   let targetClip = null;
   try {
-    targetClip = actionClipFor(action, jointNames);
+    // Isaac Lab resolves the clip against the action term's joints.
+    targetClip = actionClipFor(action, actionJointNames);
   } catch (error) {
     controlErrors.push(error.message);
   }
+  // None at all only with control errors, which refuse the policy anyway.
+  const someJoints = actionJoints.indices.length > 0 && actionJoints.indices.length < jointNames.length;
 
   return {
     ...(torqueLimit ? { torque_limit: torqueLimit } : {}),
+    ...(someJoints ? { action_joint_indices: actionJoints.indices } : {}),
     action_scale: actionScale,
     stiffness: jointNames.map((name) => gainFor(name, 'stiffness')),
     damping: jointNames.map((name) => gainFor(name, 'damping')),

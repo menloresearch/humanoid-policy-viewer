@@ -74,9 +74,30 @@ test('an env.yaml the viewer cannot read is an error; a junk agent.yaml a warnin
   assert.match(errors[0], /^env\.yaml is incomplete: .*, so the viewer will refuse the policy$/);
   assert.deepEqual(warnings, ['agent.yaml file is empty']);
   assert.match(policyProblems({ envYaml, agentYaml: 'a:\n\tb: 1\n', jointNames }).warnings[0], /tab character/);
-  // As for a leg-only policy: env.yaml has no setting for a joint the viewer drives.
-  const legsOnly = envYaml.replace('\n        waist_yaw_joint: 0.0\n', '\n');
-  assert.match(policyProblems({ envYaml: legsOnly, agentYaml, jointNames }).errors[0], /^env\.yaml is incomplete: Expected one .* for waist_yaw_joint/);
+  // env.yaml has no default pose for a joint, which the viewer needs even for a joint the policy does not drive.
+  const noWaistPose = envYaml.replace('\n        waist_yaw_joint: 0.0\n', '\n');
+  assert.match(policyProblems({ envYaml: noWaistPose, agentYaml, jointNames }).errors[0], /^env\.yaml is incomplete: Expected one .* for waist_yaw_joint/);
+});
+
+test('a leg-only policy is no problem; an observation the viewer cannot compute for it is an error', () => {
+  // actions.joint_pos lists the 12 leg joints only, as Menlo/asimov1-locomotion-26-10-17-upper-body-blind.
+  const legsOnly = envYaml.replace(/(    joint_names:\n(?:    - .*\n){12})(?:    - .*\n)+(    scale: 0\.25\n)/, '$1$2');
+  assert.notEqual(legsOnly, envYaml);
+  assert.deepEqual(policyProblems({ envYaml: legsOnly, agentYaml, jointNames }), { errors: [], warnings: [] });
+
+  // As Menlo/asimov1-locomotion-26-10-05-upper-body: last actions padded by a function whose source is not known.
+  const padded = legsOnly.replace(
+    '      func: isaaclab.envs.mdp.observations:last_action\n      params: {}',
+    '      func: isaac_asimov.tasks.locomotion.mdp.observations:padded_last_action\n      params:\n        target_size: 23');
+  assert.deepEqual(policyProblems({ envYaml: padded, agentYaml, jointNames }).errors, [
+    "env.yaml's policy observations cannot be reproduced: actions (isaac_asimov.tasks.locomotion.mdp.observations:padded_last_action) is not something the viewer computes, so the viewer will refuse the policy",
+  ]);
+
+  // As Menlo/asimov1-locomotion-26-10-26-lower-body-27dof: angular velocity read at the torso.
+  const torso = legsOnly.replace('        quantity: base_ang_vel\n', '        quantity: base_ang_vel\n        asset_cfg:\n          name: robot\n          body_names:\n          - waist_yaw_link\n');
+  assert.deepEqual(policyProblems({ envYaml: torso, agentYaml, jointNames }).errors, [
+    "env.yaml's policy observations cannot be reproduced: base_ang_vel is read at waist_yaw_link in training, but the viewer reads it at the pelvis (pelvis_link), so the viewer will refuse the policy",
+  ]);
 });
 
 test('checkPolicyDir finds files at the root or under params/', () => {

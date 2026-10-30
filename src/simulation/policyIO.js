@@ -1,5 +1,7 @@
 // Checks a policy's ONNX input and output sizes against what the viewer feeds
-// it and expects back. The output must match the robot's motor count. The input
+// it and expects back. The output must match the joints the policy drives: the
+// robot's motor count, or the joints env.yaml's actions.joint_pos names when the
+// policy drives only some (e.g. the legs). The input
 // must match the observation recipe built for this policy, which comes from
 // its env.yaml when that records one (so extra terms such as a gait clock, or a
 // stacked history, are fine), and from the reference config otherwise. A policy
@@ -24,12 +26,16 @@ function lastDim(metadata) {
  * since the recipe it would be compared with is not the policy's.
  * `controlErrors` lists where env.yaml drove the robot differently than the
  * viewer does (policy rate, action order); see envPolicyConfig.js.
+ * `actionsFromEnv` is set when numActions is the count of joints env.yaml's
+ * actions drive, rather than every motor.
  */
-export function policyIOErrors({ inputMetadata, outputMetadata, inputName, outputName, numObs, numActions, recipeError, controlErrors = [] }) {
+export function policyIOErrors({ inputMetadata, outputMetadata, inputName, outputName, numObs, numActions, actionsFromEnv = false, recipeError, controlErrors = [] }) {
   const errors = [...controlErrors];
   const outputSize = lastDim(outputMetadata?.find((m) => m.name === outputName));
   if (outputSize !== null && outputSize !== numActions) {
-    errors.push(`it outputs ${outputSize} actions, but the robot has ${numActions} motors`);
+    errors.push(actionsFromEnv
+      ? `it outputs ${outputSize} actions, but its env.yaml actions.joint_pos drives ${numActions} joints`
+      : `it outputs ${outputSize} actions, but the robot has ${numActions} motors`);
   }
   if (recipeError) {
     errors.push(recipeError);

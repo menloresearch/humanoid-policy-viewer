@@ -86,14 +86,22 @@ path that tells it apart from the others, e.g. `run1/exported` and
 
 ## Supported policies
 
-The viewer runs Asimov joint-position policies. The output is fixed by the
-robot; the input follows the observation recipe in the policy's `env.yaml`, so
-policies with extra inputs (such as a gait clock) or a stacked history load as
-long as every input is something the viewer can compute. A policy whose ONNX
-input or output size does not match is refused when it loads, with a message
-saying which size differs and why.
+The viewer runs Asimov joint-position policies, for all 23 motors or for some
+of them (such as a leg-only policy). The output follows the joints the
+policy's `env.yaml` actions drive; the input follows the observation recipe in
+the policy's `env.yaml`, so policies with extra inputs (such as a gait clock) or
+a stacked history load as long as every input is something the viewer can
+compute. A policy whose ONNX input or output size does not match is refused when
+it loads, with a message saying which size differs and why.
 
-**Output:** 23 joint position actions, one per motor, in this order. The target for each
+**Output:** one joint position action per joint that `env.yaml`'s
+`actions.joint_pos.joint_names` names: all 23 motors, in this order, or some of
+them in the same relative order (a leg-only policy drives the first 12). The
+names are resolved as Isaac Lab resolves them: each is a regular expression that
+must fully match a joint, a joint matched twice or a name that matches no joint
+is refused, and `preserve_order` orders the actions name by name. Names that
+match all 23 joints, such as `.*`, drive them in this order. Without
+`joint_names` (an mjlab layout) the policy drives all 23. The target for each
 joint is `default_joint_pos + action_scale * action`, with both read from
 `env.yaml`. If `env.yaml` clips the actions (`actions.joint_pos.clip`), each
 target is clipped to its joint's range as in training, before the action delay
@@ -101,6 +109,17 @@ and the actuators. The policy runs at 50 Hz. A policy whose `env.yaml` trained i
 another rate (`sim.dt` x `decimation`), or whose `actions.joint_pos` lists the
 joints in another order or does not set `preserve_order` or `use_default_offset`,
 is refused, naming the difference.
+
+**Joints the policy does not drive** are held at their `env.yaml` default pose
+(`scene.robot.init_state.joint_pos`), each by its own actuator's `stiffness`,
+`damping` and `effort_limit`, with the same action delay as the rest of the
+target, so the arms of a leg-only policy keep their pose. This is a
+simplification: a leg-only policy such as
+`Menlo/asimov1-locomotion-26-10-05-upper-body` was trained while a separate
+controller moved the waist and arms at random (its `upper_body_pd_targets`
+event), and the viewer keeps them still, so a benchmark scores it with the upper
+body held. Every joint needs a default pose, gains and torque limit in
+`env.yaml`; only the joints the policy drives need an action scale.
 
 ```
 left_hip_pitch   left_hip_roll   left_hip_yaw   left_knee   left_ankle_pitch   left_ankle_roll
@@ -144,7 +163,7 @@ The `env.yaml` terms the viewer can compute, recognised by their function name
 | `generated_commands` of a `GaitClockCommand` | 2 | `sin, cos` of the gait phase; the period goes from `period_slow` at `speed_slow` to `period_fast` at `speed_fast` (planar command speed); `0, 0` and phase reset while the command is below `stand_threshold` |
 | `joint_pos_rel` | one per listed joint | relative to `default_joint_pos`; needs `joint_names` with `preserve_order: true` |
 | `joint_vel_rel` | one per listed joint | `scale` applied; same joint rule |
-| `last_action` | 23 | the previous raw action |
+| `last_action` | one per action | the previous raw action: 12 for a leg-only policy |
 
 A `history_length` above 1, on the group or a term, stacks that many steps of
 each term, oldest first, the way Isaac Lab and mjlab flatten it; after a reset
@@ -152,7 +171,10 @@ every step holds the first value. Any other term (base linear velocity, foot
 contacts, height scans and other quantities the real robot cannot measure) makes
 the policy refused, naming the term; a policy that needs them has to estimate
 them inside the ONNX. So does a term with `clip` or `modifiers` set, since the
-viewer applies neither.
+viewer applies neither, and a term from a function the viewer does not know,
+such as `padded_last_action` (the last actions padded to 23 values, which
+`Menlo/asimov1-locomotion-26-10-05-upper-body` reads): it is not computed
+until its source can be checked.
 
 **Recurrent policies:** the first ONNX input is the observation above. Every
 other float input is recurrent state, fed back each step from the output whose
@@ -176,7 +198,7 @@ After downloading, the script checks the repo before running it:
 | Check | If it fails |
 |---|---|
 | `env.yaml` is present | **Error**: the run is refused and nothing starts. `env.yaml` supplies the policy's gains, action scale and torque limits, and guessing them gives a simulation that does not match the trained policy |
-| `env.yaml` is complete | **Error**: the viewer would fail to load the policy. It is parsed against the Asimov joint list; missing actuators, gains, action scale or default pose are reported |
+| `env.yaml` is complete | **Error**: the viewer would fail to load the policy. It is parsed against the Asimov joint list; missing actuators, gains or default pose (for every joint, including those a leg-only policy does not drive) or action scale (for the joints it drives) are reported |
 | `env.yaml` matches what the viewer runs | **Error**: the viewer would refuse the policy. Every policy observation must be one the viewer computes (at the pelvis, for angular velocity and gravity), and training must have driven the robot as the viewer does (see below) |
 | `env.yaml` declares a numeric `effort_limit` | Warning: joint torque would be unclamped |
 | `agent.yaml` is present and is real YAML | Warning. Not empty, no tab indentation, has top-level keys; the viewer never reads it |
@@ -191,7 +213,8 @@ it prints `Checked env.yaml and agent.yaml: OK`. A policy's own
 The viewer refuses a policy whose `env.yaml` it cannot read, whose policy
 observations include a term it cannot compute, or that drove the robot
 differently than the viewer does: another policy rate than 50 Hz, actions
-sent to the joints in another order or without the default pose added, or an
+sent to joints the viewer's robot does not have, to the joints in another order
+or without the default pose added, or an
 `actions.joint_pos.clip` it cannot apply as in training (see
 [Supported policies](#supported-policies)). These are errors here, so such a
 policy is refused up front instead of failing every run: `npm run benchmark`
@@ -200,7 +223,8 @@ in `errors`, which cyclotron stops on. `npm run dev` still lists the policy,
 printing its errors.
 
 When the viewer loads the policy, it also checks the ONNX model's output size
-against the motor count (23), its input size against the observation recipe
+against the joints its actions drive (the motor count, 23, or for a leg-only
+policy the joints `actions.joint_pos.joint_names` names), its input size against the observation recipe
 built for it, and that every other input is recurrent state it can carry (see
 [Supported policies](#supported-policies)). A mismatch is shown as an error in
 the policy panel and the policy is not run.
