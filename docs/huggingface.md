@@ -176,7 +176,8 @@ After downloading, the script checks the repo before running it:
 | Check | If it fails |
 |---|---|
 | `env.yaml` is present | **Error**: the run is refused and nothing starts. `env.yaml` supplies the policy's gains, action scale and torque limits, and guessing them gives a simulation that does not match the trained policy |
-| `env.yaml` is complete | Warning. It is parsed against the Asimov joint list; missing actuators, gains, action scale or default pose are reported |
+| `env.yaml` is complete | **Error**: the viewer would fail to load the policy. It is parsed against the Asimov joint list; missing actuators, gains, action scale or default pose are reported |
+| `env.yaml` matches what the viewer runs | **Error**: the viewer would refuse the policy. Every policy observation must be one the viewer computes, and training must have driven the robot as the viewer does (see below) |
 | `env.yaml` declares a numeric `effort_limit` | Warning: joint torque would be unclamped |
 | `agent.yaml` is present and is real YAML | Warning. Not empty, no tab indentation, has top-level keys; the viewer never reads it |
 | Model card has `library_name: asimov` | Warning: the repo may not be an Asimov policy |
@@ -187,11 +188,16 @@ it prints `Checked env.yaml and agent.yaml: OK`. A policy's own
 `tracking_policy.json` is not consulted: the joint list always comes from
 `reference_policy_config.json`.
 
-An `env.yaml` whose policy observations include a term the viewer cannot
-compute is also a warning here; the viewer then refuses the policy. So is one
-that drove the robot differently than the viewer does: another policy rate
-than 50 Hz, or actions sent to the joints in another order or without the
-default pose added (see [Supported policies](#supported-policies)).
+The viewer refuses a policy whose `env.yaml` it cannot read, whose policy
+observations include a term it cannot compute, or that drove the robot
+differently than the viewer does: another policy rate than 50 Hz, actions
+sent to the joints in another order or without the default pose added, or an
+`actions.joint_pos.clip` it cannot apply as in training (see
+[Supported policies](#supported-policies)). These are errors here, so such a
+policy is refused up front instead of failing every run: `npm run benchmark`
+stops before any test runs, and `npm run -s benchmark policy-info` reports them
+in `errors`, which cyclotron stops on. `npm run dev` still lists the policy,
+printing its errors.
 
 When the viewer loads the policy, it also checks the ONNX model's output size
 against the motor count (23), its input size against the observation recipe
