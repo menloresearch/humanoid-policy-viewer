@@ -424,21 +424,6 @@
           </v-dialog>
 
           <v-divider class="my-2"/>
-          <div class="status-legend">
-            <span class="status-name">Interrupt (upper body)</span>
-            <span class="text-caption">{{ interruptMask ? 'EXTERNAL' : 'POLICY' }}</span>
-          </div>
-          <v-switch
-            v-model="interruptMask"
-            :label="interruptMask ? 'Arms externally driven (mask=1)' : 'Policy controls arms (mask=0)'"
-            density="compact"
-            hide-details
-            color="warning"
-            :disabled="state !== 1"
-            @update:modelValue="onInterruptMaskChange"
-          ></v-switch>
-
-          <v-divider class="my-2"/>
           <details>
           <summary style="cursor:pointer; font-size: 12px;">
             <b>Telemetry</b>
@@ -932,7 +917,7 @@
 
 <script>
 import { MuJoCoDemo } from '@/simulation/main.js';
-import { asimovCommandState, asimovInterruptState, imuBiasState } from '@/simulation/observationHelpers.js';
+import { asimovCommandState, imuBiasState } from '@/simulation/observationHelpers.js';
 import { commandSequencer } from '@/simulation/commandSequencer.js';
 import { runBenchmarkGroup, waitForPolicyReady, estimateBenchmarkSeconds } from '@/simulation/benchmarkRunner.js';
 import { loadTestScene } from '@/simulation/terrainScene.js';
@@ -1023,7 +1008,6 @@ export default {
     // commandSequencer.js) and are only overridden per-axis when the loaded
     // policy's own env.yaml declares a command_limits range.
     cmdLimits: { vx: [-1.0, 1.5], vy: [-0.6, 0.6], wz: [-0.8, 0.8] },
-    interruptMask: false,
     drFriction: 1.0,
     drArmatureScale: 1.0,
     drDelayMinLag: 0,
@@ -2333,10 +2317,6 @@ export default {
       ctx.fillStyle = '#FF6D00';
       ctx.fillRect(6, 16, 8, 3);
       ctx.fillText('ideal', 18, 20);
-    },
-    onInterruptMaskChange(value) {
-      this.interruptMask = Boolean(value);
-      asimovInterruptState.active = this.interruptMask ? 1 : 0;
     },
     onDrFrictionChange(value) {
       if (!this.demo?.model) return;

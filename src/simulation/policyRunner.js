@@ -50,8 +50,6 @@ export class PolicyRunner {
     this.isInferencing = false;
     // The policy's raw output (Isaac Lab's last_action): one per action.
     this.lastActions = new Float32Array(this.numActions);
-    // 0 = policy controls upper body, 1 = arms externally driven (teleop).
-    this.interruptMask = 0;
 
     this.tracking = null;
     if (config.tracking) {
@@ -304,8 +302,6 @@ export class PolicyRunner {
       this._pushScalarCsvParts(labels, values, ['command_x', 'command_y', 'command_yaw'], segment);
     } else if (name === 'AsimovGaitClock') {
       this._pushScalarCsvParts(labels, values, entry.order === 'sin_cos' ? ['gait_clock_sin', 'gait_clock_cos'] : ['gait_clock_cos', 'gait_clock_sin'], segment);
-    } else if (name === 'AsimovInterruptMask') {
-      this._pushScalarCsvParts(labels, values, ['interrupt_mask'], segment);
     } else if (name === 'BootIndicator') {
       this._pushScalarCsvParts(labels, values, ['boot_indicator'], segment);
     } else if (name === 'ComplianceFlagObs') {
