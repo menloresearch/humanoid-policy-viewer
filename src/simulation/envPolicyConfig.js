@@ -85,12 +85,19 @@ function listAfter(lines, key) {
 // 150.0, ...}`) is kept as that map and resolved per joint by matchOneActuator.
 function actuatorFields(item, indent) {
   const config = fields(item, indent);
-  for (const key of ['stiffness', 'damping', 'effort_limit']) {
+  for (const key of ['stiffness', 'damping', 'effort_limit', 'actuator_effort_limit']) {
     if (config[key] !== '') continue;
     const map = block(item, [key]);
     if (map?.length) config[key] = directFields(map);
   }
   return config;
+}
+
+// An actuator group's torque cap. Isaac Lab 3.0 renamed effort_limit to
+// actuator_effort_limit and still writes the old key, unset (null).
+function effortLimitOf(config) {
+  const renamed = config.actuator_effort_limit;
+  return renamed === undefined || renamed === '' || renamed === 'null' ? config.effort_limit : renamed;
 }
 
 function isaacActuators(lines) {
@@ -103,7 +110,7 @@ function isaacActuators(lines) {
     const item = lines.slice(i + 1, end);
     const config = actuatorFields(item, indent + 2);
     for (const pattern of listAfter(item, 'joint_names_expr')) {
-      entries.push({ pattern, stiffness: config.stiffness, damping: config.damping, effort_limit: config.effort_limit, min_delay: config.min_delay, max_delay: config.max_delay });
+      entries.push({ pattern, stiffness: config.stiffness, damping: config.damping, effort_limit: effortLimitOf(config), min_delay: config.min_delay, max_delay: config.max_delay });
     }
     i = end;
   }
@@ -219,14 +226,22 @@ function vectorAt(lines, key, size) {
   return values;
 }
 
+// Isaac Lab 3.0 writes quaternions as (x, y, z, w); Isaac Lab 2.x and mjlab as
+// (w, x, y, z), the order MuJoCo uses. Only 3.0's env.yaml has
+// sim.use_newton_actuators.
+function writesXyzwQuaternions(lines) {
+  return 'use_newton_actuators' in directFields(block(lines, ['sim']) ?? []);
+}
+
 // The robot's state at reset (init_state): base pose and velocities, and the
 // joint velocities aligned with jointNames. The joint positions are the
-// default pose, read separately as default_joint_pos.
-function initStateFor(initState, jointNames) {
+// default pose, read separately as default_joint_pos. rot is returned in
+// MuJoCo's (w, x, y, z) order.
+function initStateFor(initState, jointNames, xyzw) {
   const state = {};
   for (const [key, size] of [['pos', 3], ['rot', 4], ['lin_vel', 3], ['ang_vel', 3]]) {
     const value = vectorAt(initState, key, size);
-    if (value) state[key] = value;
+    if (value) state[key] = key === 'rot' && xyzw ? [value[3], value[0], value[1], value[2]] : value;
   }
   const jointVel = block(initState, ['joint_vel']);
   if (jointVel?.length) state.joint_vel = valuesForJoints(directFields(jointVel), jointNames, 'initial joint velocity');
@@ -358,6 +373,7 @@ function policyObsConfigFor(lines, jointNames) {
       if (!kind) throw new Error(`${name} (${settings.func}) is not something the viewer computes`);
       if (isSet(termLines, 'clip')) throw new Error(`${name} is clipped, which the viewer does not do`);
       if (isSet(termLines, 'modifiers')) throw new Error(`${name} has modifiers, which the viewer does not apply`);
+      if ((optionalNumber(settings.delay_max_lag) ?? 0) > 0) throw new Error(`${name} is delayed (delay_max_lag ${settings.delay_max_lag}), which the viewer does not do`);
       const entry = obsEntryFor(name, termLines, kind, optionalNumber(settings.scale), lines, jointNames);
       const history = groupHistory ?? optionalNumber(settings.history_length) ?? 0;
       const flatten = groupSettings.flatten_history_dim ?? settings.flatten_history_dim;
@@ -521,7 +537,7 @@ export function parseEnvPolicySettings(yaml, jointNames) {
     stiffness: jointNames.map((name) => gainFor(name, 'stiffness')),
     damping: jointNames.map((name) => gainFor(name, 'damping')),
     default_joint_pos: defaultJointPos,
-    init_state: { ...initStateFor(initState, jointNames), joint_pos: defaultJointPos },
+    init_state: { ...initStateFor(initState, jointNames, writesXyzwQuaternions(lines)), joint_pos: defaultJointPos },
     ...(delay ?? {}),
     ...(commandRanges ?? {}),
     ...(targetClip ? { target_clip: targetClip } : {}),

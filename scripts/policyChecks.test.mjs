@@ -36,7 +36,12 @@ test('an env.yaml without effort_limit is warned about as unclamped torque', () 
   const stripped = envYaml.replace(/effort_limit:/g, 'effort_cap:');
   const { errors, warnings } = policyProblems({ envYaml: stripped, agentYaml, jointNames });
   assert.deepEqual(errors, []);
-  assert.deepEqual(warnings.map((w) => w.replace(/,.*/, '')), ['env.yaml declares no numeric effort_limit for the actuators']);
+  assert.deepEqual(warnings.map((w) => w.replace(/,.*/, '')), ['env.yaml declares no numeric effort_limit (actuator_effort_limit since Isaac Lab 3.0) for the actuators']);
+});
+
+test("an Isaac Lab 3.0 env.yaml's actuator_effort_limit is a torque limit", () => {
+  const renamed = envYaml.replace(/\n( +)effort_limit: (.+)/g, '\n$1effort_limit: null\n$1actuator_effort_limit: $2');
+  assert.deepEqual(policyProblems({ envYaml: renamed, agentYaml, jointNames }), { errors: [], warnings: [] });
 });
 
 // The viewer refuses these policies at load, so a run must not start: every cell would fail.

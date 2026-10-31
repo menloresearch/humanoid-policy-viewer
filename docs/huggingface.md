@@ -151,8 +151,9 @@ each term, oldest first, the way Isaac Lab and mjlab flatten it; after a reset
 every step holds the first value. Any other term (base linear velocity, foot
 contacts, height scans and other quantities the real robot cannot measure) makes
 the policy refused, naming the term; a policy that needs them has to estimate
-them inside the ONNX. So does a term with `clip` or `modifiers` set, since the
-viewer applies neither.
+them inside the ONNX. So does a term with `clip` or `modifiers` set, or delayed
+(Isaac Lab 3.0's `delay_max_lag` above 0), since the viewer applies none of
+them.
 
 **Recurrent policies:** the first ONNX input is the observation above. Every
 other float input is recurrent state, fed back each step from the output whose
@@ -178,7 +179,7 @@ After downloading, the script checks the repo before running it:
 | `env.yaml` is present | **Error**: the run is refused and nothing starts. `env.yaml` supplies the policy's gains, action scale and torque limits, and guessing them gives a simulation that does not match the trained policy |
 | `env.yaml` is complete | **Error**: the viewer would fail to load the policy. It is parsed against the Asimov joint list; missing actuators, gains, action scale or default pose are reported |
 | `env.yaml` matches what the viewer runs | **Error**: the viewer would refuse the policy. Every policy observation must be one the viewer computes, and training must have driven the robot as the viewer does (see below) |
-| `env.yaml` declares a numeric `effort_limit` | Warning: joint torque would be unclamped |
+| `env.yaml` declares a numeric `effort_limit` (`actuator_effort_limit` since Isaac Lab 3.0) | Warning: joint torque would be unclamped |
 | `agent.yaml` is present and is real YAML | Warning. Not empty, no tab indentation, has top-level keys; the viewer never reads it |
 | Model card has `library_name: asimov` | Warning: the repo may not be an Asimov policy |
 

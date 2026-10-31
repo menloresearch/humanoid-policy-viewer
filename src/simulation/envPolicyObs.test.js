@@ -171,6 +171,15 @@ test('a clipped or modified observation term is refused, since the viewer feeds 
   assert.match(modified.obs_config_error, /base_ang_vel has modifiers, which the viewer does not apply$/);
 });
 
+test("an Isaac Lab 3.0 observation delay is refused, since the viewer feeds the current value", () => {
+  const delayedBy = (lag) => parseEnvPolicySettings(envWith((group) => group.replace(
+    '      clip: null\n      scale: 0.25',
+    `      clip: null\n      scale: 0.25\n      delay_min_lag: 0\n      delay_max_lag: ${lag}\n      delay_hold_prob: 1.0`,
+  )), joints);
+  assert.match(delayedBy(2).obs_config_error, /base_ang_vel is delayed \(delay_max_lag 2\), which the viewer does not do$/);
+  assert.equal(delayedBy(0).obs_config_error, undefined);
+});
+
 test('another policy rate or action order is refused, alongside the size check', () => {
   assert.equal(parseEnvPolicySettings(bundledEnv, joints).control_errors, undefined);
 
@@ -195,6 +204,15 @@ test('another policy rate or action order is refused, alongside the size check',
   // A pattern follows the robot asset's joint order, which the viewer cannot see, so it is not compared.
   const pattern = actionsWith((actions) => actions.replace(/    joint_names:\n(    - .*\n)+/, '    joint_names:\n    - .*\n'));
   assert.equal(parseEnvPolicySettings(pattern, joints).control_errors, undefined);
+});
+
+test('an Isaac Lab 3.0 env.yaml gives the torque limit as actuator_effort_limit', () => {
+  // Isaac Lab 3.0 renamed effort_limit and still writes the old key, unset.
+  const renamed = bundledEnv.replace(/\n( +)effort_limit: (.+)/g, '\n$1effort_limit: null\n$1actuator_effort_limit: $2');
+  assert.notEqual(renamed, bundledEnv);
+  const limits = parseEnvPolicySettings(bundledEnv, joints).torque_limit;
+  assert.equal(limits.length, joints.length);
+  assert.deepEqual(parseEnvPolicySettings(renamed, joints).torque_limit, limits);
 });
 
 test('per-joint gain maps in a single actuator group are resolved joint by joint', () => {

@@ -27,6 +27,17 @@ test('the bundled env.yaml gives its init_state: base pose, velocities and the d
   assert.deepEqual(init.joint_pos, pose);
 });
 
+test('an Isaac Lab 3.0 env.yaml writes rot as (x, y, z, w); init_state.rot is in MuJoCo order (w, x, y, z)', () => {
+  const withRot = (rot) => bundledEnv.replace(
+    /( +)rot: !!python\/tuple\n(?:\1- .*\n){4}/,
+    (_, indent) => `${indent}rot: !!python/tuple\n${rot.map((value) => `${indent}- ${value}\n`).join('')}`,
+  );
+  assert.deepEqual(parseEnvPolicySettings(withRot([0.9, 0.1, 0.2, 0.3]), joints).init_state.rot, [0.9, 0.1, 0.2, 0.3]);
+  // Only Isaac Lab 3.0's env.yaml has sim.use_newton_actuators.
+  const isaacLab3 = withRot([0.1, 0.2, 0.3, 0.9]).replace('\nsim:\n', '\nsim:\n  use_newton_actuators: false\n');
+  assert.deepEqual(parseEnvPolicySettings(isaacLab3, joints).init_state.rot, [0.9, 0.1, 0.2, 0.3]);
+});
+
 test('init_state vectors may be flow lists, as mjlab writes them', () => {
   const env = bundledEnv.replace(/( {4}init_state:\n {6}pos: )!!python\/tuple\n(?: {6}- .*\n){3}/, '$1[0.1, -0.2, 0.7]\n');
   assert.deepEqual(parseEnvPolicySettings(env, joints).init_state.pos, [0.1, -0.2, 0.7]);
