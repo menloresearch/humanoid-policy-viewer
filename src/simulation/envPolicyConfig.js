@@ -387,15 +387,73 @@ function policyObsConfigFor(lines, jointNames) {
   return policy.length ? { obs_config: { policy } } : null;
 }
 
+// A YAML float, .inf and -.inf included; null when the text is not one.
+function yamlFloat(text) {
+  const infinity = text.match(/^([-+]?)\.inf$/i);
+  if (infinity) return infinity[1] === '-' ? -Infinity : Infinity;
+  const number = Number(text);
+  return text === '' || Number.isNaN(number) ? null : number;
+}
+
+// actions.joint_pos.clip: Isaac Lab's { joint pattern: (min, max) } bounds on
+// the joint position target, which JointAction.process_actions applies after
+// scale and offset. Resolved like Isaac Lab's resolve_matching_names_values: a
+// pattern applies to every joint it fully matches, a joint no pattern matches
+// is not clipped, and a joint two patterns match or a pattern that matches no
+// joint is an error (Isaac Lab raises on both). Returns one [min, max] per joint
+// in jointNames order, or null when the actions are not clipped. Throws when
+// the clip cannot be applied as in training.
+function actionClipFor(action, jointNames) {
+  if (!isSet(action, 'clip')) return null;
+  const cannot = (reason) => new Error(`its actions.joint_pos.clip cannot be applied: ${reason}`);
+  const lines = block(action, ['clip']);
+  if (!lines?.length) throw cannot('expected a block of "<joint pattern>: (min, max)" entries');
+  const indent = Math.min(...lines.map((line) => line.indent));
+  const clip = jointNames.map(() => [-Infinity, Infinity]);
+  const matchedBy = jointNames.map(() => null);
+  for (let i = 0; i < lines.length;) {
+    let end = i + 1;
+    while (end < lines.length && (lines[end].indent > indent || lines[end].text.startsWith('- '))) end++;
+    const entry = lines[i].text.match(/^(.+?):(?:\s+(.*))?$/);
+    if (lines[i].text.startsWith('- ') || !entry) throw cannot('expected a block of "<joint pattern>: (min, max)" entries');
+    const [, pattern, rest = ''] = entry;
+    // A tuple is written `!!python/tuple` and then one `- value` line per item; a list may be inline.
+    const value = rest.replace(/^!!python\/tuple\b\s*/, '');
+    const following = lines.slice(i + 1, end);
+    let items = null;
+    if (value === '' && following.every((line) => line.text.startsWith('- '))) {
+      items = following.map((line) => line.text.slice(2).trim());
+    } else if (/^\[.*\]$/.test(value) && !following.length) {
+      items = value.slice(1, -1).split(',').map((item) => item.trim());
+    }
+    const range = items?.map(yamlFloat);
+    if (range?.length !== 2 || range.includes(null)) throw cannot(`${pattern} is not a (min, max) pair of numbers`);
+    let regex;
+    try { regex = new RegExp(`^(?:${pattern})$`); } catch { throw cannot(`${pattern} is not a valid joint pattern`); }
+    let matched = false;
+    jointNames.forEach((joint, j) => {
+      if (!regex.test(joint)) return;
+      if (matchedBy[j] !== null) throw cannot(`${joint} is matched by both ${matchedBy[j]} and ${pattern}`);
+      matchedBy[j] = pattern;
+      clip[j] = range;
+      matched = true;
+    });
+    if (!matched) throw cannot(`${pattern} matches none of the policy's joints`);
+    i = end;
+  }
+  return clip;
+}
+
 // The policy period the viewer runs every policy at (main.js, mujocoUtils.js and
 // Demo.vue step it at 50 Hz).
 const POLICY_PERIOD_S = 0.02;
 
 // Where training drove the robot differently than the viewer would: another
-// policy rate, or actions sent to the joints in another order, offset or
-// clipped. The policy would load and run, but every action would land at the
-// wrong time or on the wrong joint. Settings env.yaml does not record (e.g. an
-// mjlab layout's sim.dt or action joints) are not checked.
+// policy rate, or actions sent to the joints in another order or without the
+// default offset. The policy would load and run, but every action would land at
+// the wrong time or on the wrong joint. Settings env.yaml does not record (e.g.
+// an mjlab layout's sim.dt or action joints) are not checked. A clip on the
+// actions is applied (actionClipFor) rather than refused.
 function controlErrorsFor(lines, action, jointNames) {
   const errors = [];
   const dt = optionalNumber(directFields(block(lines, ['sim']) ?? []).dt);
@@ -417,7 +475,6 @@ function controlErrorsFor(lines, action, jointNames) {
   if (settings.use_default_offset === 'false') {
     errors.push('its actions were not added to the default pose in training (actions.joint_pos.use_default_offset: false), but the viewer adds them');
   }
-  if (isSet(action, 'clip')) errors.push('its actions were clipped in training (actions.joint_pos.clip), which the viewer does not do');
   return errors;
 }
 
@@ -467,6 +524,12 @@ export function parseEnvPolicySettings(yaml, jointNames) {
   const commandRanges = commandRangesFor(lines);
   const torqueLimit = torqueLimitsFor(jointNames, matchOneActuator);
   const controlErrors = controlErrorsFor(lines, action, jointNames);
+  let targetClip = null;
+  try {
+    targetClip = actionClipFor(action, jointNames);
+  } catch (error) {
+    controlErrors.push(error.message);
+  }
 
   return {
     ...(torqueLimit ? { torque_limit: torqueLimit } : {}),
@@ -477,6 +540,7 @@ export function parseEnvPolicySettings(yaml, jointNames) {
     init_state: { ...initStateFor(initState, jointNames, writesXyzwQuaternions(lines)), joint_pos: defaultJointPos },
     ...(delay ?? {}),
     ...(commandRanges ?? {}),
+    ...(targetClip ? { target_clip: targetClip } : {}),
     ...(policyObsConfigFor(lines, jointNames) ?? {}),
     ...(controlErrors.length ? { control_errors: controlErrors } : {}),
   };

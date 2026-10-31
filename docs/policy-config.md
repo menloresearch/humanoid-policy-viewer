@@ -20,6 +20,7 @@ Three kinds of file describe a policy, and they have different owners:
 | `policy_hz`, `action_lpf_hz`, `kd_ff`, `control_type` | yes | `policy_hz` = 1 / (`dt` x `decimation`) | the JSON; the policy always runs at 50 Hz, and one trained at another rate is refused |
 | `stiffness`, `damping` | fallback only | yes | **`env.yaml`** |
 | `action_scale`, `default_joint_pos` | fallback only | yes | **`env.yaml`** |
+| Joint position target clip | - | `actions.joint_pos.clip` | **`env.yaml`**: each joint's target is clipped as in training; without it, targets are not clipped |
 | Action delay range | fallback only | if declared | `env.yaml` if declared, else the JSON |
 | Command limits (`vx`, `vy`, `wz`) | - | if declared | `env.yaml` if declared, else a global default |
 | Torque limits | - | `effort_limit` (`actuator_effort_limit` since Isaac Lab 3.0) | **`env.yaml`**; without it torque is unclamped and the console warns |
@@ -34,8 +35,8 @@ for policy-library policies). Settings `env.yaml` does not feed the viewer, such
 the joint order and rates, always come from the JSON. They are checked against
 `env.yaml` instead: a policy trained at another rate (`sim.dt` x `decimation`
 other than 0.02 s), or whose `actions.joint_pos` lists the joints in another
-order, without `preserve_order`, without `use_default_offset` or with a `clip`,
-is refused when it loads, naming the difference.
+order, without `preserve_order` or without `use_default_offset`, is refused
+when it loads, naming the difference.
 
 ## Where `env.yaml` is looked up
 
